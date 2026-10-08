@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <title>ClassiFile</title>
+  <clipPath id="cf-bk"><rect x="0" y="0" width="512" height="166"/></clipPath><path d="M56,130 Q56,100 86,100 H198 Q212,100 222,110 L238,136 Q248,146 262,146 H426 Q456,146 456,176 V398 Q456,428 426,428 H86 Q56,428 56,398 Z" fill="#0D9488" clip-path="url(#cf-bk)"/>
+  <rect x="56" y="178" width="400" height="250" rx="30" fill="#0D9488"/>
+  <path d="M169.0,205.0 H241.0 L273.0,237.0 V337.0 Q273.0,351.0 259.0,351.0 H169.0 Q155.0,351.0 155.0,337.0 V219.0 Q155.0,205.0 169.0,205.0 Z" fill="#FFFFFF"/>
+  <path d="M241.0,203.0 V237.0 H275.0" fill="none" stroke="#0D9488" stroke-width="9" stroke-linejoin="round" stroke-linecap="butt"/>
+  <path d="M211.0,235.0 H283.0 L315.0,267.0 V367.0 Q315.0,381.0 301.0,381.0 H211.0 Q197.0,381.0 197.0,367.0 V249.0 Q197.0,235.0 211.0,235.0 Z" fill="#0D9488" stroke="#0D9488" stroke-width="24" stroke-linejoin="round"/>
+  <path d="M211.0,235.0 H283.0 L315.0,267.0 V367.0 Q315.0,381.0 301.0,381.0 H211.0 Q197.0,381.0 197.0,367.0 V249.0 Q197.0,235.0 211.0,235.0 Z" fill="#FFFFFF"/>
+  <path d="M283.0,233.0 V267.0 H317.0" fill="none" stroke="#0D9488" stroke-width="9" stroke-linejoin="round" stroke-linecap="butt"/>
+  <path d="M253.0,265.0 H325.0 L357.0,297.0 V397.0 Q357.0,411.0 343.0,411.0 H253.0 Q239.0,411.0 239.0,397.0 V279.0 Q239.0,265.0 253.0,265.0 Z" fill="#0D9488" stroke="#0D9488" stroke-width="24" stroke-linejoin="round"/>
+  <path d="M253.0,265.0 H325.0 L357.0,297.0 V397.0 Q357.0,411.0 343.0,411.0 H253.0 Q239.0,411.0 239.0,397.0 V279.0 Q239.0,265.0 253.0,265.0 Z" fill="#FFFFFF"/>
+  <path d="M325.0,263.0 V297.0 H359.0" fill="none" stroke="#0D9488" stroke-width="9" stroke-linejoin="round" stroke-linecap="butt"/>
+</svg>

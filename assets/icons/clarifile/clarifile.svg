@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <title>ClariFile</title>
+  <clipPath id="lh"><rect x="0" y="0" width="256" height="512"/></clipPath>
+  <clipPath id="rh"><rect x="256" y="0" width="256" height="512"/></clipPath>
+  <g clip-path="url(#lh)"><clipPath id="cl-bk"><rect x="0" y="0" width="512" height="166"/></clipPath><path d="M56,130 Q56,100 86,100 H198 Q212,100 222,110 L238,136 Q248,146 262,146 H426 Q456,146 456,176 V398 Q456,428 426,428 H86 Q56,428 56,398 Z" fill="#0D9488" clip-path="url(#cl-bk)"/>
+  <rect x="56" y="178" width="400" height="250" rx="30" fill="#0D9488"/></g>
+  <g clip-path="url(#rh)"><clipPath id="cr-bk"><rect x="0" y="0" width="512" height="166"/></clipPath><path d="M56,130 Q56,100 86,100 H198 Q212,100 222,110 L238,136 Q248,146 262,146 H426 Q456,146 456,176 V398 Q456,428 426,428 H86 Q56,428 56,398 Z" fill="#6C47FF" clip-path="url(#cr-bk)"/>
+  <rect x="56" y="178" width="400" height="250" rx="30" fill="#6C47FF"/></g>
+  <g transform="translate(256,304) rotate(-45) scale(0.72)">
+    <path d="M-110.00,-20.00 H2.00 A40,40 0 0 1 2.00,60.00 H-110.00 A40,40 0 0 1 -110.00,-20.00 Z" fill="none" stroke="#FFFFFF" stroke-width="34" stroke-dasharray="39.00 65.51 370.82 0"/>
+    <path d="M-2.00,-60.00 H110.00 A40,40 0 0 1 110.00,20.00 H-2.00 A40,40 0 0 1 -2.00,-60.00 Z" fill="none" stroke="#FFFFFF" stroke-width="34" stroke-dasharray="276.66 65.51 133.16 0"/>
+  </g>
+</svg>

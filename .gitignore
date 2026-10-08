@@ -1,0 +1,20 @@
+# Environment and caches
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Generated data and test outputs
+data/
+test-output/
+
+# Sample fixtures (never committed)
+claude-handoff/samples/
+**/claude-handoff/samples/
+
+# The user's output folder while it sits inside the project (organized copies; never committed)
+Docs-Output/
+
+# Handoff notes and the checkpoint prompt stay local (they name development documents)
+document-organizer-claude-handoff/
+CHECKPOINT_*_PROMPT.md

@@ -1,0 +1,450 @@
+# Decision Record — ClassiFile (Offline Document Organizer)
+
+Version 1.9 · 2026-10-08
+
+**Names**
+- **ClariFile:** the suite.
+- **ClassiFile:** this project, the categorizer (the "organizer" in this record). Python package `classifile`.
+- **SummarEase:** the secondary summarizer (A11), a fully separate project.
+
+**Status:** authoritative. This record was produced after the design debate between the project owner (the user), ChatGPT and Claude. Only the user can change it. Every change goes in the changelog at the end.
+
+**Roles**
+- Claude Code implements the project, one checkpoint at a time.
+- ChatGPT reviews ideas, bugs, evaluation results and proposed changes.
+- Both follow this record. Where it conflicts with older handoff files or `legacy_prototype/`, this record wins.
+
+**Labels**
+- **[Requirement]**: confirmed by the user; settled.
+- **[Decision]**: agreed design decision.
+- **[Default]**: conservative initial default; changes only with evidence and the user's approval.
+
+---
+
+## Glossary
+
+- **Source (original):** a file the user imports. Never modified.
+- **App copy:** a byte-identical copy the app places in an output category folder. App-owned.
+- **Document:** catalog entity with a stable document ID. Each imported byte snapshot has a SHA-256 hash. The hash identifies bytes, not the document.
+- **Category:** catalog entity with a stable category ID. It has a display name, an optional concise scope description, explicitly confirmed aliases, and a level (series, purpose, subject, or user-defined).
+- **Membership:** a link between a document and a category. A document has at most one primary membership and any number of secondary ones.
+- **Extraction observations:** measured facts per page, slide or block (e.g., native characters, image area). Never described as "completeness".
+- **Suspected unread content:** a heuristic flag, recorded together with the rule that raised it.
+- **Decision states:** committed, provisional, pending, failed.
+- **"Needs your decision" queue:** a persistent list of open questions for the user.
+- **Label provenance:** machine-assigned, user-confirmed, or user-corrected.
+- **Label status:** active, superseded, or excluded.
+- **Document family:** files that are versions or format twins of the same material (e.g., the PDF and PPTX of one lecture).
+- **Data splits:** development, validation, final evaluation. Always split by family.
+- **Vocabulary coverage:** the share of a document's terms the current vectorizer represents. **OOV rate:** the share it does not.
+
+---
+
+## A. Confirmed requirements
+
+**A1 [Requirement] Platform**
+- Offline processing.
+- No required paid API. Installation and model downloads may use the internet.
+- Python 3.11+.
+- English documents first. Other languages are flagged where feasible; Burmese comes later.
+- Target laptop: MSI GS65 9SE, 16 GB RAM. Other specs are verified in CP0.
+
+**A2 [Requirement] Inputs**
+- PDF, PPTX, DOCX and ODT.
+- Drag-and-drop and manual file selection. Not CLI-only.
+
+**A3 [Requirement] General organizer**
+- The user's course materials are development data only.
+- No course-primary default.
+- Automatic mode follows one documented general organizing policy and never asks per-file preference questions.
+
+**A4 [Requirement] Automatic mode**
+- Each document is analysed independently from its own content and purpose, then compared with existing categories.
+- A genuinely equivalent existing category is reused when the match is supported. A new category is created when supported.
+- One document can justify creating a category if it clearly supports its own category and passes duplicate and conflict checks.
+- An unmatched string alone is insufficient. It must describe this document, not a prerequisite, a reference or an incidental topic.
+- Ambiguous cases stay pending.
+- No folder per file.
+- Existing folders never force a document into an unsuitable placement.
+- Useful trained knowledge is used.
+
+**A5 [Requirement] Selected-category mode**
+- Destinations are limited to the selected categories.
+- Creating a category requires permission.
+- Other categories are checked for duplicate prevention only. They never become destinations without authorization.
+
+**A6 [Requirement] Memberships**
+- "Belongs to this category" replaces the primary assignment.
+- "Also belongs to" adds a secondary membership.
+- A confirmation applies to that document only. It never silently becomes an alias, a rule or a universal policy.
+
+**A7 [Requirement] Learning**
+- Explicit confirmations and corrections are eligible supervised training examples by default.
+- Model updates are deliberate, versioned and validated.
+
+**A8 [Requirement] Originals**
+- Source files are never moved, renamed, deleted, overwritten or edited, and their metadata is never deliberately changed. They are read only.
+- Separate, content-identical copies are placed in output categories.
+- No source-deletion or Recycle Bin workflow.
+- Internal analysis and catalog data stay separate from document contents.
+- Summaries, tags or OCR text are never inserted into any document, original or copy.
+
+**A9 [Requirement] Internal summarization**
+- Required.
+- Hidden: users neither view nor approve it.
+
+**A10 [Requirement] Interface**
+- Categories, categorized documents, minimal status, and decision prompts when necessary.
+- ClassiFile's scope is suggesting category names and filing documents. It offers no text viewing, copying or exporting; those belong to SummarEase (A11).
+
+**A11 [Requirement] Secondary summarizer: SummarEase (later project)**
+- A separate project, usable standalone or called by ClassiFile on demand.
+- User-facing; accepts documents or pasted text.
+- At least three summary levels.
+- Built after the categorizer.
+- A fully separate project, with its own folder, environment and repository.
+- ClassiFile detects an installed SummarEase through a registration file in `%LOCALAPPDATA%\ClariFile`, and asks before using it. Each works alone.
+- Detection details (the registration file's contents and format) are designed when SummarEase is built.
+- Planned for SummarEase (not built now), alongside the summary levels:
+  - a readable text view with automatic formatting (layout only, never the words);
+  - Copy;
+  - Export as a searchable PDF or a Word document.
+  - Exports are new files, created only on request and saved where the user chooses. Originals and filed copies are never changed.
+- When SummarEase's own repository starts, its entries move to its own decision record.
+
+---
+
+## B. Agreed design decisions
+
+### B1 Decision flow
+
+- **[Decision] Outcomes.** Each document ends as assign, pending (with a reason) or failed (operational). Creating a category is a separate step from assignment.
+- **[Decision] Proposer and matcher.**
+  - The proposer analyses one document without reference to existing categories (self-description, purpose, subject). It outputs a candidate category with its evidence.
+  - The matcher measures fit to existing categories, always against all categories.
+  - A selection only filters actions. It never renormalizes scores, so selecting fewer categories cannot manufacture confidence.
+- **[Decision] Evidence is weighted, not absolute.**
+  - Identity positions (cover, running headers and footers, metadata, filename) and body text can all count, and any of them can mislead.
+  - Text in prerequisite, reference or "see also" contexts never counts as self-description (A4).
+  - Instance identifiers (invoice numbers, dates, lecture or section numbers) are guarded against becoming category names. Complete titles are not banned.
+  - A single-member category is not automatically a mistake.
+- **[Decision] Names and content.** Names make claims; content tests plausibility. Document fit is not the same as category equivalence. Category relations are kept distinct: equivalent, broader/narrower, related, conflicting.
+- **[Decision] Name matching.**
+  - Normalized equality is a candidate match, never proof.
+  - Normalization covers case and whitespace, plus an explicit equivalence list (e.g., "&" and "and").
+  - Punctuation is significant, so C, C++ and C# stay distinct.
+  - Abbreviations are expanded only through explicit, context-aware entries.
+- **[Default] Different names.** Substantively different names are not reused automatically; the question goes to the queue. Experiment E5 may change this.
+- **[Default] Conflicting self-descriptions.**
+  - Candidates of comparable strength leave the document pending.
+  - Frequency or template repetition alone does not establish dominance.
+  - The interpretation of the development sample whose cover title and repeated course line name different identities stays provisional (E7).
+- **[Decision] Aliases.** Unconfirmed alternate names are recorded, but never act as aliases or routing authority. Aliases are created only by an explicit, category-level confirmation.
+- **[Decision] Category definitions.**
+  - A category is defined by its name, a concise scope description when supported, and its confirmed members.
+  - A founding document is provisional evidence.
+  - Definitions never widen silently as documents arrive. Automatically assigned documents never change a definition; only deliberate, validated updates do.
+- **[Decision] Re-evaluation.**
+  - Pending documents are re-evaluated when categories change.
+  - Re-evaluation is separate from re-notification.
+  - Model updates never reopen an explicit user assignment.
+- **[Decision] Existing categories at other levels.** The documented policy states how it treats categories at other levels (e.g., created manually or in selected mode), without silently redefining or reorganizing them.
+
+### B2 Queue and effort
+
+- **[Decision]** One persistent "Needs your decision" queue, with no repeated pop-ups. Selected-mode creation approvals go through it.
+- **[Decision]** Items are grouped only when the underlying ambiguity is equivalent. A batch answer applies only to the listed documents and never silently authorizes an alias or future rule.
+- **[Decision]** New evidence triggers silent recomputation. The user is notified only when a new decision is needed. Unresolved items are not re-asked without meaningful new evidence.
+- **[Decision]** Effort is reported as four numbers:
+  - pending documents;
+  - distinct questions;
+  - documents resolved per decision;
+  - later corrections. These reveal discovered errors only, not every error.
+
+### B3 Extraction
+
+- **[Decision] Isolated reader module.**
+  - Imports nothing from organizer or summarizer code.
+  - Extracts native text from PDF, PPTX, DOCX and ODT, and uses OCR for image content.
+  - Records extraction observations and source locations (page, slide, document block; pasted-text spans later).
+- **[Decision] Reading order** must not merge side-by-side columns. Observed: PyMuPDF `sort=True` merged two PHP code panels line by line.
+- **[Decision] Terminology.** The app records observations and suspected-unread flags, never "complete". Decisions made while suspected gaps remain, without independent evidence, are provisional.
+- **[Default] Selective OCR** (adopted from E8, version 1.5).
+  - OCR every non-repeated picture covering at least 5% of its page or slide, regardless of how much native text the unit has.
+  - Replaces the first rule (under 300 native characters and at least 30% non-repeated picture area), which missed most text-bearing pictures, including the observed miss type (text-bearing images on text-heavy pages).
+  - OCR text is kept apart from native text. Lines that look like junk (photos, decorations) are dropped, and the number of dropped characters is recorded.
+- **[Decision] Long documents** are never rejected for length. Documents that may mix topics are judged per section. OCR is the main cost, so the work queue is ordered by expected work.
+- **[Decision]** "Reuse compatible extraction when sufficient." Deeper reading from the preserved app copy is allowed later.
+- **[Decision] Layout in the extraction record.**
+  - For native and OCR text, the reader keeps line breaks, paragraph and block boundaries, positions and text sizes, so SummarEase can build readable formatting later.
+  - DOCX and ODT store no positions; for them the reader keeps boundaries and sizes only.
+  - The text the categorizer uses is unchanged, and ClassiFile's interface shows none of this layout.
+
+### B4 Models and evaluation
+
+- **[Decision] Scorer comparison.**
+  - Start with one word-level TF-IDF representation, fitted inside each training split.
+  - Compare nearest centroid, logistic regression and kNN across empty, growing and established catalogs.
+  - Select one primary scorer. No ensembles.
+- **[Default]** Vocabulary refresh, hashing or embeddings are added only when initial results expose a relevant weakness (E3).
+- **[Default]** A global abstention baseline comes first. Category-specific spread is used only with evidence (E4).
+- **[Decision]** Vocabulary coverage and OOV rate are diagnostics, not proof of unfamiliarity; OCR errors, identifiers and formulas affect them. Any gate built on them is evaluated before use.
+- **[Decision]** Every validated model version bundles its preprocessing, vectorizer, category mapping and decision settings.
+- **[Decision]** Classification uses the full extracted content; the internal summary feeds naming and checks. Content-based and digest-based decisions are compared under identical conditions (E9).
+- **[Decision]** Candidate-name extraction starts with rules. A trained own-name classifier is deferred and is adopted only if it beats the rules.
+  - Name review (development data, 1.8): the user judged the top three suggested names of 34 development files. 21 files had at least one good name in the top three, and the user typed 3 better names; 76 names were marked not good.
+  - The acceptable names (good marks plus typed better names) are kept in `data\acceptable_names.csv`, outside the repository, because they contain file names. This record keeps only the counts.
+  - These counts describe development data under rules-5. They are not accuracy estimates.
+- **[Decision]** Similarity scores and confidences are never presented as probabilities. No accuracy is claimed from the six development PDFs.
+- **[Decision] Data splits by document family.** Format twins and revisions always stay together.
+  - Development: used to choose policy, features, models and thresholds.
+  - Validation: used for operating choices.
+  - Final evaluation: untouched, used once per frozen version.
+  - Repeatedly inspecting a held-out set turns it into development data.
+- **[Decision] Feedback labels.**
+  - Labels keep provenance, status and history. The latest resolved explicit label is used.
+  - Unresolved conflicts (e.g., family members with conflicting explicit labels, or open queue items) are excluded until resolved.
+  - Lack of correction is never confirmation.
+  - Feedback on final-evaluation families never trains a model.
+- **[Decision]** The learning method is supervised learning from feedback, not active learning or RLHF.
+
+### B5 Storage and copies
+
+- **[Decision] Identity.** A stable catalog document ID, plus a SHA-256 hash per imported snapshot. Changed source bytes become a separate snapshot; version linking is deferred.
+- **[Default] Catalog.** SQLite in the app's data folder. No sidecar files in output folders.
+- **[Decision] Copy procedure.**
+  1. Write to a temporary name inside the destination folder.
+  2. Verify the hash.
+  3. Publish without any overwrite path.
+  4. Record per-copy status.
+  - Startup recovery resolves interrupted operations.
+  - Name collisions get a suffix.
+  - Unrelated files are never overwritten, and recovery never deletes files the app did not create.
+- **[Decision] Handling sources.**
+  - Opened read-only.
+  - No save or timestamp calls on them, including "restoring" access times. OS-level last-access updates are reported, not fought.
+  - No side files next to sources; converters run on temporary copies.
+  - No alternate data streams or extended attributes.
+- **[Decision] Primary replacement.**
+  - Create the new copy from a verified app copy, or from the original if its hash still matches. Verify and record it.
+  - Only then remove the old primary copy, and only if it is unchanged. A direct move is an optimization, not the safety definition.
+  - An existing destination copy is verified before reuse.
+  - Edited app copies are never overwritten or removed automatically; they are flagged.
+  - Removing a document's final membership leaves a retained, unfiled app copy. It is never a deletion.
+  - "Remove membership" is recorded separately from an explicit "incorrect category" judgment.
+- **[Decision]** Each membership has its own copy.
+- **[Decision] Remove from ClassiFile** (documents waiting for a decision only).
+  - The original file is never touched, and no app copy exists yet for a waiting document.
+  - Removing deletes the text, analysis and internal summary ClassiFile stored for that document.
+  - Importing the same file again brings it back as a new document.
+- **[Default] Folder names.** Category folder names are sanitized for Windows (forbidden characters, reserved names, trailing dots and spaces). A "/" never creates nesting; "+" and "#" are kept.
+
+### B6 Summarization
+
+- **[Decision] Internal summary (hidden).**
+  - A structured extractive record: title, self-description candidates, purpose, outline, keyphrases, rule-based entities, a short extractive digest, and OCR and gap flags.
+  - Computed once per snapshot, and per section for long documents.
+  - No summary method or citation guarantees faithfulness.
+- **[Decision] Secondary summarizer (SummarEase): deferred.**
+  - Only a boundary note for now: standalone or called on demand; reads extraction records; never writes the organizer's catalog.
+  - At least three levels. Exact count, lengths, packaging and invocation are deferred.
+  - Source references do not prove that higher levels preserve meaning. Represented meaning and qualifications must be evaluated.
+  - Collecting documents, caching extraction, precomputing summaries and training a summarizer are separate decisions.
+
+### B7 Application
+
+- **[Decision]** A lightweight offline desktop app.
+- **[Default] GUI: PySide6.** Drag-and-drop yields real file paths, and it supports background workers. CP0 confirms it installs and runs on the laptop. The fallback is Tkinter with tkinterdnd2, only with the user's approval.
+- **[Decision]** Heavy work runs off the UI thread. Parser crashes and timeouts are operational failures, never semantic evidence.
+- **[Default]** A separate worker process with per-file timeouts arrives with OCR (CP2).
+- **[Decision]** No document text in logs. No network calls during normal processing.
+- **[Decision] Licensing note.** PyMuPDF is AGPL. That is fine for personal use; review it before any distribution.
+
+---
+
+## C. Remaining experiments
+
+Each experiment lists its alternatives, data, measurements, what decides it, and the default if results are inconclusive.
+
+**E1 Organizing policy (granularity)**
+- Alternatives: series → filed-by-type purpose → subject (the candidate), plus policies derived from the user's grouping.
+- Data: the user's grouping of 20–30 mixed documents (primary placement only), then a second batch.
+- Measure: over-merging and fragmentation separately, plus co-membership precision and recall.
+- Decides: the candidate that best balances both, on both batches, becomes the documented policy.
+- Default: create categories only from strong self-descriptions; everything else stays pending.
+
+**E2 Primary scorer**
+- Alternatives: nearest centroid, logistic regression, kNN (word TF-IDF).
+- Data: the development split by family, with simulated catalog growth (empty, growing, established), new subjects and varied styles.
+- Measure: correct and incorrect assignments, abstentions, false-familiar outcomes, and behaviour with one to three examples per category.
+- Decides: the scorer with the best balance. The user picks the operating point (Part E).
+- Default: nearest centroid with a higher abstention level.
+
+**E3 Representation weaknesses** (run only if E2 exposes them)
+- Alternatives: frozen vocabulary, refresh per validated version, hashing, small embeddings.
+- Measure: new-subject matching and false-familiar outcomes.
+- Default: refresh the vocabulary at each validated version.
+
+**E4 Abstention**
+- Alternatives: a global baseline, category-specific spread, document-type-aware comparison.
+- Measure: abstention by document type (e.g., labs vs lectures), incorrect assignments, false-familiar outcomes.
+- Default: global baseline.
+
+**E5 Semantic name equivalence**
+- Data: true synonyms, related-but-distinct categories, broader/narrower pairs, identical names with different meanings, and the networking-course trap (Network Analysis vs Networking Fundamentals).
+- Measure: incorrect reuse versus review burden.
+- Decides: automatic semantic reuse only if development and validation results support a trade-off the user accepts. The rule is frozen before final evaluation.
+- Default: queue.
+
+**E6 Titles and instance identifiers**
+- Data: a genuinely new one-document category, a generic title, and invoice and lecture identifiers.
+- Measure: whether created categories are appropriate and reusable (human judgement), and how often valid categories are wrongly rejected.
+- Decides: keep guards that prevent demonstrated mistakes; refine guards that block valid categories.
+- Default: weighting plus targeted identifier guards.
+
+**E7 Dominant self-description vs conflict**
+- Data: correct repeated headers, stale repeated templates, accurate covers, misleading filenames, and genuinely conflicting identities.
+- Measure: incorrect automatic outcomes and review burden.
+- Default: pending when the evidence cannot resolve the conflict.
+
+**E8 Selective OCR**
+- Data: page labels on the sample PDFs, plus fixtures of known miss types.
+- Measure: meaningful content missed, and OCR time on the laptop.
+- Default: the simple rule, with misses disclosed as suspected unread content.
+- Result (development data, 1.5): the user labelled 240 units of 34 development files (6 samples, 28 real files; 206 more were labelled "no" automatically because they show no non-repeated picture). 160 had content the native text misses.
+  - First rule: caught 42 of 160; 20 flagged units had no such content; 62 units OCR'd.
+  - Region rule (picture of at least 5% with little native text inside its box): caught 125 of 160; it did worse than the plain area rule because native text often sits on top of text-bearing pictures.
+  - Adopted rule (any non-repeated picture of at least 5%): caught 139 of 160; 55 flagged units had no such content; 212 units OCR'd, about 98 s of reading in total for the 34 files on the laptop.
+  - These counts describe development data and a threshold chosen on it; validation confirms or revises them. They are not accuracy estimates.
+
+**E9 Content vs digest classification**
+- Measure: a comparison under identical conditions.
+- Default: full content.
+
+**E10 Discovery replay (diagnostic)**
+- Process the development documents in automatic mode, starting from an empty taxonomy, in several orders.
+- Report:
+  - categories created;
+  - single-member categories (judged case by case, not assumed wrong);
+  - duplicates;
+  - wrong creations;
+  - unsuitable reuse;
+  - pending rate;
+  - correctness of automatic assignments.
+- One held-out-course pass gives a false-familiar diagnostic only.
+
+---
+
+## D. Staged Milestone 1
+
+Partial checkpoints are not the completed v1. Evaluation runs alongside development.
+
+**CP0 Foundation**
+- Environment baseline: OS, CPU, RAM, free disk, Python. GPU and driver are recorded if easy; they never block.
+- Project skeleton with the isolated reader module.
+- GUI smoke test: dropped files arrive as real paths, and a background task runs while the window stays responsive.
+- Small utilities are allowed:
+  - an inventory tool: hashes, formats, page counts, duplicate hints, plus columns for the user's labels and families;
+  - a family-based split tool.
+
+**CP1 First end-to-end slice** (PDF only, user-approved placement)
+1. Import by drag-and-drop or file chooser.
+2. Extract native PDF text, observations and source locations into an extraction record that carries a version number (bumped whenever the record's format changes).
+3. Analyze: rule-based candidate names with their evidence.
+4. Show the category decision. The user approves a suggestion, picks an existing category, or creates one.
+5. Make a verified copy.
+6. Persist to the catalog. Reopening the app shows the same state.
+
+**CP2 Formats and OCR**
+- Native extraction for PPTX, DOCX and ODT.
+- Selective OCR with observations.
+- Worker process with timeouts.
+- Hidden internal summary record.
+- Extraction checks against the sample page labels (E8).
+
+**CP3 Matching and selected mode**
+- Scorer comparison (E2) and abstention baseline (E4) on development data, producing the initial matcher.
+- Selected-category mode, with permissions through the queue.
+- "Belongs to" and "Also belongs to", primary replacement rules, and edited-copy protection.
+
+**CP4 Automatic mode and discovery**
+- The documented policy (E1) drives the proposer.
+- Single-document creation, with duplicate and equivalence checks using the defaults above (E5–E7).
+- Re-evaluation of pending documents.
+- Discovery replay (E10).
+
+**CP5 Quality gate and freeze**
+- From validation results, the user chooses the operating point.
+- Choices are frozen.
+- The final evaluation runs once, producing the v1 candidate.
+
+---
+
+## E. Gates and acceptance
+
+**Functional gate** (cumulative; applies to the features shipped at each checkpoint)
+- Source files preserved: hash, size, modification time, attributes and alternate streams unchanged; no new files beside sources; last-access time reported only.
+- Copies verified by hash; unrelated files never overwritten.
+- Interrupted operations recover. Crash-injection tests cover the operations shipped so far; merge tests come only once merging ships.
+- Selected-mode permissions enforced (from CP3).
+- Edited app copies protected (from CP3).
+- Evaluation-family separation maintained.
+- An offline run works with networking disabled after installation.
+- Decisions and results are reproducible for the same inputs and versions.
+
+**Quality gate** (before unattended automatic sorting)
+- Report:
+  - incorrect assignments;
+  - incorrect creations;
+  - duplicate categories;
+  - over-merging and fragmentation;
+  - pending rate;
+  - user decision effort (questions, and documents resolved per decision);
+  - later corrections.
+- The user chooses an acceptable operating point from development and validation results. Choices are frozen before final evaluation.
+- If the evidence is insufficient, automatic behaviour stays limited (more pending) and the limitation is stated.
+- Passing the functional gate alone never justifies unattended sorting.
+- Zero duplicates in a finite trap suite is a regression result, not a guarantee.
+- A held-out-course pass is a diagnostic, not proof of general unknown-category detection.
+- No numeric targets until results exist.
+
+---
+
+## F. Deferred
+
+- Secondary summarizer implementation, beyond the boundary note.
+- LLMs.
+- Clustering.
+- Trained own-name classifier.
+- Separate packages.
+- Additional representations, unless E2 or E3 justify them.
+- Automatic version linking.
+- Elaborate category management: merging, and renaming beyond the minimum the workflow needs.
+- Installer packaging.
+- Burmese and other languages.
+- Both GitHub repositories already exist in the ClariFile organization: ClassiFile (this project, `https://github.com/ClariFile/ClassiFile.git`) and SummarEase (empty until its development starts). The reader stays isolated so SummarEase can reuse it.
+
+---
+
+## G. What the user provides
+
+1. Laptop OS and basic resources. Claude Code collects these in CP0; the user confirms.
+2. Representative files in each supported format, the known document families (twins and revisions), and primary labels for the inventory.
+3. Desired groupings for 20–30 mixed development examples (primary placement only), then a second small batch.
+4. Output-location preference.
+5. Later: the operating trade-off decision, once validation results exist.
+
+---
+
+## Changelog
+
+- **1.0 (2026-10-07):** consolidated record after the final debate round. All of ChatGPT's final amendments were adopted; none changed a confirmed requirement.
+- **1.1 (2026-10-08):** section F: added the two-repository note (organizer and secondary summarizer repositories are created near the finished product; until then one private repository, with the reader kept isolated for reuse by the summarizer). Authorized by the user.
+- **1.2 (2026-10-08):** A11: the secondary summarizer is a fully separate project (own folder, environment and repository); the organizer detects an installed summarizer and asks before using it; each works alone; detection details are designed when the summarizer is built. Authorized by the user.
+- **1.3 (2026-10-08):** names: ClariFile (suite), ClassiFile (this categorizer; package `classifile`), SummarEase (secondary summarizer). A11: SummarEase is a fully separate project (own folder, environment and repository); ClassiFile detects it through a registration file in `%LOCALAPPDATA%\ClariFile` and asks before using it; each works alone; detection details are designed when SummarEase is built. D/CP1: the extraction record carries a version number. Authorized by the user.
+- **1.4 (2026-10-08):** section F: both repositories already exist in the ClariFile organization, ClassiFile (this project) and SummarEase (empty until its development starts); replaces the 1.1 note that they would be created near the finished product. Authorized by the user.
+- **1.5 (2026-10-08):** B3 and E8: selective OCR now covers every non-repeated picture of at least 5% of its page or slide, regardless of native text, replacing the first rule; OCR junk from photos and decorations is filtered and counted. E8 development results recorded. Authorized by the user.
+- **1.6 (2026-10-08):** A10: ClassiFile's scope is suggesting category names and filing; no text viewing, copying or exporting. A11: SummarEase's planned readable view, Copy and Export (new files only, on request, saved where the user chooses; originals and filed copies never changed); SummarEase entries move to its own record when its repository starts. B5: Remove from ClassiFile for waiting documents. Authorized by the user.
+- **1.7 (2026-10-08):** B3: the extraction record keeps layout (line, paragraph and block boundaries, positions and text sizes) for native and OCR text, for SummarEase's later readable view; categorizing text and ClassiFile's interface are unchanged. Authorized by the user.
+- **1.8 (2026-10-08):** B4: name review result on development data (21 of 34 files with a good name in the top three; 3 better names typed); the acceptable names are kept in `data\acceptable_names.csv` outside the repository, not in this record. Authorized by the user.
+- **1.9 (2026-10-08):** neutral wording before the first push: the sample with conflicting identities (B1) is described instead of named by its course code. No requirement or decision changed. File names, course codes, people, institutions and titles from the user's documents stay out of tracked files; tests refer to development files by neutral IDs through a local map in `data\`. Authorized by the user.
