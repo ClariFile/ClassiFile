@@ -1,6 +1,6 @@
 # ClassiFile status
 
-2026-10-11 · decision record version 1.9
+2026-10-12 · decision record version 1.9
 
 ## Done
 
@@ -34,7 +34,7 @@
 - Labelling windows for the E8 page labels, the OCR quality check and the name review.
 - Dropdowns and disclosure arrows share the control style; the layout was checked at 1920×1080.
 - Tests refer to development files by neutral IDs through a local map in `data\` and skip when it is absent.
-- 197 automated tests.
+- 198 automated tests.
 
 ## Development results so far
 
@@ -45,16 +45,20 @@ These counts describe development data only. They are not accuracy estimates.
   were marked not good. The most common problems were subtopics (sections of a document rather than the
   whole), course or series names, fragments and generic or template words. The acceptable names are kept outside
   the repository.
-- **OCR quality:** of 40 OCR outputs judged, 4 were good, 9 partly good and 27 bad. The junk filter dropped no
-  real text in the sample, so the problem is the recognition itself.
+- **OCR quality:** 40 OCR outputs were judged twice. First round: 4 good, 9 partly good, 27 bad. Second round,
+  with PDFs showing only the regions OCR read: 5 good, 8 partly good, 27 bad (PDF 5, 8 and 16; slides 7 bad;
+  text documents 4 bad). 25 of the 40 answers were the same in both rounds.
 
 ## Open
 
 - **OCR quality.** Investigated on the same 40 items (57 pictures). The counts below are a proxy (distinct
   plausible words kept after the junk filter), on development data; they are not accuracy estimates.
-  - The first judgments are not a reliable baseline. For PDFs the window showed the whole page instead of the
-    regions OCR read, the 40 answers took about two minutes in total, and several pictures marked bad were read
-    almost word for word. The window now shows only the OCR'd regions; the 40 items need judging again.
+  - The judging window misled in two ways, both corrected: PDFs showed the whole page instead of the regions
+    OCR read (before the second round), and slides showed repeated logos that OCR never reads (after it).
+  - The junk filter dropped some real lines, although none were marked in the judging: lines with a stray bar
+    or dots, and slash-joined words. Fixed: 550 words kept (547 before).
+  - Tried and not adopted: regrouping OCR words into rows. It kept no more words and, on a synthetic picture,
+    attached junk to a real line so the line was dropped.
   - Resolution is not the cause: rendering at half or a third of the size reads about the same number of words.
   - What OCR really misses is text inside bordered boxes and table cells, light text on dark boxes, and text on
     gradient backgrounds. Formulas and label-free drawings stay poor whatever the setting.
@@ -71,8 +75,8 @@ These counts describe development data only. They are not accuracy estimates.
 
 ## Next
 
-1. OCR: judge the 40 items again in the corrected window; then the user decides whether the extra-pass
-   candidate is worth its cost. If so, build it and judge it blind against the current results.
+1. OCR: the user decides whether the extra-pass candidate is worth its cost. If so, build it and judge it
+   blind against the current results.
 2. Name-rule improvements, re-checked against the saved name review.
 3. CP3 (after the user's go-ahead): scorer comparison (E2) and abstention baseline (E4) on development data,
    selected-category mode with permissions through the queue, "Belongs to" / "Also belongs to", primary

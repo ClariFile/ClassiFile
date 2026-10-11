@@ -194,3 +194,20 @@ def test_quality_and_label_windows_show_item_number_and_answer(app, sheet):
     QTest.keyClick(w, Qt.Key_Backspace)
     assert w.queue[w.pos] is first and w.note.text() == "Your answer: no"
     w.close()
+
+
+def test_quality_pass_hides_repeated_slide_pictures(tmp_path):
+    from types import SimpleNamespace
+
+    from tools.label_window import Sources
+
+    deck = tmp_path / "deck.pptx"
+    make_pptx(deck)
+    units = [SimpleNamespace(pictures=["logo", f"p{i}"]) for i in range(4)]   # the logo sits on every slide
+    s = Sources()
+    try:
+        s.records[str(deck)] = SimpleNamespace(units=units)
+        assert len(s.pictures(str(deck), units[0])) == 2                       # E8 pass: every picture
+        assert len(s.pictures(str(deck), units[0], ocr_only=True)) == 1       # quality pass: OCR never reads the logo
+    finally:
+        s.close()

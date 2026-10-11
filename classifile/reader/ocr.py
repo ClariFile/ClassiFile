@@ -98,7 +98,7 @@ def _wordlike(token):
         return True
     if t.isalpha():
         return _plausible_word(t)
-    parts = re.split(r"[-'’]", t)                                          # well-known, it's
+    parts = re.split(r"[-'’/]", t)                                         # well-known, it's, TCP/IP
     return len(parts) > 1 and all(p.isalpha() and (len(p) <= 2 or _plausible_word(p)) for p in parts)
 
 
@@ -113,12 +113,11 @@ def usable_ocr_text(text, photo_like=False):
     kept = []
     for line in text.splitlines():
         toks = line.split()
-        good = sum(map(_wordlike, toks))
-        if toks and good / len(toks) >= OCR_LINE_WORD_SHARE and (good >= 2 or len(toks[0].strip(_EDGE_PUNCT)) >= 4):
+        real = [t for t in toks if t.strip(_EDGE_PUNCT)]                   # stray bars and dots do not count
+        good = sum(map(_wordlike, real))
+        if real and good / len(real) >= OCR_LINE_WORD_SHARE and (good >= 2 or len(real[0].strip(_EDGE_PUNCT)) >= 4):
             kept.append(" ".join(toks))
     return "\n".join(kept)
-
-
 
 
 def flat_share(pix, top=16):

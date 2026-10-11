@@ -19,6 +19,7 @@ import os
 import shutil
 import sys
 import tempfile
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -34,7 +35,7 @@ from classifile.app import make_app
 from classifile.app.preview import PdfPages, first_page_png
 from classifile.organizer import read_and_analyze
 from classifile.reader import read_document
-from classifile.reader.common import package_part
+from classifile.reader.common import REPEATED_SHARE, package_part
 from classifile.worker import WorkerPool
 from tools import refuse_final_eval
 from tools.ocr_quality import DEFAULT_OUT as QUALITY_SHEET
@@ -103,18 +104,25 @@ class Sources:
         rec = rec.result() if hasattr(rec, "result") else rec
         return rec.units[index - 1] if rec else None
 
-    def pictures(self, source, unit, ocr_regions=False):
+    def pictures(self, source, unit, ocr_only=False):
         """PNG bytes to show: the whole page for PDFs, else each picture (None where it cannot be drawn).
-        ocr_regions: for PDFs, only the regions OCR read, so the answer is about them and not the page's other text."""
+        ocr_only: leave out what OCR never reads, so the answer is about what it did read: PDFs show only the
+        OCR'd regions, slides hide repeated pictures (logos, backgrounds)."""
         path = self.copy(source)
         if path.suffix == ".pdf":
             with pymupdf.open(path) as d:
                 page = d[unit.index - 1]
-                clips = [lay["region"] for lay in unit.ocr_layout if lay.get("region")] if ocr_regions else []
+                clips = [lay["region"] for lay in unit.ocr_layout if lay.get("region")] if ocr_only else []
                 return ([page.get_pixmap(dpi=110, clip=c).tobytes("png") for c in clips]
                         or [page.get_pixmap(dpi=110).tobytes("png")])
+        refs = unit.pictures
+        if ocr_only and path.suffix == ".pptx":
+            rec = self.records[source]
+            rec = rec.result() if hasattr(rec, "result") else rec
+            seen = Counter(ref for u in rec.units for ref in set(u.pictures))
+            refs = [ref for ref in refs if seen[ref] < max(2, len(rec.units) * REPEATED_SHARE)]
         out = []
-        for ref in unit.pictures:
+        for ref in refs:
             try:
                 with pymupdf.open(stream=package_part(path, ref)) as d:
                     out.append(d[0].get_pixmap(dpi=96).tobytes("png"))
@@ -224,7 +232,7 @@ class LabelWindow(QWidget):
             QTimer.singleShot(300, self.show_current)
             return
         unit = self.sources.unit(r["source"], int(r["unit"]))
-        for png in self.sources.pictures(r["source"], unit, ocr_regions=self.mode == "quality"):
+        for png in self.sources.pictures(r["source"], unit, ocr_only=self.mode == "quality"):
             label = QLabel()
             if png is None:
                 label.setText("[this picture's format cannot be shown]")

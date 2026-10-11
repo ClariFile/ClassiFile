@@ -23,7 +23,7 @@ def _texts(rec):
 def test_docx(tmp_path):
     r = read_document(make_docx(tmp_path / "a.docx"))
     rec = r.record
-    assert r.status == "ok" and (rec.format, rec.unit, rec.reader_version) == ("docx", "block", "docx-5")
+    assert r.status == "ok" and (rec.format, rec.unit, rec.reader_version) == ("docx", "block", "docx-6")
     assert _texts(rec)[:6] == [
         ("title", "Database Systems Handbook"),
         ("heading", "Introduction"),
@@ -71,7 +71,7 @@ def test_pptx(tmp_path):
 def test_odt(tmp_path):
     r = read_document(make_odt(tmp_path / "a.odt"))
     rec = r.record
-    assert r.status == "ok" and (rec.format, rec.unit, rec.reader_version) == ("odt", "block", "odt-4")
+    assert r.status == "ok" and (rec.format, rec.unit, rec.reader_version) == ("odt", "block", "odt-5")
     assert _texts(rec) == [
         ("heading", "Database Systems Handbook"),
         ("paragraph", "Keep this  sentence.\tTabbed after note.Spanned end."),  # note body kept apart

@@ -23,6 +23,9 @@ def test_junk_lines_are_dropped_and_real_lines_kept():
         "Network Address Translation table"
     assert usable_ocr_text("eeoe oo\nooeeoo\naeeoeoeeeoooo\n2oFeeeoea.a") == ""
     assert usable_ocr_text("") == "" and usable_ocr_text(None) == ""
+    # Stray bars and dots do not sink a real line; slash-joined words count as words.
+    assert usable_ocr_text("| think that ...\n| believe/suppose that...\n| a\n_ + _ +") == \
+        "| think that ...\n| believe/suppose that..."
 
 
 def _page(draw, w=900, h=600):
