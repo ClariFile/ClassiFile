@@ -62,7 +62,7 @@ Run from the project folder (Windows, Python 3.11+; the venv uses 3.12).
 - Inventory: `.venv\Scripts\python -m tools.inventory <folder> [--out data\inventory.csv]`
 - Splits: `.venv\Scripts\python -m tools.split data\inventory.csv --dev P --val P --final P [--seed N] [--out data\splits.csv]`
 - E8 page labels: `.venv\Scripts\python -m tools.page_labels make <folder>... [--out data\page_labels.csv]`, then `... check [data\page_labels.csv]`
-- Labelling windows: `.venv\Scripts\python -m tools.label_window` (E8), `... --quality` (OCR quality; sample with `tools.ocr_quality make`, count with `tools.ocr_quality check`)
+- Labelling windows: `.venv\Scripts\python -m tools.label_window` (E8), `... --quality` (OCR quality; sample with `tools.ocr_quality make`, count with `tools.ocr_quality check`), `... --compare` (blind: one OCR pass against the extra passes of `CLASSIFILE_OCR=extra`)
 - Name review: `.venv\Scripts\python -m tools.name_review make <folder>...`, label with `tools.label_window --names`, count with `tools.name_review check`
 - Window renders for layout checks: `.venv\Scripts\python -m tools.render_window [--size 1536x864] [--scale 1.25] [--out data]` (dark-theme PNGs: seven views, or four scaled views with `--scale`)
 - OCR needs Tesseract (`C:\Program Files\Tesseract-OCR`, or `TESSDATA_PREFIX`). Tests run OCR only when marked `ocr`; others set `CLASSIFILE_OCR=off`.

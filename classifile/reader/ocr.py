@@ -10,18 +10,23 @@ the junk filter below; the number of discarded characters is recorded. Per-unit 
   unavailable        Tesseract language data not found
   deferred           the document's OCR time budget ran out first (never a rejection: the gap stays disclosed)
   disabled           OCR switched off with CLASSIFILE_OCR=off (tests that do not exercise OCR)
+CLASSIFILE_OCR=extra adds two passes through the Tesseract program itself (see EXTRA_PASSES). Off by default.
 All constants are provisional; E8 revisits them.
 """
+import csv
+import io
 import math
 import os
 import re
+import shutil
+import subprocess
 import time
 from collections import Counter
 from pathlib import Path
 
 import pymupdf
 
-from .common import ocr_worthy, page_layout
+from .common import _box, ocr_worthy, page_layout
 
 OCR_LANGUAGE = "eng"
 OCR_DPI = 300
@@ -37,6 +42,52 @@ def tessdata():
         if folder and (Path(folder) / f"{OCR_LANGUAGE}.traineddata").is_file():
             return str(folder)
     return None
+
+
+# Extra passes (CLASSIFILE_OCR=extra; off by default until judged against the single pass). PyMuPDF's OCR call
+# has no layout setting and misses text in bordered boxes, table cells and on dark or gradient backgrounds. The
+# Tesseract program reads those in sparse-text layout, but reads some other pictures worse, so each picture keeps
+# whichever pass leaves the most words after the junk filter.
+EXTRA_PASSES = (("sparse", 0), ("sparse-adaptive", 2))   # name, Tesseract thresholding_method
+EXTRA_PASS_SECONDS = 60
+
+
+def tesseract_exe():
+    """The Tesseract program for the extra passes: beside the language data, else on PATH, else None."""
+    folder = tessdata()
+    beside = [Path(folder).parent / n for n in ("tesseract.exe", "tesseract")] if folder else []
+    return next((str(p) for p in beside if p.is_file()), None) or shutil.which("tesseract")
+
+
+def ocr_sparse(pix, exe, folder, threshold):
+    """One pass through the Tesseract program in sparse-text layout: (text, blocks) like ocr_pixmap with layout.
+    The picture goes in on stdin and the words come back on stdout: no temporary files, nothing beside sources."""
+    out = subprocess.run(
+        [exe, "stdin", "stdout", "--tessdata-dir", folder, "-l", OCR_LANGUAGE, "--psm", "11", "--dpi", str(OCR_DPI),
+         "-c", f"thresholding_method={threshold}", "tsv"],
+        input=pix.tobytes("png"), capture_output=True, timeout=EXTRA_PASS_SECONDS, check=True,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout.decode("utf-8", "replace")
+    w, h = pix.width or 1, pix.height or 1
+    found = {}                                                    # block -> line -> word rows
+    for r in csv.DictReader(io.StringIO(out), delimiter="\t", quoting=csv.QUOTE_NONE):
+        if r["level"] == "5" and (r["text"] or "").strip():
+            found.setdefault(r["block_num"], {}).setdefault((r["par_num"], r["line_num"]), []).append(r)
+    box = lambda rows: (min(int(r["left"]) for r in rows), min(int(r["top"]) for r in rows),
+                        max(int(r["left"]) + int(r["width"]) for r in rows),
+                        max(int(r["top"]) + int(r["height"]) for r in rows))
+    blocks = []
+    for lines_ in found.values():
+        lines = [{"text": " ".join(r["text"].strip() for r in rows), "bbox": _box(box(rows), 1 / w, 1 / h, 4),
+                  "size": round((box(rows)[3] - box(rows)[1]) / h, 4)} for rows in lines_.values()]
+        blocks.append({"bbox": _box(box([r for rows in lines_.values() for r in rows]), 1 / w, 1 / h, 4),
+                       "lines": lines})
+    return "\n".join(l["text"] for b in blocks for l in b["lines"]), blocks
+
+
+def _word_count(text):
+    """Distinct plausible words of three or more letters: how the passes are compared."""
+    tokens = (t.strip(_EDGE_PUNCT) for t in text.split())
+    return len({t.casefold() for t in tokens if len(t) >= 3 and t.isalpha() and _plausible_word(t)})
 
 
 def dpi_for(rect):
@@ -144,8 +195,10 @@ def flow_sources(units, blocks, page_area, load):
 def run(units, sources):
     """Fill ocr_status/ocr_text on suspected units. sources: {unit index: [zero-argument pixmap makers]}.
     Returns the engine settings for the document record."""
-    disabled = os.environ.get(SWITCH_ENV, "").casefold() == "off"
+    switch = os.environ.get(SWITCH_ENV, "").casefold()
+    disabled = switch == "off"
     folder = tessdata()
+    exe, extra_wins = (tesseract_exe() if switch == "extra" and folder else None), 0
     deadline = time.monotonic() + OCR_BUDGET_SECONDS
     for u in units:
         if not u.suspected_unread:
@@ -170,8 +223,19 @@ def run(units, sources):
             except Exception:
                 failed += 1
                 continue
+            photo = flat_share(pix) < PHOTO_MAX_FLAT_SHARE
+            clean = usable_ocr_text(raw, photo_like=photo)
+            first = raw
+            for _, threshold in EXTRA_PASSES if exe else ():
+                try:
+                    raw2, blocks2 = ocr_sparse(pix, exe, folder, threshold)
+                except Exception:  # a failed or timed-out extra pass leaves the result so far in place
+                    continue
+                clean2 = usable_ocr_text(raw2, photo_like=photo)
+                if _word_count(clean2) > _word_count(clean):       # ties keep the earlier pass
+                    raw, blocks, clean = raw2.strip(), blocks2, clean2
+            extra_wins += raw is not first
             raws.append(raw)
-            clean = usable_ocr_text(raw, photo_like=flat_share(pix) < PHOTO_MAX_FLAT_SHARE)
             discarded += len("".join(raw.split())) - len("".join(clean.split()))
             texts.append(clean)
             kept = set(clean.splitlines())
@@ -187,4 +251,5 @@ def run(units, sources):
         u.ocr_status = ("done" if text else "no_readable_image" if not readable
                         else "failed" if failed == readable else "no_text")
     return {"engine": f"mupdf-tesseract (PyMuPDF {pymupdf.VersionBind})", "language": OCR_LANGUAGE,
-            "dpi": OCR_DPI, "available": folder is not None and not disabled, "budget_seconds": OCR_BUDGET_SECONDS}
+            "dpi": OCR_DPI, "available": folder is not None and not disabled, "budget_seconds": OCR_BUDGET_SECONDS,
+            "extra_passes": [n for n, _ in EXTRA_PASSES] if exe else [], "extra_pass_pictures": extra_wins}
