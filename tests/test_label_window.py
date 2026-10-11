@@ -115,6 +115,7 @@ def test_quality_pass_shows_ocr_with_dropped_lines_and_saves_answers(app, tmp_pa
         QTest.keyClick(w, Qt.Key_G)
         _pump(app, lambda: not w._loading() and w.pictures.count() > 0)
         assert "line-through" in w.text.toHtml()           # the photo's junk is shown greyed out
+        assert w.pictures.itemAt(0).widget().pixmap().height() < 600   # the OCR'd region, not the whole page
         QTest.keyClick(w, Qt.Key_D)
         QTest.keyClick(w, Qt.Key_B)
     finally:

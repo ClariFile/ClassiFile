@@ -103,12 +103,16 @@ class Sources:
         rec = rec.result() if hasattr(rec, "result") else rec
         return rec.units[index - 1] if rec else None
 
-    def pictures(self, source, unit):
-        """PNG bytes to show: the whole page for PDFs, else each picture (None where it cannot be drawn)."""
+    def pictures(self, source, unit, ocr_regions=False):
+        """PNG bytes to show: the whole page for PDFs, else each picture (None where it cannot be drawn).
+        ocr_regions: for PDFs, only the regions OCR read, so the answer is about them and not the page's other text."""
         path = self.copy(source)
         if path.suffix == ".pdf":
             with pymupdf.open(path) as d:
-                return [d[unit.index - 1].get_pixmap(dpi=110).tobytes("png")]
+                page = d[unit.index - 1]
+                clips = [lay["region"] for lay in unit.ocr_layout if lay.get("region")] if ocr_regions else []
+                return ([page.get_pixmap(dpi=110, clip=c).tobytes("png") for c in clips]
+                        or [page.get_pixmap(dpi=110).tobytes("png")])
         out = []
         for ref in unit.pictures:
             try:
@@ -220,7 +224,7 @@ class LabelWindow(QWidget):
             QTimer.singleShot(300, self.show_current)
             return
         unit = self.sources.unit(r["source"], int(r["unit"]))
-        for png in self.sources.pictures(r["source"], unit):
+        for png in self.sources.pictures(r["source"], unit, ocr_regions=self.mode == "quality"):
             label = QLabel()
             if png is None:
                 label.setText("[this picture's format cannot be shown]")
