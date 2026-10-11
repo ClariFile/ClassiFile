@@ -184,3 +184,25 @@ def test_a_text_document_takes_only_its_first_opening_line():
 def test_generic_words_ranks_codes_and_data_are_rejected(line):
     assert analyze(_record([line]), "x.pdf").suggestions == []
     assert analyze(_record([]), "ABC-1234_L2.pdf").suggestions == []  # only a code is left after trimming
+
+
+def test_a_numbered_list_on_the_cover_is_contents_not_a_name():
+    a = analyze(_record(["Signal Processing", "1. Sampling", "2. Fourier Series", "3. Filter Design"]), "x.pdf")
+    assert _names(a) == ["Signal Processing"]
+    assert _names(analyze(_record(["1. Sampling Theorem"]), "x.pdf")) == ["Sampling Theorem"]  # one line is no list
+
+
+def test_a_title_inside_a_cover_picture_is_suggested_with_less_weight():
+    from classifile.app.reasons import reason_text
+    from classifile.reader import UnitRecord
+
+    rec = _record(["Signal Processing", "1. Sampling", "2. Fourier Series"])
+    rec.units = [UnitRecord(index=1, kind="page", text="", native_chars=0, text_area=0.0, image_area=0.5,
+                            nonrepeated_image_area=0.5, suspected_unread=True, suspect_rule="x",
+                            ocr_text="Waves and Oscillations\nSignal Proc\nIn -38\nLecture 4")]
+    by_name = {s.name: s for s in analyze(rec, "x.pdf").suggestions}
+    assert set(by_name) == {"Signal Processing", "Waves and Oscillations"}   # no fragments, no pieces of native lines
+    ocr_name = by_name["Waves and Oscillations"]
+    assert ocr_name.score < by_name["Signal Processing"].score
+    evidence = [{"source": e.source, "pages": e.pages} for e in ocr_name.evidence]
+    assert reason_text(evidence) == "in a picture on the cover"

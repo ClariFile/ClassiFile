@@ -11,7 +11,7 @@
 **CP1 First end-to-end slice**
 - Import by drag-and-drop or file chooser.
 - PDF extraction with observations and source locations, in a versioned extraction record.
-- Rule-based candidate names with evidence (rules-6 since the name review).
+- Rule-based candidate names with evidence (rules-7 since the name reviews).
 - Two-step filing: the user picks or types a category; filing happens only on the button or Enter.
 - Verified copies: temporary name, hash check, publish without overwriting, catalog record.
 - SQLite catalog; reopening the app shows the same state. Startup repairs half-done filings.
@@ -48,6 +48,8 @@ These counts describe development data only. They are not accuracy estimates.
 - **OCR quality:** 40 OCR outputs were judged twice. First round: 4 good, 9 partly good, 27 bad. Second round,
   with PDFs showing only the regions OCR read: 5 good, 8 partly good, 27 bad (PDF 5, 8 and 16; slides 7 bad;
   text documents 4 bad). 25 of the 40 answers were the same in both rounds.
+- **OCR comparison:** blind, one pass against extra passes on the same 40 items: 4 extra, 3 current, 33 same.
+- **Second name review:** 34 files, 80 names marked not good, 7 skipped, none good, 3 category names typed.
 
 ## Open
 
@@ -65,32 +67,35 @@ These counts describe development data only. They are not accuracy estimates.
   - PyMuPDF's OCR call has no layout setting. The installed Tesseract program has: in sparse-text mode it reads
     the boxed and table text the current pass misses, but reads some other pictures worse. No single setting
     wins (current 547 words, sparse 537, sparse with adaptive thresholding 589).
-  - Candidate, built but off by default (`CLASSIFILE_OCR=extra`): keep the current pass, add two Tesseract passes
-    and keep the best per picture. On the 57 pictures: 635 words kept (550 with one pass); a later pass won on
-    22. Cost: about one more second per picture, and the Tesseract program itself, not only its language data.
-    The pictures go to it on stdin and come back on stdout: no temporary files.
-  - Waiting for the user's blind comparison on the same 40 items (`tools.label_window --compare`). The extra
-    passes become the default only if the user prefers them; the decision record then needs a line in B3.
-- **Name rules.** First round after the review done (rules-6), checked against the saved review with
-  `tools.name_stats score`. Top-three names marked not good: 39 (76 under rules-5). Files with a good name in the
-  top three: 21 of 34, unchanged; with a good name first: 19 (17). 14 of the names now shown were never judged.
-  These counts describe development data and rules chosen on it; they are not accuracy estimates.
-  - Changed: lines whose only evidence is repeating on some pages go under "More" (score unchanged, so no
-    self-description is declared dominant); DOCX/ODT take only their first qualifying opening line; more generic
-    words, bare codes, IP addresses, quoted data and academic ranks alone are rejected.
-  - The user's ruling (2026-10-12): ClassiFile never decides, creates or changes a document's own title or
-    name; it only suggests category names and files documents. A cover title is evidence for a category only.
-  - No file has a category label from the user yet, so suggestions cannot be scored at category level. The
-    second review round (`data\name_review_2.csv`, 74 names for 34 files) collects them: good marks, and a typed
-    category name where none fits.
-  - Left as they are: cover lines that are subtopics, file-name forms, and key-phrase fragments.
+  - Extra passes through the Tesseract program (sparse-text layout, best result per picture) were built and
+    judged blind by the user on the 40 items: 4 better with them, 3 better without, 33 no difference. Not
+    adopted and removed; they also cost about one more second per picture.
+  - Speed, same words kept: the OCR result is no longer compressed before it is read back, the photo check
+    samples fewer pixels, and a picture shown again in a document is read once. Reading the 18 sampled files:
+    about 98 s before, 80 s now. The app reads four documents at once (was two).
+  - Not taken: OCR at 200 dpi instead of 300 would bring those files to about 59 s and keep about 1% fewer
+    words. The user decides.
+- **Category names.** The user's ruling (2026-10-12): ClassiFile never decides, creates or changes a document's
+  own title or name; it only suggests category names and files documents.
+  - rules-6, from the first review: lines whose only evidence is repeating on some pages go under "More" (score
+    unchanged, so no self-description is declared dominant); DOCX/ODT take only their first qualifying opening
+    line; generic words, bare codes, IP addresses, quoted data and academic ranks alone are rejected.
+  - Second review (rules-6 names, asked as category names): all 34 files reviewed, no suggested name marked
+    good, three category names typed. The first review had marked 21 of largely the same names good, so the
+    marks cannot say which level a category should have.
+  - rules-7, from the typed names: a numbered list on the cover is the document's contents, not its name; a
+    title that exists only inside a picture on the cover is suggested (cleaned OCR text, less weight). Of the
+    four files with a typed category, two now show it or its near form in the top three (none before).
+  - Against the first review, as a regression check only: 32 top-three names marked not good (76 under rules-5),
+    20 of 34 files with a name once marked good (21), 17 names never judged. Development data; not accuracy.
+  - What would settle the level: the user's own grouping of the development files (decision record G3), which
+    does not exist yet. Filing them in the app with the categories the user wants would provide it.
 - **CP3** has not started.
 
 ## Next
 
-1. OCR: the user's blind comparison of one pass against the extra passes, then adopt or drop them.
-2. Names: the user's second review round, as category names; then rules from those marks. A trained name
-   recogniser stays deferred by the decision record until it can be compared with the rules.
+1. OCR: the user says whether 200 dpi is worth about 1% fewer words.
+2. Categories: the user's grouping of the development files (G3); it is also the first data CP3 needs.
 3. CP3 (after the user's go-ahead): scorer comparison (E2) and abstention baseline (E4) on development data,
    selected-category mode with permissions through the queue, "Belongs to" / "Also belongs to", primary
    replacement and edited-copy protection.

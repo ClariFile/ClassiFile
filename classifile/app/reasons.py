@@ -32,6 +32,8 @@ def reason_text(evidence, unit="page"):
         src, pages = e["source"], e["pages"]
         if src == "first_page":
             parts.append(FIRST_TEXT.get(unit, "on the cover"))
+        elif src == "first_page_ocr":
+            parts.append("in a picture " + FIRST_TEXT.get(unit, "on the cover"))
         elif src == "template":
             parts.append(f"on most {noun}s")
         elif src == "recurring":

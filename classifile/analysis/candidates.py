@@ -2,6 +2,7 @@
 
 Evidence weights are simple, provisional and documented here (E6/E7 revisit them):
   first_page 2, template 2, recurring 2 (a template line is not also counted as recurring),
+  first_page_ocr 1 (a line read from a picture on the cover or title slide),
   running 2 (DOCX/ODT headers and footers, PPTX master and layout text),
   metadata_title 1, metadata_subject 1, filename 1.
 "first_page" is the first page or slide (its first six qualifying lines), or the first qualifying opening line of
@@ -13,6 +14,7 @@ document, so they rank after every other candidate (provisional, like the weight
 
 Names must be clean and short, never cut-off sentences (provisional rules, revisited with the user's name reviews):
   - cover lines wrapped mid-sentence are joined before use;
+  - a numbered list on the cover (two or more lines "1. ...", "2. ...") is the document's contents, not its name;
   - fragments ending in a connecting word (and, of, the, to, for, with, ...) or a comma are rejected, and so are
     lines that read like sentences ("is", "are", "was" or "were" as the verb);
   - names of 2 to 5 words are preferred: other lengths rank as if their evidence weighed 1 less;
@@ -33,8 +35,8 @@ import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-ANALYZER_VERSION = "rules-6"
-WEIGHTS = {"keyphrase": 1, "first_page": 2, "template": 2, "recurring": 2, "running": 2, "metadata_title": 1, "metadata_subject": 1, "filename": 1}
+ANALYZER_VERSION = "rules-7"
+WEIGHTS = {"keyphrase": 1, "first_page": 2, "first_page_ocr": 1, "template": 2, "recurring": 2, "running": 2, "metadata_title": 1, "metadata_subject": 1, "filename": 1}
 FIRST_PAGE_LINES = 6    # only the first few qualifying first-page lines are candidates
 FLOW_START_LINES = 1    # DOCX/ODT have no cover page: after the first qualifying line come headings and body text
 MAX_SUGGESTIONS = 12
@@ -55,6 +57,7 @@ INSTANCE_PATTERNS = [
     r"(?<![\w.-])\d+(?:\.\d+){1,2}\.?(?![\w.-])",                               # 4.2, 4.2.1 (not IPs)
 ]
 _INSTANCE = re.compile("|".join(f"(?:{p})" for p in INSTANCE_PATTERNS), re.I)
+_LIST_ITEM = re.compile(r"^\d{1,2}[.)]\s*\S")       # "1. Sampling", "2) Scope"
 _EDGE_NUMBER = re.compile(r"^\d+[.)]?\s+|\s+\d+$")  # leading "4. " / trailing page numbers
 
 # Prerequisite / reference / see-also contexts: such lines are mentions, not self-descriptions.
@@ -244,7 +247,10 @@ def analyze(record, file_name):
     author = " ".join(str(record.metadata.get("author") or "").split())
     people = _people(cover, author)
     limit = FLOW_START_LINES if record.unit == "block" else FIRST_PAGE_LINES
+    outline = sum(bool(_LIST_ITEM.match(l)) for l in cover) >= 2  # a numbered list on the cover is its contents
     for line in cover:
+        if outline and _LIST_ITEM.match(line):
+            continue
         if _MENTION_HEADING.match(line):
             # ponytail: a mention heading covers the rest of page 1; per-block scoping when layout is recorded.
             in_mention_block = True
@@ -256,6 +262,16 @@ def analyze(record, file_name):
             taken += 1
         else:
             _clean(line, "first_page", markers)  # still record instance markers such as "Lecture -9"
+
+    # A title that exists only inside a picture on the cover or title slide (cleaned OCR text; weighs less).
+    # Two real words at least, and not a piece of a line already found: OCR also reads fragments of native text.
+    if record.unit != "block" and record.units and record.units[0].ocr_text:
+        native = list(found)
+        for line in record.units[0].ocr_text.splitlines()[:limit]:
+            name = _clean(line, "first_page_ocr", []) or ""
+            words = sum(len(w) >= 3 and w.isalpha() for w in name.split())
+            if words >= 2 and not any(name_key(name) in k for k in native):
+                add(line, "first_page_ocr", [1])
 
     template_keys = set()
     for t in record.template_lines:
