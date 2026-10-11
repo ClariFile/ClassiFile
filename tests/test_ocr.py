@@ -131,37 +131,15 @@ def test_ocr_layout_positions_lines_and_marks_kept(tmp_path):
     assert all(l["kept"] for l in lines if _has_words(l["text"]))
 
 
-def test_extra_passes_are_off_by_default_and_keep_the_best_per_picture(tmp_path, monkeypatch):
-    if ocr.tesseract_exe() is None:
-        pytest.skip("Tesseract program not installed")
-    path = _scanned_pdf(tmp_path / "scan.pdf")
-    assert read_document(path).record.ocr["extra_passes"] == []                  # one pass unless switched on
-    monkeypatch.setenv("CLASSIFILE_OCR", "extra")
-    rec = read_document(path).record
-    assert rec.ocr["extra_passes"] == ["sparse", "sparse-adaptive"] and _has_words(rec.units[1].ocr_text)
-
-    # A later pass replaces the result only when it leaves more words; its layout comes with it.
-    monkeypatch.setattr(ocr, "ocr_sparse", lambda pix, exe, folder, threshold: (
-        "Scanned Diagram Legend\nRouting Table Entries", [{"bbox": [0, 0, 1, 1], "lines": [
-            {"text": "Scanned Diagram Legend", "bbox": [0, 0, 1, .5], "size": .2},
-            {"text": "Routing Table Entries", "bbox": [0, .5, 1, 1], "size": .2}]}]))
-    rec = read_document(path).record
-    unit = rec.units[1]
-    assert "Routing Table Entries" in unit.ocr_text and rec.ocr["extra_pass_pictures"] == 1
-    assert [l["kept"] for b in unit.ocr_layout[0]["blocks"] for l in b["lines"]] == [True, True]
-    monkeypatch.setattr(ocr, "ocr_sparse", lambda *a: (_ for _ in ()).throw(OSError("no program")))
-    rec = read_document(path).record                                             # a failing extra pass changes nothing
-    assert rec.units[1].ocr_status == "done" and _has_words(rec.units[1].ocr_text)
-    assert rec.ocr["extra_pass_pictures"] == 0
-
-
-def test_sparse_pass_returns_text_and_positions():
-    exe, folder = ocr.tesseract_exe(), ocr.tessdata()
-    if exe is None or folder is None:
-        pytest.skip("Tesseract program not installed")
+def test_a_picture_shown_twice_is_read_once(tmp_path, monkeypatch):
     doc = pymupdf.open()
+    for _ in range(4):
+        doc.new_page().insert_text((72, 72), "Native text page with plenty of characters. " * 10)
     _picture_page(doc)
-    text, blocks = ocr.ocr_sparse(doc[0].get_pixmap(dpi=150), exe, folder, 0)
-    lines = [l for b in blocks for l in b["lines"]]
-    assert _has_words(text) and lines and all(0 <= v <= 1 for l in lines for v in l["bbox"])
-    assert all(0 < l["size"] < 1 for l in lines)
+    _picture_page(doc)
+    doc.save(tmp_path / "twice.pdf")
+    calls, real = [], ocr.ocr_pixmap
+    monkeypatch.setattr(ocr, "ocr_pixmap", lambda *a, **k: calls.append(1) or real(*a, **k))
+    units = read_document(tmp_path / "twice.pdf").record.units
+    assert len(calls) == 1 and _has_words(units[4].ocr_text) and units[4].ocr_text == units[5].ocr_text
+    assert units[4].ocr_layout[0]["blocks"][0] is not units[5].ocr_layout[0]["blocks"][0]  # each unit has its own

@@ -3,6 +3,7 @@
 Run: .venv\\Scripts\\python -m classifile.app
 """
 import json
+import os
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
@@ -32,6 +33,7 @@ from classifile.worker import WorkerPool
 ALL, DECIDE, RECENT, SETTINGS = "all", "decide", "recent", "settings"
 VIEW_TITLES = {ALL: "All documents", DECIDE: "Needs your decision", RECENT: "Recently added", SETTINGS: "Settings"}
 RECENT_DAYS = 7
+READ_WORKERS = min(4, os.cpu_count() or 2)  # documents read (and OCR'd) at once, each in its own process
 WAITING = ("needs_decision", "pending", "failed")
 DOC = Qt.UserRole
 SIDEBAR_WIDTH = 240
@@ -63,8 +65,8 @@ class MainWindow(QWidget):
         self.deferred = []          # "Leave pending": moved to the end of the decision page for this session
         self.view = (ALL, None)     # ("all" | "decide" | "recent" | "settings" | "category", category id)
         self.details_open = False
-        self.pool = ThreadPoolExecutor(max_workers=2)
-        self.workers = workers or WorkerPool(read_and_analyze)
+        self.pool = ThreadPoolExecutor(max_workers=READ_WORKERS)
+        self.workers = workers or WorkerPool(read_and_analyze, size=READ_WORKERS)
         self.bridge = Bridge()
         self.bridge.read_done.connect(self._read_done)
         self.bridge.file_done.connect(self._file_done)

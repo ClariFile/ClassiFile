@@ -5,8 +5,6 @@ Usage:
                                                                   Y yes, N no, S skip
   python -m tools.label_window --quality [data/ocr_quality.csv]  OCR quality: G good, P partly, B bad, S skip;
                                                                   D = the greyed (dropped) lines had real text
-  python -m tools.label_window --compare [data/ocr_quality.csv]  OCR, one pass against the extra passes, blind:
-                                                                  1 left better, 2 right better, 0 same, S skip
   python -m tools.label_window --names [data/name_review.csv]    Suggested category names, one file per screen:
                                                                   1/2/3 mark good names, Enter, 0 none, S skip
 
@@ -18,7 +16,6 @@ copies; data/final-eval is refused.
 """
 import html
 import os
-import random
 import shutil
 import sys
 import tempfile
@@ -44,7 +41,7 @@ from tools import refuse_final_eval
 from tools.ocr_quality import DEFAULT_OUT as QUALITY_SHEET
 from tools.name_review import BETTER, FILE_ANSWER
 from tools.name_review import DEFAULT_OUT as NAMES_SHEET
-from tools.ocr_quality import COMPARE, DROPPED, read_extra
+from tools.ocr_quality import DROPPED
 from tools.page_labels import DEFAULT_OUT, append_answer, read_answers, read_rows
 
 PICTURE_WIDTH = 760
@@ -65,15 +62,6 @@ MODES = {
         "answered": ("good", "partly", "bad"),
         "help": "G = good    P = partly    B = bad    S = skip    "
                 "D = the greyed lines contained real text    Backspace = back",
-    },
-    "compare": {
-        "title": "ClassiFile — OCR comparison",
-        "question": "Which side read the text in these pictures better? Left and right are two ways of reading, in "
-                    "a random order for each item. Only the text the app keeps is shown.",
-        "keys": {Qt.Key_1: "left", Qt.Key_2: "right", Qt.Key_0: "same", Qt.Key_S: "skip"},
-        "answered": ("current", "extra", "same"),
-        "help": "1 = left is better    2 = right is better    0 = no real difference    S = skip    Backspace = back",
-        "kind": COMPARE,
     },
 }
 
@@ -165,7 +153,7 @@ def ocr_html(unit):
 
 
 class LabelWindow(QWidget):
-    def __init__(self, labels, mode="unread", workers=None, workers_extra=None):
+    def __init__(self, labels, mode="unread", workers=None):
         super().__init__()
         self.labels, self.mode, self.cfg = Path(labels), mode, MODES[mode]
         refuse_final_eval(self.labels)
@@ -173,8 +161,7 @@ class LabelWindow(QWidget):
         for r in rows:
             if r.get("source"):
                 refuse_final_eval(r["source"])
-        self.kind = self.cfg.get("kind", "")
-        self.answers = read_answers(self.labels, kind=self.kind)
+        self.answers = read_answers(self.labels)
         self.dropped = read_answers(self.labels, kind=DROPPED)
         self.rows = rows
         self.todo = [r for r in rows if r.get("unit") and r.get("label_source") != "auto"
@@ -184,22 +171,11 @@ class LabelWindow(QWidget):
         self.queue, self.pos, self.history = fresh + skipped, 0, []
         self.sources = Sources(workers)
         self.sources.start(r["source"] for r in self.queue)
-        self.extra = Sources(workers_extra) if mode == "compare" else None   # the same files, read the other way
-        if self.extra:
-            self.extra.start(r["source"] for r in self.queue)
         self._build()
         self.show_current()
 
     def _answer(self, r):
         return self.answers.get((r["file"], r["unit"]))
-
-    def _save(self, r, answer):
-        append_answer(self.labels, r["file"], r["unit"], answer, kind=self.kind)
-        self.answers[(r["file"], r["unit"])] = answer
-
-    def _flipped(self, r):
-        """Whether the extra-pass reading is on the left for this item: random, but the same every time."""
-        return random.Random(f"{r['file']}|{r['unit']}").random() < 0.5
 
     def _build(self):
         self.setWindowTitle(self.cfg["title"])
@@ -232,8 +208,7 @@ class LabelWindow(QWidget):
 
     def _loading(self):
         r = self.queue[self.pos] if self.pos < len(self.queue) else None
-        return r is not None and any(s.prefetch is not None and not s.ready(r["source"])
-                                     for s in (self.sources, self.extra) if s)
+        return r is not None and self.sources.prefetch is not None and not self.sources.ready(r["source"])
 
     def show_current(self):
         while self.pictures.count():
@@ -251,22 +226,13 @@ class LabelWindow(QWidget):
                             f"{r['file']}  ·  {r['kind']} {r['unit']}")
         answer = self._answer(r)
         dropped = " · greyed lines marked as real text" if self.dropped.get((r["file"], r["unit"])) == "yes" else ""
-        if self.mode == "compare" and answer in self.cfg["answered"]:
-            answer = "saved"                                       # naming the side would end the blind comparison
-        shown = answer if answer == "saved" or answer in self.cfg["answered"] else "not answered yet"
-        self.note.setText(f"Your answer: {shown}{dropped}")
+        self.note.setText(f"Your answer: {answer if answer in self.cfg['answered'] else 'not answered yet'}{dropped}")
         if self._loading():
             self.text.setPlainText("Reading this document (with OCR)…")
             QTimer.singleShot(300, self.show_current)
             return
         unit = self.sources.unit(r["source"], int(r["unit"]))
-        if self.mode == "compare":
-            sides = [unit.ocr_text or "", self.extra.unit(r["source"], int(r["unit"])).ocr_text or ""]
-            if sides[0] == sides[1] and self._answer(r) is None:   # nothing to judge: both read the same
-                self._save(r, "same")
-                self.pos += 1
-                return self.show_current()
-        for png in self.sources.pictures(r["source"], unit, ocr_only=self.mode in ("quality", "compare")):
+        for png in self.sources.pictures(r["source"], unit, ocr_only=self.mode == "quality"):
             label = QLabel()
             if png is None:
                 label.setText("[this picture's format cannot be shown]")
@@ -277,12 +243,6 @@ class LabelWindow(QWidget):
             self.pictures.addWidget(label)
         if self.mode == "quality":
             self.text.setHtml(ocr_html(unit))
-        elif self.mode == "compare":
-            shown = lambda text: html.escape(text).replace("\n", "<br>") or "<i>[nothing read]</i>"
-            cell = lambda title, text: f'<td width="50%" valign="top"><b>{title}</b><br><br>{shown(text)}</td>'
-            left, right = reversed(sides) if self._flipped(r) else sides
-            self.text.setHtml(f'<table width="100%" cellspacing="14"><tr>{cell("1 — left", left)}'
-                              f'{cell("2 — right", right)}</tr></table>')
         else:
             text = unit.text + (f"\n\n— Speaker notes —\n{unit.notes}" if unit.notes else "")
             self.text.setPlainText(text.strip() or "[no normal text]")
@@ -292,10 +252,9 @@ class LabelWindow(QWidget):
         if self._loading():
             return
         if e.key() in keys and self.pos < len(self.queue):
-            r, answer = self.queue[self.pos], keys[e.key()]
-            if answer in ("left", "right"):                        # stored by what it is, not by where it was shown
-                answer = "extra" if (answer == "left") == self._flipped(r) else "current"
-            self._save(r, answer)
+            r = self.queue[self.pos]
+            append_answer(self.labels, r["file"], r["unit"], keys[e.key()])
+            self.answers[(r["file"], r["unit"])] = keys[e.key()]
             self.history.append(self.pos)
             self.pos += 1
             self.show_current()
@@ -312,8 +271,6 @@ class LabelWindow(QWidget):
 
     def closeEvent(self, e):
         self.sources.close()
-        if self.extra:
-            self.extra.close()
         super().closeEvent(e)
 
 
@@ -533,11 +490,9 @@ class NameReviewWindow(QWidget):
 
 def main(argv=None):
     args = list(sys.argv[1:] if argv is None else argv)
-    flags = {"--quality": "quality", "--compare": "compare", "--names": "names"}
-    mode = next((m for f, m in flags.items() if f in args), "unread")
-    args = [a for a in args if a not in flags]
-    sheets = {"quality": QUALITY_SHEET, "compare": QUALITY_SHEET, "names": NAMES_SHEET}
-    labels = Path(args[0]) if args else sheets.get(mode, DEFAULT_OUT)
+    mode = "quality" if "--quality" in args else "names" if "--names" in args else "unread"
+    args = [a for a in args if a not in ("--quality", "--names")]
+    labels = Path(args[0]) if args else {"quality": QUALITY_SHEET, "names": NAMES_SHEET}.get(mode, DEFAULT_OUT)
     if not labels.exists():
         sys.exit(f"No sheet at {labels}.")
     if mode in ("unread", "names"):
@@ -546,9 +501,7 @@ def main(argv=None):
     if mode == "names":
         w = NameReviewWindow(labels)
     else:
-        ocr = mode in ("quality", "compare")
-        w = LabelWindow(labels, mode, workers=WorkerPool(read_and_analyze, size=1) if ocr else None,
-                        workers_extra=WorkerPool(read_extra, size=1) if mode == "compare" else None)
+        w = LabelWindow(labels, mode, workers=WorkerPool(read_and_analyze, size=1) if mode == "quality" else None)
     w.show()
     sys.exit(app.exec())
 

@@ -4,25 +4,19 @@ Usage:
   python -m tools.ocr_quality make [sheet.csv] [--n 40] [--seed 2026] [--out data/ocr_quality.csv]
   python -m tools.label_window --quality [data/ocr_quality.csv]
   python -m tools.ocr_quality check [data/ocr_quality.csv]
-  python -m tools.label_window --compare [data/ocr_quality.csv]   blind: one OCR pass against the extra passes
 
 make: samples units where OCR ran (status done or no_text) from a page_labels sheet. Numbers only.
 The window shows each unit's pictures and the text OCR read, with the lines the junk filter drops greyed out.
 Answers: G good, P partly, B bad (how well OCR read the picture's text), and optionally D: the greyed (dropped)
 lines contained real text. check counts them. Counts on development data only; not accuracy estimates.
-The comparison shows the same units read with one pass and with the extra passes (classifile/reader/ocr.py), side
-by side in a random order per item; units where both read the same are recorded as "same" without being shown.
 """
 import argparse
 import csv
-import os
 import random
 import sys
 from collections import Counter
 from pathlib import Path
 
-from classifile.organizer import read_and_analyze
-from classifile.reader.ocr import SWITCH_ENV
 from tools import refuse_final_eval
 from tools.page_labels import read_answers, read_rows
 
@@ -31,13 +25,6 @@ DEFAULT_SHEET = DATA / "page_labels_e8filter.csv"
 DEFAULT_OUT = DATA / "ocr_quality.csv"
 COLUMNS = ["file", "unit", "kind", "ocr_status", "ocr_chars", "ocr_discarded_chars", "source"]
 DROPPED = "dropped"   # answers kind for the D key
-COMPARE = "compare"   # answers kind for the blind comparison: current | extra | same
-
-
-def read_extra(path):
-    """Worker target: read with the extra OCR passes on. The setting stays inside that worker process."""
-    os.environ[SWITCH_ENV] = "extra"
-    return read_and_analyze(path)
 
 
 def sample(rows, n, seed):
@@ -47,7 +34,7 @@ def sample(rows, n, seed):
     return sorted(picked, key=lambda r: order[id(r)])  # sheet order: each document is read once in the window
 
 
-def check(rows, answers, dropped, compared=None):
+def check(rows, answers, dropped):
     fmt = lambda r: r["file"].rsplit(".", 1)[-1].lower()
     judged = [r for r in rows if answers.get((r["file"], r["unit"])) in ("good", "partly", "bad")]
     out = {"sampled": len(rows), "judged": len(judged)}
@@ -58,8 +45,6 @@ def check(rows, answers, dropped, compared=None):
     filtered = [r for r in judged if int(r["ocr_discarded_chars"] or 0) > 0]
     out["judged_with_dropped_lines"] = len(filtered)
     out["dropped_lines_had_real_text"] = sum(1 for r in filtered if dropped.get((r["file"], r["unit"])) == "yes")
-    if compared:  # blind comparison: which reading was better, one pass (current) or the extra passes
-        out["compared"] = dict(Counter(v for v in compared.values() if v != "skip"))
     return out
 
 
@@ -91,8 +76,7 @@ def main(argv=None):
         print("Judge them with: python -m tools.label_window --quality")
     else:
         refuse_final_eval(a.labels)
-        result = check(read_rows(a.labels), read_answers(a.labels), read_answers(a.labels, kind=DROPPED),
-                       read_answers(a.labels, kind=COMPARE))
+        result = check(read_rows(a.labels), read_answers(a.labels), read_answers(a.labels, kind=DROPPED))
         for k, v in result.items():
             print(f"{k}: {v}")
         print("Counts on development data; they describe these files, not accuracy in general.")
