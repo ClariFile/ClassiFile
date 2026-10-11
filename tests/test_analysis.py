@@ -163,3 +163,24 @@ def test_instance_words_with_numbers_in_any_form(line):
                                   "Summary", "References", "Quizzes", "Objectives", "Table of Contents"])
 def test_unbalanced_and_generic_lines_are_rejected(line):
     assert analyze(_record([line]), "x.pdf").suggestions == []
+
+
+def test_lines_that_only_repeat_go_under_more_with_their_score():
+    rec = _record(["Signal Representation"], recurring=[{"line": "Sampling Theorem", "pages": [4, 9]}])
+    a = analyze(rec, "x.pdf")
+    assert _top(a) == ["Signal Representation"]
+    (rep,) = [s for s in a.suggestions if s.name == "Sampling Theorem"]
+    assert rep.demoted == "repeated" and rep.score == a.suggestions[0].score  # shown under "More"; no winner picked
+
+
+def test_a_text_document_takes_only_its_first_opening_line():
+    rec = _record(["Database Notes", "Types of Keys", "Normal Forms"])
+    rec.unit = "block"                                              # DOCX/ODT: no cover page
+    assert _names(analyze(rec, "x.docx")) == ["Database Notes"]
+
+
+@pytest.mark.parametrize("line", ["Example", "Solution", "Expected Output", "■ Example", "Associate Professor",
+                                  "ABC-1234", "PC1 – 10.0.0.5", '"Alpha,Beta,Gamma"'])
+def test_generic_words_ranks_codes_and_data_are_rejected(line):
+    assert analyze(_record([line]), "x.pdf").suggestions == []
+    assert analyze(_record([]), "ABC-1234_L2.pdf").suggestions == []  # only a code is left after trimming

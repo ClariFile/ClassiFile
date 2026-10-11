@@ -138,25 +138,25 @@ def test_name_review_window_one_file_per_screen(app, samples, tmp_path):
     name_review.main(["make", str(src), "--out", str(sheet)])
     rows = page_labels.read_rows(sheet)
     cst = [r for r in rows if r["file"] == SAMPLE["S1"]]
-    assert [r["unit"] for r in cst] == ["1", "2", "3"] and cst[0]["name"] == EXPECT["S1.cover_title"]
+    assert [r["unit"] for r in cst] == ["1", "2"] and cst[0]["name"] == EXPECT["S1.cover_title"]
     assert cst[0]["reason"] == "on the cover" and cst[0]["page"] == "1"
-    assert cst[1]["reason"].startswith("repeated on pages") and int(cst[1]["page"]) > 1
+    assert not [r for r in cst if r["reason"].startswith("repeated on pages")]  # those are under "More", not reviewed
 
     w = NameReviewWindow(sheet)
     w.show()
     assert w.progress.text().startswith("File 1 of 2") and SAMPLE["S1"] in w.progress.text()
-    assert "Press 1, 2 or 3" in w.help.text() and w.names.count() == 3
+    assert "Press 1, 2 or 3" in w.help.text() and w.names.count() == 2
     assert "on the cover (page 1)" in w.names.item(0).text()
+    QTest.keyClick(w, Qt.Key_PageDown)
+    assert w.page_label.text() == "Page 2 of 38"
     w.names.itemClicked.emit(w.names.item(1))                      # a name jumps to its first page
     assert w.page_label.text() == f"Page {cst[1]['page']} of 38"
-    QTest.keyClick(w, Qt.Key_PageDown)
-    assert w.page_label.text() == f"Page {int(cst[1]['page']) + 1} of 38"
     QTest.keyClick(w, Qt.Key_1)
     assert "✓ good" in w.names.item(0).text()
     QTest.keyClick(w, Qt.Key_1)                                    # pressing again unmarks
     assert "✓" not in w.names.item(0).text()
     QTest.keyClick(w, Qt.Key_1)
-    QTest.keyClick(w, Qt.Key_Return)                               # Enter saves: 1 good, 2 and 3 not good
+    QTest.keyClick(w, Qt.Key_Return)                               # Enter saves: 1 good, the rest not good
     assert w.progress.text().startswith("File 2 of 2")
     QTest.keyClick(w, Qt.Key_0)                                    # none of file 2's names is good
     assert w.progress.text().startswith("Done: 2 of 2")

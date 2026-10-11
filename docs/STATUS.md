@@ -11,7 +11,7 @@
 **CP1 First end-to-end slice**
 - Import by drag-and-drop or file chooser.
 - PDF extraction with observations and source locations, in a versioned extraction record.
-- Rule-based candidate names with evidence (rules-5).
+- Rule-based candidate names with evidence (rules-6 since the name review).
 - Two-step filing: the user picks or types a category; filing happens only on the button or Enter.
 - Verified copies: temporary name, hash check, publish without overwriting, catalog record.
 - SQLite catalog; reopening the app shows the same state. Startup repairs half-done filings.
@@ -34,7 +34,7 @@
 - Labelling windows for the E8 page labels, the OCR quality check and the name review.
 - Dropdowns and disclosure arrows share the control style; the layout was checked at 1920×1080.
 - Tests refer to development files by neutral IDs through a local map in `data\` and skip when it is absent.
-- 198 automated tests.
+- 209 automated tests.
 
 ## Development results so far
 
@@ -68,16 +68,24 @@ These counts describe development data only. They are not accuracy estimates.
   - Candidate, not adopted: keep the current pass, add two Tesseract passes and keep the best per picture:
     632 words (current 547); a later pass won on 23 of 57 pictures. Cost: two extra program launches per
     picture, about half a second each, and the app would need the Tesseract program, not only its language data.
-- **Name rules.** Improve the rules for the problem types found in the name review, then review again.
-  The user's guidance for that round: lesson titles (one lesson inside a course) are too narrow; suggestions
-  should be at the subject or course level, like the better names the user typed. Not changed yet.
+- **Name rules.** First round after the review done (rules-6), checked against the saved review with
+  `tools.name_stats score`. Top-three names marked not good: 39 (76 under rules-5). Files with a good name in the
+  top three: 21 of 34, unchanged; with a good name first: 19 (17). 14 of the names now shown were never judged.
+  These counts describe development data and rules chosen on it; they are not accuracy estimates.
+  - Changed: lines whose only evidence is repeating on some pages go under "More" (score unchanged, so no
+    self-description is declared dominant); DOCX/ODT take only their first qualifying opening line; more generic
+    words, bare codes, IP addresses, quoted data and academic ranks alone are rejected.
+  - Open question for the user: the marks and the guidance point in different directions. In the review, a
+    document's own title was mostly marked good and course names not good; the guidance for this round says
+    lesson titles are too narrow and names should be at subject or course level. The level is not changed.
+  - Left as they are: cover lines that are subtopics, file-name forms, and key-phrase fragments.
 - **CP3** has not started.
 
 ## Next
 
 1. OCR: the user decides whether the extra-pass candidate is worth its cost. If so, build it and judge it
    blind against the current results.
-2. Name-rule improvements, re-checked against the saved name review.
+2. Names: the user settles the level question above; then a second review round on the new suggestions.
 3. CP3 (after the user's go-ahead): scorer comparison (E2) and abstention baseline (E4) on development data,
    selected-category mode with permissions through the queue, "Belongs to" / "Also belongs to", primary
    replacement and edited-copy protection.

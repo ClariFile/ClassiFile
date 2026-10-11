@@ -128,8 +128,9 @@ def test_decision_page_two_step_filing_toast_and_details(app, samples, make_org)
     assert cst.line.text() == f"Suggested new category: {cover}"
     assert cst.primary.text() == "Create && file" and cst.choose.isVisible() and cst.pending.isVisible()
     cst.choose.click()                                              # expands in place
-    assert cst.expanded.isVisible() and cst.sugg.count() == 3 and cst.more_button.isVisible()
-    assert f"{cover}\n    on the cover" in [cst.sugg.item(i).text() for i in range(3)]
+    # two names now: lines that only repeat on some pages are under "More"
+    assert cst.expanded.isVisible() and cst.sugg.count() == 2 and cst.more_button.isVisible()
+    assert f"{cover}\n    on the cover" in [cst.sugg.item(i).text() for i in range(2)]
     assert cst.field.text() == cover and cst.field.property("filled") is True
     cst.more_button.click()
     nde = next(i for i in range(cst.sugg.count()) if cst.sugg.item(i).text().startswith(course))

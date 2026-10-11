@@ -127,3 +127,18 @@ def test_audit_terms_matching(tmp_path):
     assert audit_terms.hits("a secret title here", patterns) == ["Secret Title"]   # case-insensitive
     assert audit_terms.hits("code AB-12", patterns) == ["re:AB-[0-9]+"]
     assert audit_terms.hits("nothing to see", patterns) == []
+
+
+def test_name_stats_scores_top_names_against_a_saved_review(tmp_path):
+    from classifile.reader import DocumentRecord
+    from tools import name_stats
+
+    rec = DocumentRecord(format="pdf", unit="page", unit_count=3, metadata={}, template_lines=[], recurring_lines=[],
+                         running_lines=[],
+                         first_page_lines=["Signal Representation", "Sampling Theorem", "Fourier Series"])
+    good, bad = tmp_path / "good.csv", tmp_path / "bad.csv"
+    good.write_text("file,name,kind\nfolder/x.pdf,signal representation,good\n", encoding="utf-8-sig")
+    bad.write_text("file,rank,name,reason,type\nx.pdf,2,Sampling Theorem,on the cover,subtopic\n", encoding="utf-8-sig")
+    c = name_stats.score([("x.pdf", rec)], name_stats.judged(good), name_stats.judged(bad))
+    assert c["files with a good name first"] == c["top-3 names: good"] == 1
+    assert c["top-3 names: not good"] == c["top-3 names: never judged"] == 1

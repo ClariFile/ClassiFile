@@ -3,23 +3,27 @@
 Usage:
   python -m tools.name_stats read <folder>... --cache <file.pkl>   read copies once (OCR on) and cache the records
   python -m tools.name_stats count --cache <file.pkl>               count problems in each file's top three names
+  python -m tools.name_stats score --cache <file.pkl>               top three names against the saved name review
+                                   [--good data/acceptable_names.csv] [--not-good data/name_review.not_good.csv]
 
 The cache holds extracted text: keep it in an ignored folder such as data\\ or test-output\\. It is a pickle
 written by this tool and only ever read back by it; never point --cache at a file from anywhere else.
 """
 import argparse
+import csv
 import pickle
 import re
 import shutil
 import sys
 import tempfile
-from collections import Counter
+from collections import Counter, defaultdict
 from pathlib import Path
 
-from classifile.analysis.candidates import analyze, is_organisation_line, top_names
+from classifile.analysis.candidates import analyze, is_organisation_line, name_key, top_names
 from classifile.reader import READERS, read_document
 from tools import refuse_final_eval
 
+DATA = Path(__file__).resolve().parent.parent / "data"
 HONORIFIC = re.compile(r"^(dr|prof|professor|mr|mrs|ms|miss|daw|u|sir|madam)\.?\s", re.I)
 INSTANCE_WORD = re.compile(r"\b(lecture|chapter|week|lab|unit|part)\b\W*\d", re.I)
 GENERIC = {"outline", "contents", "table of contents", "introduction", "summary", "conclusion", "conclusions",
@@ -63,6 +67,30 @@ def count(records):
     return c
 
 
+def judged(path):
+    """{file name: {name keys}} from a saved review sheet with file and name columns."""
+    out = defaultdict(set)
+    with open(path, newline="", encoding="utf-8-sig") as f:
+        for r in csv.DictReader(f):
+            out[Path(r["file"].replace("\\", "/")).name].add(name_key(r["name"]))
+    return out
+
+
+def score(records, good, not_good):
+    """Each file's top three names against the names judged in the name review. Counts on development data."""
+    c = Counter()
+    for file_name, rec in records:
+        keys = [name_key(s.name) for s in top_names(analyze(rec, file_name).suggestions)] if rec else []
+        ok, bad = good.get(file_name, set()), not_good.get(file_name, set())
+        c["files"] += 1
+        c["files with a good name in the top three"] += any(k in ok for k in keys)
+        c["files with a good name first"] += bool(keys) and keys[0] in ok
+        c["top-3 names: good"] += sum(k in ok for k in keys)
+        c["top-3 names: not good"] += sum(k in bad and k not in ok for k in keys)
+        c["top-3 names: never judged"] += sum(k not in ok and k not in bad for k in keys)
+    return c
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -71,6 +99,10 @@ def main(argv=None):
     rd.add_argument("--cache", type=Path, required=True)
     ct = sub.add_parser("count")
     ct.add_argument("--cache", type=Path, required=True)
+    sc = sub.add_parser("score")
+    sc.add_argument("--cache", type=Path, required=True)
+    sc.add_argument("--good", type=Path, default=DATA / "acceptable_names.csv")
+    sc.add_argument("--not-good", type=Path, default=DATA / "name_review.not_good.csv")
     a = ap.parse_args(argv)
     if a.cmd == "read":
         records = []
@@ -86,7 +118,9 @@ def main(argv=None):
         a.cache.write_bytes(pickle.dumps(records))
         print(f"{len(records)} records cached")
     else:
-        for k, v in sorted(count(pickle.loads(a.cache.read_bytes())).items()):
+        records = pickle.loads(a.cache.read_bytes())
+        result = count(records) if a.cmd == "count" else score(records, judged(a.good), judged(a.not_good))
+        for k, v in sorted(result.items()):
             print(f"{k}: {v}")
 
 

@@ -4,7 +4,8 @@ Evidence weights are simple, provisional and documented here (E6/E7 revisit them
   first_page 2, template 2, recurring 2 (a template line is not also counted as recurring),
   running 2 (DOCX/ODT headers and footers, PPTX master and layout text),
   metadata_title 1, metadata_subject 1, filename 1.
-"first_page" is the first page or slide, or the opening lines of a DOCX/ODT before its first page break.
+"first_page" is the first page or slide (its first six qualifying lines), or the first qualifying opening line of
+a DOCX/ODT: those have no cover page, and the lines after the first are headings and body text.
 A suggestion's score is the sum of the weights of its distinct sources. Scores are ranking aids,
 not probabilities. Equal scores mean comparable evidence: the analysis does not pick a winner.
 Organisation lines (University, Faculty, Department, School, College, Institute) describe the publisher, not the
@@ -20,19 +21,22 @@ Names must be clean and short, never cut-off sentences (provisional rules, revis
   - when nothing on the cover, in headers or in the metadata qualifies, key phrases of the text (native and
     cleaned OCR text) are suggested;
   - rejected: unbalanced brackets or quotes, and names that are only a generic section word (Outline,
-    Introduction, Summary, ...); "Lecture", "Chapter", "Week", "Lab", "Unit" or "Part" with a number in any form
-    (also "Lecture (5") is instance-level;
+    Introduction, Summary, Example, Solution, ...); "Lecture", "Chapter", "Week", "Lab", "Unit" or "Part" with a
+    number in any form (also "Lecture (5") is instance-level; a bare code (capital letters and digits, such as
+    "ABC-1234"), a line with an IP address, quoted data, and an academic rank alone ("Associate Professor");
   - demoted below the top three (shown under "More"): people's names (the Author metadata, a title or honorific
-    such as Dr., Prof., Daw or U, or a line next to "Lecturer", "Presented by", "Prepared by", "Instructor") and
-    institution lines.
+    such as Dr., Prof., Daw or U, or a line next to "Lecturer", "Presented by", "Prepared by", "Instructor"),
+    institution lines, and lines whose only evidence is repeating on some pages. Those are mostly section
+    headings; their score is unchanged, so this does not settle which self-description is dominant (E7).
 """
 import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-ANALYZER_VERSION = "rules-5"
+ANALYZER_VERSION = "rules-6"
 WEIGHTS = {"keyphrase": 1, "first_page": 2, "template": 2, "recurring": 2, "running": 2, "metadata_title": 1, "metadata_subject": 1, "filename": 1}
 FIRST_PAGE_LINES = 6    # only the first few qualifying first-page lines are candidates
+FLOW_START_LINES = 1    # DOCX/ODT have no cover page: after the first qualifying line come headings and body text
 MAX_SUGGESTIONS = 12
 MAX_NAME_CHARS = 80
 MAX_NAME_WORDS = 8
@@ -66,20 +70,22 @@ _BOILERPLATE = re.compile(
     r"^(untitled|document\s*\d*|presentation\s*\d*|slide\s*\d+|microsoft (word|powerpoint|excel)\b.*)$"
     r"|^(\S+\s+){0,3}\S*power\s*point\S*(\s+\S+){0,3}$", re.I)
 
-_BULLETS = re.compile(r"[-]|^[\s•▪●◦·*\-–—>]+")
+_BULLETS = re.compile(r"[-]|^[\s•▪●◦·■□✓➢*\-–—>]+")
 # Questions, sentences and code/command lines are not names. "#" only counts after a digit or ")",
 # so "C#" survives while "R1#" and "(config)#" do not.
-_NOT_A_NAME = re.compile(r"\?$|^(\S+\s+){3,}.*\.$|[<>{};=$]|[\d)]#")
+_NOT_A_NAME = re.compile(r"\?$|^(\S+\s+){3,}.*\.$|[<>{};=$]|[\d)]#"
+                         r"|^[A-Z]{2,6}-?\d{3,6}$|\b\d{1,3}(\.\d{1,3}){3}\b|^[\"“']")  # codes, IPs, quoted data
 _ORGANISATION = re.compile(
     r"\b(university|faculty|department|school|college|institute)\s+of\b"
     r"|\b(university|college|institute|school)$|^(the\s+)?(university|faculty|department)\b", re.I)
 _HONORIFIC = re.compile(r"^(?i:dr|prof|professor|mr|mrs|ms|miss|daw|sir)\.?\s+\S|^U\s+[A-Z]")
 _ROLE = re.compile(r"\b(lecturer|presented by|prepared by|submitted by|supervised by|instructor|tutor)\b", re.I)
-_ROLE_ONLY = re.compile(r"^\W*(lecturer|presented by|prepared by|submitted by|supervised by|instructor|tutor)\W*$",
-                        re.I)
+_ROLE_ONLY = re.compile(r"^\W*(lecturer|presented by|prepared by|submitted by|supervised by|instructor|tutor"
+                        r"|(associate |assistant )?professor)\W*$", re.I)
 GENERIC_SECTIONS = {"outline", "contents", "table of contents", "introduction", "summary", "conclusion",
                     "conclusions", "references", "exercises", "exercise", "quiz", "quizzes", "questions", "answers",
-                    "agenda", "objectives"}
+                    "agenda", "objectives", "example", "examples", "solution", "solutions", "output",
+                    "expected output", "sample output", "advantages", "disadvantages"}
 _CONNECTOR_END = re.compile(
     r"(\b(and|of|the|to|for|with|a|an|in|on|or|by|from|at|as|into|than|that|which)|,)$", re.I)
 _SENTENCE_VERB = re.compile(r"\s(is|are|was|were)\s", re.I)
@@ -99,7 +105,7 @@ class Suggestion:
     name: str
     score: int
     evidence: list
-    demoted: str | None = None  # "person" or "institution": never in the top three, only under "More"
+    demoted: str | None = None  # "person", "institution" or "repeated": never in the top three, only under "More"
 
 
 @dataclass
@@ -213,7 +219,7 @@ def _clean(text, source, markers):
     if len(letters) < 2 or len(s) > MAX_NAME_CHARS or len(s.split()) > MAX_NAME_WORDS:
         return None
     # ponytail: a lowercase start marks a body fragment ("network", "ports using ..."); titles rarely start lowercase.
-    if letters[0].islower():
+    if letters[0].islower() or _NOT_A_NAME.search(s):  # again: trimming can leave only a code ("ABC-1234 L2")
         return None
     return s
 
@@ -237,6 +243,7 @@ def analyze(record, file_name):
     cover = _join_wrapped(record.first_page_lines)
     author = " ".join(str(record.metadata.get("author") or "").split())
     people = _people(cover, author)
+    limit = FLOW_START_LINES if record.unit == "block" else FIRST_PAGE_LINES
     for line in cover:
         if _MENTION_HEADING.match(line):
             # ponytail: a mention heading covers the rest of page 1; per-block scoping when layout is recorded.
@@ -244,7 +251,7 @@ def analyze(record, file_name):
         if in_mention_block or _MENTION_LINE.match(line):
             mentions.append({"text": line, "source": "first_page", "page": 1})
             continue
-        if taken < FIRST_PAGE_LINES and _clean(line, "first_page", []):
+        if taken < limit and _clean(line, "first_page", []):
             add(line, "first_page", [1])
             taken += 1
         else:
@@ -273,7 +280,8 @@ def analyze(record, file_name):
 
     def mark(s):
         s.demoted = ("person" if _is_person(s.name, people, author)
-                     else "institution" if is_organisation_line(s.name) else None)
+                     else "institution" if is_organisation_line(s.name)
+                     else "repeated" if [e.source for e in s.evidence] == ["recurring"] else None)
 
     for s in found.values():
         mark(s)
