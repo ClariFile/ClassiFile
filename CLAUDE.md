@@ -21,6 +21,7 @@ The record above is authoritative.
 4. **Be careful with deletions.**
    - Never delete a file the app did not create and record.
    - Never delete or overwrite an app copy whose hash has changed (the user may have edited it).
+   - Ask before deleting any file the user put in the project folder (for example under `data\`), even an exact duplicate.
 5. **No network calls at runtime.** Install dependencies during setup only, with the user's approval.
 6. **No LLMs, embeddings, clustering or extra ML libraries** unless the record allows them for the current checkpoint.
 7. **Report results honestly.** Never present similarity scores or confidences as probabilities, and never claim accuracy from the six sample PDFs.
@@ -66,6 +67,7 @@ Run from the project folder (Windows, Python 3.11+; the venv uses 3.12).
 - Name review: `.venv\Scripts\python -m tools.name_review make <folder>...`, label with `tools.label_window --names`, count with `tools.name_review check`
 - The owner's grouping of development files, from the catalog (read-only): `.venv\Scripts\python -m tools.grouping <folder>...` (prints file and category names: keep the output local)
 - Inventory labels, one file at a time: `.venv\Scripts\python -m tools.label_inventory [data\inventory_incoming.csv] [--folder data\incoming]`
+- Labels again after a split (files shown from their split folders, for the owner): `.venv\Scripts\python -m tools.label_inventory --splits data\splits_incoming.csv [--only "<label>"]`
 - Window renders for layout checks: `.venv\Scripts\python -m tools.render_window [--size 1536x864] [--scale 1.25] [--out data]` (dark-theme PNGs: nine views, or five scaled views with `--scale`)
 - OCR needs Tesseract (`C:\Program Files\Tesseract-OCR`, or `TESSDATA_PREFIX`). Tests run OCR only when marked `ocr`; others set `CLASSIFILE_OCR=off`.
 - Apply a split: `.venv\Scripts\python -m tools.apply_split data\splits.csv --from <folder>` (moves the files into `data\development`, `data\validation` and `data\final-eval`; all or nothing)

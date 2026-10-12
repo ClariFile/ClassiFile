@@ -1,6 +1,6 @@
 # Decision Record — ClassiFile (Offline Document Organizer)
 
-Version 2.0 · 2026-10-12
+Version 2.1 · 2026-10-12
 
 **Names**
 - **ClariFile:** the suite.
@@ -290,6 +290,12 @@ Each experiment lists its alternatives, data, measurements, what decides it, and
 - Measure: over-merging and fragmentation separately, plus co-membership precision and recall.
 - Decides: the candidate that best balances both, on both batches, becomes the documented policy.
 - Default: create categories only from strong self-descriptions; everything else stays pending.
+- Result (development data, 2.1): the user regrouped the development files into subject folders. 32 of the 34 files are filed, in 8 categories: 80 pairs of documents the user keeps together. For 28 of the 32 files the category name was typed by the user, not taken from a suggestion.
+  - Every name-based stand-in policy (top suggestion; cover or opening line; repeated line; repeated, else cover, else top; file name) put no two documents together: no over-merging, and all 80 pairs fragmented (placed apart or left pending).
+  - Upper bound: putting together every pair of documents that shares any suggested name keeps 8 of the 80 pairs and over-merges 4.
+  - No name-based policy reproduces the user's grouping, because the folders are subject names that usually are not written in the documents.
+  - So CP3 (matching documents to the user's existing categories by their content) comes first, and CP4 needs a plan for naming new subjects. No rule was changed.
+  - These counts describe development data and the stored suggestions (rules-7), compared with stand-in policies; the documented policy is not built. They are not accuracy estimates.
 
 **E2 Primary scorer**
 - Alternatives: nearest centroid, logistic regression, kNN (word TF-IDF).
@@ -468,3 +474,4 @@ Partial checkpoints are not the completed v1. Evaluation runs alongside developm
 - **1.8 (2026-10-08):** B4: name review result on development data (21 of 34 files with a good name in the top three; 3 better names typed); the acceptable names are kept in `data\acceptable_names.csv` outside the repository, not in this record. Authorized by the user.
 - **1.9 (2026-10-08):** neutral wording before the first push: the sample with conflicting identities (B1) is described instead of named by its course code. No requirement or decision changed. File names, course codes, people, institutions and titles from the user's documents stay out of tracked files; tests refer to development files by neutral IDs through a local map in `data\`. Authorized by the user.
 - **2.0 (2026-10-12):** regrouping and naming, after the first filing of the development files gave one category per document. B5: Move to… (primary replacement, recorded as user-corrected), Rename category and Delete category (empty ones only), with the question about emptied categories; no merge and no aliases. D/CP3: "Belongs to" brought forward as Move to…; F: rename and delete of empty categories no longer deferred. B2: no one-click category creation once categories exist. B1: file names never suggest a category and count only as weak support for what the content says. A11: SummarEase summaries come from the content, never the file name. Authorized by the user.
+- **2.1 (2026-10-12):** E1: result on development data recorded. No name-based policy reproduces the user's regrouped library (all 80 kept-together pairs fragmented; the shared-name upper bound keeps 8 and over-merges 4), because the folders are subject names that usually are not written in the documents. CP3 (matching to existing categories by content) comes first; CP4 needs a plan for naming new subjects. No rule changed. Authorized by the user.

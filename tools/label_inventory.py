@@ -1,6 +1,7 @@
 """Fill in the primary_label column of an inventory, one file at a time (instead of a spreadsheet program).
 
 Usage: python -m tools.label_inventory [data/inventory_incoming.csv] [--folder data/incoming] [--catalog PATH]
+       python -m tools.label_inventory [data/inventory_incoming.csv] --splits data/splits_incoming.csv [--only LABEL]
 
 Shows the file's name, its pages (a picture of each page, drawn for the owner to look at: no text is taken from
 the file and nothing about it is stored) and a category field listing the categories in ClassiFile's catalog and
@@ -9,7 +10,12 @@ the labels given so far, with counts; type to filter, or type a new name and cho
 Enter or "Save & next" writes the label into the inventory CSV at once, so labelling can stop and continue later;
 it starts at the first file without a label. Only the primary_label column changes. The CSV as it was before the
 first label is kept beside it as <name>.before-labels.csv. The catalog is opened read-only; data/final-eval is
-refused.
+refused as a folder.
+
+After a split the files are in the split's folders: --splits finds each file where the split put it, and --only
+shows just the files the split recorded under one label, to give them other labels (it starts at the first file
+that still has that label). This shows the owner pages of validation and final-evaluation files too: labels are
+the owner's to give. The split itself is not redone here.
 """
 import argparse
 import csv
@@ -28,6 +34,7 @@ from classifile.app import make_app
 from classifile.app.widgets import GROUP, PAD, STYLE, CategoryPicker, ElidedLabel, Preview, box
 from classifile.catalog.db import default_data_dir
 from tools import refuse_final_eval
+from tools.apply_split import FOLDERS
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_SHEET = ROOT / "data" / "inventory_incoming.csv"
@@ -67,11 +74,21 @@ def write_sheet(path, columns, rows):
     os.replace(temp, path)
 
 
+def split_paths(splits, only=None, folders=FOLDERS):
+    """{relative_path: where the split put the file}, for every row or just those recorded under one label."""
+    with open(splits, newline="", encoding="utf-8-sig") as f:
+        return {r["relative_path"]: Path(folders[r["split"]]) / r["relative_path"] for r in csv.DictReader(f)
+                if only is None or r["primary_label"].strip() == only}
+
+
 class LabelInventoryWindow(QWidget):
-    def __init__(self, sheet, folder, categories=None):
+    def __init__(self, sheet, folder, categories=None, paths=None, redo=None):
+        """paths: {relative_path: where the file is now}; given, only those files are shown. redo: the label
+        being replaced, so a file that still has it counts as not done."""
         super().__init__()
-        self.sheet, self.folder = Path(sheet), Path(folder)
-        self.columns, self.rows = read_sheet(self.sheet)
+        self.sheet, self.folder, self.paths, self.redo = Path(sheet), Path(folder), paths, redo
+        self.columns, self.all_rows = read_sheet(self.sheet)
+        self.rows = [r for r in self.all_rows if paths is None or r["relative_path"] in paths]  # the ones shown
         self.categories = dict(categories or {})
         self.recent = []  # labels given in this session, latest first
         self.setWindowTitle("ClassiFile — inventory labels")
@@ -117,8 +134,17 @@ class LabelInventoryWindow(QWidget):
         h = box(QHBoxLayout(self), PAD, PAD)
         h.addWidget(self.preview, 3)            # the pages on the left, the question on the right
         h.addLayout(v, 2)
-        first = next((i for i, r in enumerate(self.rows) if not r["primary_label"].strip()), len(self.rows))
-        self.show_row(first)
+        self.show_row(self._next_open(0))
+
+    def _open(self, row):
+        return row["primary_label"].strip() in ("", self.redo)
+
+    def _next_open(self, start, otherwise=None):
+        return next((i for i in range(start, len(self.rows)) if self._open(self.rows[i])),
+                    len(self.rows) if otherwise is None else otherwise)
+
+    def path(self, row):
+        return Path(self.paths[row["relative_path"]]) if self.paths else self.folder / row["relative_path"]
 
     def open_path(self, path):
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
@@ -126,17 +152,18 @@ class LabelInventoryWindow(QWidget):
     def open_file(self):
         """The file opens in its default program, for the owner to look at. Nothing here reads it."""
         if self.at < len(self.rows):
-            self.open_path(self.folder / self.rows[self.at]["relative_path"])
+            self.open_path(self.path(self.rows[self.at]))
 
     def _choices(self):
-        given = Counter(r["primary_label"].strip() for r in self.rows if r["primary_label"].strip())
+        given = Counter(r["primary_label"].strip() for r in self.all_rows if r["primary_label"].strip())
         names = {n.casefold(): n for n in list(self.categories) + list(given)}  # one spelling per name
         return [(n, n, self.categories.get(n, 0) + given.get(n, 0)) for n in names.values()]
 
     def show_row(self, index):
         self.at = max(0, min(len(self.rows), index))
-        done = sum(bool(r["primary_label"].strip()) for r in self.rows)
-        self.progress.setText(f"{done} of {len(self.rows)} labelled")
+        done = sum(not self._open(r) for r in self.rows)
+        self.progress.setText(f"{len(self.rows) - done} of {len(self.rows)} still labelled {self.redo}" if self.redo
+                              else f"{done} of {len(self.rows)} labelled")
         finished = self.at >= len(self.rows)
         for w in (self.open_button, self.picker, self.skip_button, self.save_button):
             w.setEnabled(not finished)
@@ -150,8 +177,8 @@ class LabelInventoryWindow(QWidget):
             return
         r = self.rows[self.at]
         self.name.setText(r["file_name"])
-        self.preview.show_document(self.folder / r["relative_path"], [])
-        family = [x["file_name"] for x in self.rows if x["family_id"] and x["family_id"] == r["family_id"] and x is not r]
+        self.preview.show_document(self.path(r), [])
+        family = [x["file_name"] for x in self.all_rows if x["family_id"] and x["family_id"] == r["family_id"] and x is not r]
         facts = [f"File {self.at + 1} of {len(self.rows)}"] + ([f"{r['pages']} page" + ("" if r["pages"] == "1" else "s")] if r.get("pages") else [])
         if family:
             facts.append("same family as " + ", ".join(family[:3]) + (f" and {len(family) - 3} more" if len(family) > 3 else ""))
@@ -169,11 +196,9 @@ class LabelInventoryWindow(QWidget):
             return
         label = choice[2]
         self.rows[self.at]["primary_label"] = label
-        write_sheet(self.sheet, self.columns, self.rows)  # at once: stopping loses nothing
+        write_sheet(self.sheet, self.columns, self.all_rows)  # at once: stopping loses nothing
         self.recent = [label] + [x for x in self.recent if x != label][:4]
-        nxt = next((i for i in range(self.at + 1, len(self.rows)) if not self.rows[i]["primary_label"].strip()),
-                   self.at + 1)
-        self.show_row(nxt)
+        self.show_row(self._next_open(self.at + 1, self.at + 1))
 
 
 def main(argv=None):
@@ -181,12 +206,20 @@ def main(argv=None):
     ap.add_argument("sheet", nargs="?", type=Path, default=DEFAULT_SHEET)
     ap.add_argument("--folder", type=Path, default=DEFAULT_FOLDER, help="the folder the inventory was made from")
     ap.add_argument("--catalog", type=Path, default=default_data_dir() / "catalog.sqlite3")
+    ap.add_argument("--splits", type=Path, help="a split that was applied: each file is shown from its split's folder")
+    ap.add_argument("--only", metavar="LABEL", help="with --splits: only the files the split recorded under this label")
     a = ap.parse_args(argv)
     if not a.sheet.is_file():
         sys.exit(f"No inventory at {a.sheet}. Make one with tools.inventory first.")
-    refuse_final_eval(a.folder)
+    if a.only and not a.splits:
+        sys.exit("--only needs --splits.")
+    paths = split_paths(a.splits, a.only) if a.splits else None
+    if a.splits and not paths:
+        sys.exit(f"No file in {a.splits}" + (f" was recorded under the label {a.only}." if a.only else "."))
+    if not a.splits:
+        refuse_final_eval(a.folder)
     app = make_app(sys.argv[:1])
-    w = LabelInventoryWindow(a.sheet, a.folder, catalog_categories(a.catalog))
+    w = LabelInventoryWindow(a.sheet, a.folder, catalog_categories(a.catalog), paths, a.only)
     w.show()
     code = app.exec()
     w.preview.close_pdf()

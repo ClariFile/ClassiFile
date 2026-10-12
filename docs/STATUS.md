@@ -60,11 +60,12 @@
 - The sidebar keeps its scroll position when it is rebuilt; Details, once switched on, stays on across the list
   pages and says what to do when nothing is selected.
 - `tools.label_inventory`: a window to fill in the labels of an inventory one file at a time (pages shown,
-  the category picker, saved into the CSV after every answer).
+  the category picker, saved into the CSV after every answer). After a split, `--splits` shows each file from
+  its split's folder and `--only <label>` just the files recorded under one label, to give them other labels.
 - `docs/UI_PROPOSAL.md`: measurements and a phased proposal for the next interface pass (nothing built yet).
 - `tools.apply_split`: moves a split's files into `data\development`, `data\validation` and `data\final-eval`,
   all or nothing, never over an existing file.
-- 235 automated tests.
+- 236 automated tests.
 
 ## Development results so far
 
@@ -90,8 +91,8 @@ These counts describe development data only. They are not accuracy estimates.
   accepted as offered. The owner regroups the 34 files into broader folders, roughly one per course or
   subject. The regrouped library is then the reference grouping (G3) for E1. The first filing and both name
   reviews are history only: not labels, not training data.
-- **The regrouped library against grouping policies (E1, 2026-10-12):** 32 of the 34 development files are filed
-  (2 still wait) in 8 categories of 8, 7, 6, 6, 2, 1, 1 and 1 documents: 80 pairs of documents the owner keeps
+- **The regrouped library against grouping policies (E1, 2026-10-12; in the record since 2.1):** 32 of the 34
+  development files are filed (the other 2 are not in the catalog) in 8 categories of 8, 7, 6, 6, 2, 1, 1 and 1 documents: 80 pairs of documents the owner keeps
   together. 28 categories were typed, 2 are a suggestion as shown and 2 part of one. Every stand-in policy (top
   suggestion; cover line; repeated line; repeated, else cover, else top; file name) put no two documents
   together: over-merging 0, and all 80 pairs fragmented (placed apart or left pending). Even putting together
@@ -155,7 +156,8 @@ These counts describe development data only. They are not accuracy estimates.
 
 ## Next
 
-1. Discuss the E1 result with the owner before any rule change.
+1. The owner relabels the 85 files under the one broad label into real subjects
+   (`tools.label_inventory --splits ... --only ...`). The split is not redone until the owner says so.
 2. Interface: Phase 1 of `docs/UI_PROPOSAL.md` (responsiveness and search), on the owner's go-ahead. The five
    decisions are made and recorded there.
 3. CP3 (after the user's go-ahead): scorer comparison (E2) and abstention baseline (E4) on development data,

@@ -281,3 +281,54 @@ def test_inventory_labels_are_saved_at_once_and_resume(app, tmp_path):
     old = list(csv.DictReader(original.decode("utf-8-sig").splitlines()))
     assert columns == inventory.COLUMNS and [{**r, "primary_label": ""} for r in saved] == old   # only the labels
     assert {p.name: (p.read_bytes(), p.stat().st_mtime_ns) for p in folder.iterdir()} == before  # files untouched
+
+
+def test_inventory_relabelling_after_a_split(app, tmp_path):
+    import csv
+
+    import pymupdf
+
+    from tools.label_inventory import LabelInventoryWindow, read_sheet, split_paths
+
+    folders = {s: tmp_path / s for s in ("development", "validation", "final_evaluation")}
+    files = [("a.pdf", "Broad", "development"), ("b.pdf", "Optics", "development"), ("c.pdf", "Broad", "validation"),
+             ("d.pdf", "Broad", "final_evaluation")]
+    for name, _, split in files:
+        folders[split].mkdir(exist_ok=True)
+        doc = pymupdf.open()
+        doc.new_page()
+        doc.save(folders[split] / name)
+        doc.close()
+    sheet, splits = tmp_path / "inv.csv", tmp_path / "splits.csv"
+    for path, columns in ((sheet, ["relative_path", "file_name", "pages", "primary_label", "family_id", "notes"]),
+                          (splits, ["relative_path", "sha256", "family_id", "primary_label", "split"])):
+        with open(path, "w", newline="", encoding="utf-8-sig") as f:
+            w = csv.DictWriter(f, fieldnames=columns, restval="", extrasaction="ignore")
+            w.writeheader()
+            w.writerows({"relative_path": n, "file_name": n, "primary_label": label, "split": split}
+                        for n, label, split in files)
+    assert split_paths(splits, folders=folders)["b.pdf"] == folders["development"] / "b.pdf"
+    paths = split_paths(splits, "Broad", folders)
+    assert sorted(paths) == ["a.pdf", "c.pdf", "d.pdf"]             # the files the split recorded under that label
+
+    w = LabelInventoryWindow(sheet, tmp_path / "gone", {}, paths, "Broad")
+    w.show()
+    opened = []
+    w.open_path = opened.append
+    assert w.name.full == "a.pdf" and w.progress.text() == "3 of 3 still labelled Broad"
+    assert w.preview.page_label.text() == "Page 1 of 1"            # found in its split's folder
+    w.open_button.click()
+    assert opened == [folders["development"] / "a.pdf"]
+    w.picker.field.setText("Optics")
+    QTest.keyClick(w.picker.field, Qt.Key_Return)
+    assert w.name.full == "c.pdf" and w.progress.text() == "2 of 3 still labelled Broad"
+    assert [r["primary_label"] for r in read_sheet(sheet)[1]] == ["Optics", "Optics", "Broad", "Broad"]  # every row kept
+    w.preview.close_pdf()
+    w.close()
+
+    again = LabelInventoryWindow(sheet, tmp_path / "gone", {}, paths, "Broad")   # another day: the same three files
+    assert len(again.rows) == 3 and again.name.full == "c.pdf"
+    again.back_button.click()
+    assert again.name.full == "a.pdf" and again.picker.current() == ("existing", "Optics", "Optics")
+    again.preview.close_pdf()
+    again.close()
