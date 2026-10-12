@@ -62,7 +62,9 @@
 - `tools.label_inventory`: a window to fill in the labels of an inventory one file at a time (pages shown,
   the category picker, saved into the CSV after every answer).
 - `docs/UI_PROPOSAL.md`: measurements and a phased proposal for the next interface pass (nothing built yet).
-- 233 automated tests.
+- `tools.apply_split`: moves a split's files into `data\development`, `data\validation` and `data\final-eval`,
+  all or nothing, never over an existing file.
+- 235 automated tests.
 
 ## Development results so far
 
@@ -88,7 +90,23 @@ These counts describe development data only. They are not accuracy estimates.
   accepted as offered. The owner regroups the 34 files into broader folders, roughly one per course or
   subject. The regrouped library is then the reference grouping (G3) for E1. The first filing and both name
   reviews are history only: not labels, not training data.
-- **Incoming files:** 104 PDFs in `data\incoming` (one flat folder), inventoried in
+- **The regrouped library against grouping policies (E1, 2026-10-12):** 32 of the 34 development files are filed
+  (2 still wait) in 8 categories of 8, 7, 6, 6, 2, 1, 1 and 1 documents: 80 pairs of documents the owner keeps
+  together. 28 categories were typed, 2 are a suggestion as shown and 2 part of one. Every stand-in policy (top
+  suggestion; cover line; repeated line; repeated, else cover, else top; file name) put no two documents
+  together: over-merging 0, and all 80 pairs fragmented (placed apart or left pending). Even putting together
+  every pair that shares any suggested name keeps only 8 of the 80 pairs and over-merges 4. The suggested names
+  are lesson-level; the owner's folders are subject-level and mostly not written in the documents. Names found
+  in a document cannot produce this grouping; matching against the owner's existing categories (CP3) has to.
+  The suggestions compared are the stored ones (rules-7). No rule was changed.
+- **Incoming files, split (2026-10-12):** the owner labelled all 104 (6 labels, all spelled as the catalog's
+  categories; one label holds 86 files). 3 files were byte-for-byte copies of development files and were
+  deleted from `data\incoming` with the owner's leave. The other 101 files (89 families) were split by family
+  50/25/25 (seed 20261007): development 52 files (45 families) in `data\development`, validation 26 (22) in
+  `data\validation`, final evaluation 23 (22) in `data\final-eval`. No family is in two splits; no two
+  families share page text. The 9 families with several files are lectures sharing a cover page, kept together.
+  The small labels fell unevenly (two labels have no development file). Record: `data\splits_incoming.csv`.
+- **Incoming files, inventory:** 104 PDFs in `data\incoming` (one flat folder), inventoried in
   `data\inventory_incoming.csv`. Suggested families: 92, of which 9 hold several files (21 files) because
   their first page reads the same; no two files have the same bytes; 3 files look like versions of development
   files and are marked to join development. Labels are empty (no subfolders). Suggestions for the owner to
@@ -137,11 +155,9 @@ These counts describe development data only. They are not accuracy estimates.
 
 ## Next
 
-1. The owner regroups the 34 development files with Move to… (and files the two still waiting). Then
-   `tools.grouping` reports the reference grouping against the grouping policies (E1).
-2. The owner fills in the labels in `data\inventory_incoming.csv` (with `tools.label_inventory`), reviews the suggested families and gives
-   the split proportions. Then: split by family, move the final-evaluation files to `data\final-eval\` (never
-   opened until the final evaluation), keep validation separate; only development files are opened.
+1. Discuss the E1 result with the owner before any rule change.
+2. Interface: Phase 1 of `docs/UI_PROPOSAL.md` (responsiveness and search), on the owner's go-ahead. The five
+   decisions are made and recorded there.
 3. CP3 (after the user's go-ahead): scorer comparison (E2) and abstention baseline (E4) on development data,
    selected-category mode with permissions through the queue, "Belongs to" / "Also belongs to", primary
    replacement and edited-copy protection.

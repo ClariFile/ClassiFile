@@ -68,7 +68,9 @@ Run from the project folder (Windows, Python 3.11+; the venv uses 3.12).
 - Inventory labels, one file at a time: `.venv\Scripts\python -m tools.label_inventory [data\inventory_incoming.csv] [--folder data\incoming]`
 - Window renders for layout checks: `.venv\Scripts\python -m tools.render_window [--size 1536x864] [--scale 1.25] [--out data]` (dark-theme PNGs: nine views, or five scaled views with `--scale`)
 - OCR needs Tesseract (`C:\Program Files\Tesseract-OCR`, or `TESSDATA_PREFIX`). Tests run OCR only when marked `ocr`; others set `CLASSIFILE_OCR=off`.
+- Apply a split: `.venv\Scripts\python -m tools.apply_split data\splits.csv --from <folder>` (moves the files into `data\development`, `data\validation` and `data\final-eval`; all or nothing)
 - `data\final-eval\` is the held-out final evaluation: never open, read or test against it until the user says so. The tools refuse it.
+- `data\validation\` is kept apart: not for building or tuning. Development data is `data\development`, `data\real-samples` and the six samples.
 
 The sample fixtures actually live in `document-organizer-claude-handoff/claude-handoff/samples/` (not tracked).
 

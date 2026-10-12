@@ -65,9 +65,10 @@ must repeat the measurement with the same script and report real ones.
 size are fine, and the slowness is our own rebuild-everything code, which would be just as slow in QML. A theme
 library would add a dependency to solve a problem (a consistent look) that one token file solves.
 
-**When to reconsider:** only for a concrete, measured limit, for example an animation you want that Widgets
-cannot do smoothly after Phase 4. Then build one screen (the decision page) in QML as a prototype and compare
-before deciding.
+**When to reconsider:** for a specific visual or interaction requirement that Widgets cannot reasonably deliver,
+or a performance limit measured after optimization. Phase 4 is a natural review point, not a mandatory wait.
+Then show the limitation, build one screen (the decision page) in QML as a prototype, and compare it against
+the improved Widgets version before deciding.
 
 **The strongest argument against this recommendation.** Qt Widgets has a ceiling. Stylesheets cannot animate
 hover or state changes, soft shadows and fluid reflow are laborious, and every card animation must be written by
@@ -230,16 +231,17 @@ Run at the end of every phase that touches the window.
 
 ---
 
-## 8. Decisions I need from you
+## 8. Decisions (the owner's, 2026-10-12)
 
-1. **Sidebar.** May the documents under each category (and the expand arrows) go, leaving category names with
-   counts? The documents are already in the main list; removing them makes the sidebar cheaper and calmer.
-2. **Reduce motion by default.** "Follow Windows" is the polite default, but on this laptop Windows currently
-   reports its animation setting as off, so the app would show no motion until you change one of the two. Follow
-   Windows, or default to motion on?
-3. **Card actions.** May "Leave pending" and "Remove from ClassiFile" move into the ⋯ menu, leaving one main
-   button, "Choose another…" and "Details" on each card?
-4. **Decision page on narrow windows.** Keep details beside the cards with stacked buttons (my recommendation),
-   or let details cover the cards as it does on the list pages?
-5. **Technology.** Confirm staying with PySide6, Qt Widgets and QSS, with QML reconsidered only after Phase 4
-   and only on a measured limit.
+1. **Sidebar.** Categories show their names with counts beside them. The documents under each category, and the
+   expand arrows, go; documents are in the main list.
+2. **Reduce motion.** The default follows Windows. The owner will switch Windows' animation effects on.
+3. **Card actions.** "Leave pending" and "Remove from ClassiFile" move into the ⋯ menu. A card keeps one main
+   button, "Choose another…" and "Details", and those two must look as clean as the main button.
+4. **Decision page on narrow windows.** Details stay beside the cards; the cards stack their buttons.
+5. **Technology.** PySide6, Qt Widgets and QSS stay for the planned improvements. Priorities: consistent
+   styling, responsive layouts and fixing the stalls, with Qt's own animation tools for smooth transitions.
+   QML is reconsidered if a specific visual or interaction requirement turns up that this stack cannot reasonably
+   deliver, or a performance limit is measured after optimization. Phase 4 can be a review point; it is not a
+   mandatory wait. Before any migration is proposed, the limitation is shown and a small QML prototype is
+   compared against the improved Widgets implementation.

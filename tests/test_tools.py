@@ -192,3 +192,39 @@ def test_inventory_prefills_families_as_suggestions(tmp_path):
     assert "joins development" in rows["Algebra copy.pdf"]["notes"] and fam["9.pdf"].startswith("F")
     assert rows["Physics/Optics notes.pdf"]["primary_label"] == "Physics" and rows["Sets.pdf"]["primary_label"] == ""
     assert list(next(iter(rows.values()))) == inventory.COLUMNS                  # nothing else is written
+
+
+def test_shared_names_bound_puts_documents_with_any_common_suggestion_together():
+    from tools import grouping
+
+    s = lambda *names: [{"name": n, "evidence": [], "demoted": None} for n in names]
+    filed = [("a", "X", s("Waves", "Optics")), ("b", "X", s("optics")), ("c", "Y", s("Sets")), ("d", "Y", s())]
+    groups = grouping.shared_names(filed)
+    assert groups["a"] == groups["b"] and len({groups["a"], groups["c"], groups["d"]}) == 3
+
+
+def test_apply_split_moves_everything_or_nothing(tmp_path):
+    import hashlib
+
+    from tools import apply_split
+
+    src = tmp_path / "incoming"
+    src.mkdir()
+    rows = []
+    for name, split in (("a.pdf", "development"), ("b.pdf", "validation"), ("c.pdf", "final_evaluation")):
+        (src / name).write_bytes(name.encode())
+        rows.append({"relative_path": name, "sha256": hashlib.sha256(name.encode()).hexdigest(), "split": split})
+    folders = {k: tmp_path / k for k in ("development", "validation", "final_evaluation")}
+    (folders["final_evaluation"]).mkdir()
+    (folders["final_evaluation"] / "c.pdf").write_bytes(b"already here")
+    with pytest.raises(ValueError, match="already at"):
+        apply_split.apply(rows, src, folders)
+    (folders["final_evaluation"] / "c.pdf").unlink()
+    (src / "b.pdf").write_bytes(b"edited")
+    with pytest.raises(ValueError, match="changed since"):
+        apply_split.apply(rows, src, folders)
+    assert sorted(p.name for p in src.iterdir()) == ["a.pdf", "b.pdf", "c.pdf"]   # nothing moved either time
+    (src / "b.pdf").write_bytes(b"b.pdf")
+    counts = apply_split.apply(rows, src, folders)
+    assert counts == {"development": 1, "validation": 1, "final_evaluation": 1} and list(src.iterdir()) == []
+    assert [(folders[r["split"]] / r["relative_path"]).read_bytes() for r in rows] == [b"a.pdf", b"b.pdf", b"c.pdf"]

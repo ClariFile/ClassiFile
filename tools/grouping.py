@@ -69,6 +69,22 @@ POLICIES = {
 }
 
 
+def shared_names(filed):
+    """A bound, not a policy: documents are put together whenever they share any suggested name at all. No way of
+    picking one suggestion per document can put more of the owner's pairs together than this does."""
+    group, seen = {}, {}
+
+    def find(x):
+        while group.setdefault(x, x) != x:
+            x = group[x]
+        return x
+
+    for name, _, suggestions in filed:
+        for s in suggestions:
+            group[find(name)] = find(seen.setdefault(name_key(s["name"]), name))
+    return {name: find(name) for name, _, _ in filed}
+
+
 def compare(own, policy):
     """Pairs of documents: own and policy map document -> group (policy: None = left pending)."""
     c = Counter()
@@ -134,13 +150,18 @@ def main(argv=None):
         print(f"  {n:3}  {kind} {where}".rstrip())
     own = {name: name_key(cat) for name, cat, _ in filed}
     print("\nPolicies against this grouping (pairs of documents; development data, not accuracy)")
-    for label, pick in POLICIES.items():
-        policy = {name: pick(s) for name, _, s in filed}
+    policies = {label: {name: pick(s) for name, _, s in filed} for label, pick in POLICIES.items()}
+    policies["any shared suggested name (a bound, not a policy)"] = shared_names(filed)
+    for label, policy in policies.items():
         groups = Counter(g for g in policy.values() if g)
         c = compare(own, policy)
-        print(f"  {label}: {len(groups)} groups, {sum(v is None for v in policy.values())} documents left pending; "
-              + "; ".join(f"{k} {c[k]}" for k in ("owner together", "policy together", "both together", "over-merged",
-                                                  "fragmented: placed apart", "fragmented: left pending")))
+        share = lambda part, whole: f"{c[part]} of {c[whole]}" if c[whole] else "none to judge"
+        print(f"  {label}: {len(groups)} groups, {sum(v is None for v in policy.values())} documents left pending\n"
+              f"      over-merging: {c['over-merged']} pairs put together that the owner keeps apart"
+              f" (pairs it puts together that the owner also does: {share('both together', 'policy together')})\n"
+              f"      fragmentation: {c['fragmented: placed apart']} pairs placed apart and"
+              f" {c['fragmented: left pending']} left pending, of the owner's {c['owner together']} pairs"
+              f" (kept together: {share('both together', 'owner together')})")
     return 0
 
 
