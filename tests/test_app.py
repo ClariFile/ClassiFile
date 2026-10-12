@@ -333,7 +333,7 @@ def test_bulk_bar_context_menu_keyboard_and_search(app, samples, make_org):
     assert w.toast.label.text() == "Filed 2 documents in Networking"
     cat = w.org.catalog.category_by_key("networking")
     assert len(w.org.catalog.documents(cat["id"])) == 2 and _cats(w) == {"Networking": "2"}
-    assert {_cell(w, i, 2) for i in range(3)} == {"", "Waiting"}   # no status once filed
+    assert {_cell(w, i, 2) for i in range(3)} == {"Approved", "Waiting"}   # filed by the user's choice
 
     filed = _doc(w, SAMPLE["S2"])
     w.select_docs([filed])

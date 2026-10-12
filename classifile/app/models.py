@@ -67,12 +67,10 @@ class DocumentModel(RowsModel):
 
     def cell(self, r, column, role):
         status = r["shown_status"]
-        filed = status == "filed"
         if role == Qt.DisplayRole:
-            return (r["file_name"], r["category"] or "—", "" if filed else status_word(status), r["date"])[column]
+            return (r["file_name"], r["category"] or "—", status_word(status), r["date"])[column]
         if role == Qt.DecorationRole:
-            return format_icon(r["file_name"]) if column == 0 else status_icon(status) if column == 2 and not filed \
-                else None
+            return format_icon(r["file_name"]) if column == 0 else status_icon(status) if column == 2 else None
         if role == Qt.ToolTipRole:
             return r["file_name"] if column == 0 else (r.get("status_reason") or None) if column == 2 else None
         if role == Qt.SizeHintRole:

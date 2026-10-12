@@ -20,6 +20,7 @@ PRIMARY = "#0F766E"       # primary buttons (white text)
 PRIMARY_HOVER = "#115E59"
 AMBER = "#D97706"         # waiting
 RED = "#DC2626"           # errors
+GREEN = "#16A34A"         # approved: filed in a category the user chose
 VIOLET = "#6C47FF"        # reserved for SummarEase; unused until it exists
 SUPPORTED = ", ".join(e[1:].upper() for e in READERS)
 TYPE_COLOR = {".pdf": "#8E6A6A", ".pptx": "#93785A", ".docx": "#5E7392", ".odt": "#5F8570"}  # muted
@@ -166,7 +167,10 @@ def format_icon(file_name):
     return _ICONS[ext]
 
 
-STATUS = {  # shown only when not filed: an icon plus a word, never colour alone
+STATUS = {  # an icon plus a word, never colour alone
+    # ponytail: every filed document was filed by the user's own choice so far. When automatic filing arrives
+    # (CP4), take this word from the membership's provenance: machine-assigned is not approved.
+    "filed": ("Approved", GREEN, "check"),
     "needs_decision": ("Waiting", AMBER, "dot"),
     "queued": ("Reading", "#9CA3AF", "ring"),
     "reading": ("Reading", "#9CA3AF", "ring"),
@@ -192,6 +196,9 @@ def status_icon(status):
         elif shape == "ring":
             p.setPen(QPen(c, 1.6))
             p.drawEllipse(QRectF(3.5, 3.5, 9, 9))
+        elif shape == "check":
+            p.setPen(QPen(c, 2, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+            p.drawPolyline([QPointF(3.5, 8.5), QPointF(6.8, 11.5), QPointF(12.5, 4.5)])
         else:
             p.setPen(Qt.NoPen)
             p.setBrush(c)

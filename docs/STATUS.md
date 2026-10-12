@@ -69,6 +69,8 @@
   read, five queries each. The sidebar shows category names with counts only. Search matches file name and
   category on every page (Ctrl+F, Esc, "3 of 7", a nothing-found state, cleared on view change).
   Measurements and the acceptance results are in section 9 of the proposal.
+- Status column: a filed document shows "Approved" with a green check (it used to be blank). Every filed
+  document was filed by the owner's choice so far; automatic filing (CP4) will need its own word.
 - `tools.measure_ui` (timings on a made-up catalog) and `tools.check_ui` (the acceptance checks at four window
   sizes and three scalings).
 - `tools.apply_split`: moves a split's files into `data\development`, `data\validation` and `data\final-eval`,
