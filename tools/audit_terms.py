@@ -4,7 +4,8 @@ Usage: python -m tools.audit_terms [--terms data/audit_terms.txt] [--range origi
 
 The term list stays in data/ (not tracked): one term per line, matched case-insensitively; a line starting with
 "re:" is a regular expression; lines starting with "#" are comments. Checked: the content and path of every tracked
-file, and for each commit in --range its message, author and committer (name and email) and its added lines.
+file, and for each commit in --range its message and its added lines. Author and committer lines are not
+checked: commits carry the owner's own git identity, by their decision (2026-10-12).
 Prints each hit as where: term, and exits with 1 when there is any.
 """
 import argparse
@@ -49,8 +50,8 @@ def audit(patterns, rev_range=None):
             found += [(f"{path}:{no}", t) for t in hits(line, patterns)]
     if rev_range:
         for sha in git("rev-list", rev_range).split():
-            meta = git("show", "-s", "--format=%an <%ae>%n%cn <%ce>%n%B", sha)
-            found += [(f"commit {sha[:7]} message/author", t) for t in hits(meta, patterns)]
+            meta = git("show", "-s", "--format=%B", sha)
+            found += [(f"commit {sha[:7]} message", t) for t in hits(meta, patterns)]
             for line in git("show", "--format=", "--unified=0", sha).splitlines():
                 if line.startswith("+") and not line.startswith("+++"):
                     found += [(f"commit {sha[:7]} added line", t) for t in hits(line, patterns)]
