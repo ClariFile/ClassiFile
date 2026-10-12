@@ -74,7 +74,7 @@ These counts describe development data only. They are not accuracy estimates.
     samples fewer pixels, and a picture shown again in a document is read once. Reading the 18 sampled files:
     about 98 s before, 80 s now. The app reads four documents at once (was two).
   - Not taken: OCR at 200 dpi instead of 300 would bring those files to about 59 s and keep about 1% fewer
-    words. The user decides.
+    words. The user keeps 300 dpi (2026-10-12): recognition quality is the bigger problem.
 - **Category names.** The user's ruling (2026-10-12): ClassiFile never decides, creates or changes a document's
   own title or name; it only suggests category names and files documents.
   - rules-6, from the first review: lines whose only evidence is repeating on some pages go under "More" (score
@@ -94,8 +94,11 @@ These counts describe development data only. They are not accuracy estimates.
 
 ## Next
 
-1. OCR: the user says whether 200 dpi is worth about 1% fewer words.
-2. Categories: the user's grouping of the development files (G3); it is also the first data CP3 needs.
+1. Categories: the user files the 34 development files in the app with the categories they would use (G3).
+   Name rules and OCR stay frozen meanwhile.
+2. Then a report on those 34 files only: the user's categories and their sizes; per filing, whether a suggestion
+   was used as it was, in a near form, or a typed name, with the rank used; the candidate organizing policies
+   (E1) against the grouping, over-merging and fragmentation separately. No rule changes before discussing it.
 3. CP3 (after the user's go-ahead): scorer comparison (E2) and abstention baseline (E4) on development data,
    selected-category mode with permissions through the queue, "Belongs to" / "Also belongs to", primary
    replacement and edited-copy protection.
