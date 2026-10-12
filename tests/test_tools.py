@@ -228,3 +228,14 @@ def test_apply_split_moves_everything_or_nothing(tmp_path):
     counts = apply_split.apply(rows, src, folders)
     assert counts == {"development": 1, "validation": 1, "final_evaluation": 1} and list(src.iterdir()) == []
     assert [(folders[r["split"]] / r["relative_path"]).read_bytes() for r in rows] == [b"a.pdf", b"b.pdf", b"c.pdf"]
+
+    # a split made again: files move between the split folders; one that keeps its split is not even read
+    previous = {r["relative_path"]: r["split"] for r in rows}
+    again = [{**rows[0], "split": "final_evaluation"}, {**rows[1], "sha256": "not checked"},
+             {**rows[2], "split": "development"}]
+    counts = apply_split.apply(again, None, folders, previous)
+    assert counts == {"development": 1, "validation": 1, "final_evaluation": 1}
+    assert [(folders[r["split"]] / r["relative_path"]).read_bytes() for r in again] == [b"a.pdf", b"b.pdf", b"c.pdf"]
+    assert sum(len(list(f.iterdir())) for f in folders.values()) == 3
+    with pytest.raises(ValueError, match="not in the previous split"):
+        apply_split.apply(again, None, folders, {})
