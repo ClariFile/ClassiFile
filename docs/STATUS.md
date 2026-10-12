@@ -57,7 +57,12 @@
 - File names never suggest a category (B1): they only support a name the content already gives.
 - `tools.inventory --families [--known <folder>...]` pre-fills family IDs as suggestions.
 - AGPL-3.0 licence file (PyMuPDF is AGPL and the repository is public).
-- 231 automated tests.
+- The sidebar keeps its scroll position when it is rebuilt; Details, once switched on, stays on across the list
+  pages and says what to do when nothing is selected.
+- `tools.label_inventory`: a window to fill in the labels of an inventory one file at a time (pages shown,
+  the category picker, saved into the CSV after every answer).
+- `docs/UI_PROPOSAL.md`: measurements and a phased proposal for the next interface pass (nothing built yet).
+- 233 automated tests.
 
 ## Development results so far
 
@@ -134,7 +139,7 @@ These counts describe development data only. They are not accuracy estimates.
 
 1. The owner regroups the 34 development files with Move to… (and files the two still waiting). Then
    `tools.grouping` reports the reference grouping against the grouping policies (E1).
-2. The owner fills in the labels in `data\inventory_incoming.csv`, reviews the suggested families and gives
+2. The owner fills in the labels in `data\inventory_incoming.csv` (with `tools.label_inventory`), reviews the suggested families and gives
    the split proportions. Then: split by family, move the final-evaluation files to `data\final-eval\` (never
    opened until the final evaluation), keep validation separate; only development files are opened.
 3. CP3 (after the user's go-ahead): scorer comparison (E2) and abstention baseline (E4) on development data,

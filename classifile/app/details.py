@@ -74,11 +74,21 @@ class DetailsPanel(QFrame):
         outer.addWidget(scroll, 1)
         # CP3's "Belongs to" actions will be added here; nothing is shown before they work.
 
+    def show_nothing(self):
+        """Open with no document selected: say what to do."""
+        self.doc_id = None
+        self.title.setText("Details")
+        self.preview.show_document(None, [])
+        self.facts.setText("Select a document to see its pages and details here.")
+        for w in (self.open_button, self.folder_button, self.locate_button, self.locations_section, self.why_section):
+            w.hide()
+
     def show_doc(self, doc_id):
         self.doc_id = doc_id
         d = self.c.document_row(doc_id)
         if d is None:
             return
+        self.locations_section.show()
         self.title.setText(d["file_name"])
         self.preview.show_document(self.c.preview_source(doc_id), self.c.first_lines(doc_id),
                                    "" if d["status"] == "filed" or d["file_name"].lower().endswith(".pdf")

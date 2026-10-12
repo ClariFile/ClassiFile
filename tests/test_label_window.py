@@ -211,3 +211,73 @@ def test_quality_pass_hides_repeated_slide_pictures(tmp_path):
         assert len(s.pictures(str(deck), units[0], ocr_only=True)) == 1       # quality pass: OCR never reads the logo
     finally:
         s.close()
+
+
+def test_inventory_labels_are_saved_at_once_and_resume(app, tmp_path):
+    import csv
+    import sqlite3
+
+    import pymupdf
+
+    from tools import inventory
+    from tools.label_inventory import LabelInventoryWindow, catalog_categories, read_sheet
+
+    folder = tmp_path / "incoming"
+    folder.mkdir()
+    for name in ("a.pdf", "b.pdf", "c.pdf"):
+        doc = pymupdf.open()
+        doc.new_page().insert_text((72, 100), name)
+        doc.new_page()
+        doc.save(folder / name)
+        doc.close()
+    before = {p.name: (p.read_bytes(), p.stat().st_mtime_ns) for p in folder.iterdir()}
+    sheet = tmp_path / "inv.csv"
+    inventory.main([str(folder), "--out", str(sheet), "--families"])
+    original = sheet.read_bytes()
+    db = sqlite3.connect(tmp_path / "catalog.sqlite3")             # a catalog as the app leaves it
+    db.executescript("CREATE TABLE categories (id TEXT, name TEXT, deleted_at TEXT);"
+                     "CREATE TABLE memberships (id INTEGER, category_id TEXT, status TEXT);"
+                     "INSERT INTO categories VALUES ('1', 'Networks', NULL), ('2', 'Gone', 'yesterday');"
+                     "INSERT INTO memberships VALUES (1, '1', 'active'), (2, '1', 'active'), (3, '1', 'superseded');")
+    db.commit()
+    db.close()
+    cats = catalog_categories(tmp_path / "catalog.sqlite3")
+    assert cats == {"Networks": 2} and catalog_categories(tmp_path / "none.sqlite3") == {}
+
+    w = LabelInventoryWindow(sheet, folder, cats)
+    w.show()
+    opened = []
+    w.open_path = opened.append
+    rows = lambda: [w.picker.list.item(i).text() for i in range(w.picker.list.count())]
+    assert w.name.full == "a.pdf" and w.progress.text() == "0 of 3 labelled" and rows() == ["Networks · 2"]
+    assert w.preview.page_label.text() == "Page 1 of 2" and not w.save_button.isEnabled()
+    w.open_button.click()
+    assert opened == [folder / "a.pdf"]
+    w.picker.field.setText("net")                                   # type to filter; Enter saves and moves on
+    QTest.keyClick(w.picker.field, Qt.Key_Return)
+    assert w.name.full == "b.pdf" and w.progress.text() == "1 of 3 labelled"
+    assert [r["primary_label"] for r in read_sheet(sheet)[1]] == ["Networks", "", ""]    # saved at once
+    assert rows() == ["Networks · 3"]
+    w.picker.field.setText("Optics")                                # a new name takes its own row
+    assert w.picker.current() is None
+    QTest.keyClick(w.picker.field, Qt.Key_Down)
+    w.save_button.click()
+    assert w.name.full == "c.pdf" and rows() == ["Optics · 1", "Networks · 3"]           # the latest first
+    w.skip_button.click()
+    assert w.name.full == "That was the last file." and not w.save_button.isEnabled()
+    w.back_button.click()
+    w.back_button.click()
+    assert w.name.full == "b.pdf" and w.picker.current() == ("existing", "Optics", "Optics")  # its label, chosen
+    w.preview.close_pdf()
+    w.close()
+
+    again = LabelInventoryWindow(sheet, folder, cats)               # another day: it continues at the first gap
+    assert again.name.full == "c.pdf" and again.progress.text() == "2 of 3 labelled"
+    again.preview.close_pdf()
+    again.close()
+    columns, saved = read_sheet(sheet)
+    with open(tmp_path / "inv.before-labels.csv", "rb") as f:
+        assert f.read() == original                                 # the sheet as it was is kept
+    old = list(csv.DictReader(original.decode("utf-8-sig").splitlines()))
+    assert columns == inventory.COLUMNS and [{**r, "primary_label": ""} for r in saved] == old   # only the labels
+    assert {p.name: (p.read_bytes(), p.stat().st_mtime_ns) for p in folder.iterdir()} == before  # files untouched

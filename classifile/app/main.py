@@ -12,7 +12,7 @@ from pathlib import Path
 
 from PySide6.QtCore import (
     QCoreApplication, QEasingCurve, QEvent, QItemSelectionModel, QObject, QPoint, QPropertyAnimation, QSize, Qt,
-    QUrl, Signal,
+    QTimer, QUrl, Signal,
 )
 from PySide6.QtGui import QDesktopServices, QIcon
 from PySide6.QtWidgets import (
@@ -211,6 +211,7 @@ class MainWindow(QWidget):
         self.sort.addItems(SORTS)
         self.sort.currentIndexChanged.connect(lambda *_: self._fill_list())
         self.details_toggle = QPushButton("Details")
+        self.details_toggle.setToolTip("Show the selected document's pages and details beside the list (Space)")
         self.details_toggle.setCheckable(True)
         self.details_toggle.toggled.connect(self.set_details_open)
         self.toolbar = QWidget()
@@ -583,6 +584,8 @@ class MainWindow(QWidget):
     def _fill_categories(self):
         cats = self.org.catalog.categories()
         current = self.view[1] if self.view[0] == "category" else None
+        bar = self.cats.verticalScrollBar()
+        at = bar.value()
         self.cats.blockSignals(True)
         self.cats.clear()
         for c in cats:
@@ -604,6 +607,9 @@ class MainWindow(QWidget):
                 node.setSelected(True)
         self.cats.blockSignals(False)
         self.cats_empty.setVisible(not cats)
+        # The list was rebuilt: put it back where the user had scrolled it (now, and once it is laid out again).
+        bar.setValue(at)
+        QTimer.singleShot(0, lambda: bar.setValue(at))
 
     def _fill_list(self, select_docs=None):
         keep = set(select_docs if select_docs is not None else self.selected_ids())
@@ -689,18 +695,22 @@ class MainWindow(QWidget):
             self.bulk_move.setEnabled(any(d["status"] == "filed" for d in docs))
             self.bulk_move.setToolTip("" if self.bulk_move.isEnabled() else "Only filed documents can be moved.")
             self.bulk_remove.setEnabled(any(d["status"] in WAITING for d in docs))
-        if self.details_open and len(ids) == 1:
-            self.details.show_doc(ids[0])
+        if self.details_open and self.stack.currentWidget() is self.table:
+            if len(ids) == 1:
+                self.details.show_doc(ids[0])
+            elif not ids:
+                self.details.show_nothing()
         self._place_details()
 
     def set_details_open(self, open_):
+        """Details (the document's pages and facts) stay on, on every list page, until switched off."""
         ids = self.selected_ids()
-        self.details_open = bool(open_ and ids)
+        self.details_open = bool(open_)
         self.details_toggle.blockSignals(True)
         self.details_toggle.setChecked(self.details_open)
         self.details_toggle.blockSignals(False)
         if self.details_open:
-            self.details.show_doc(ids[0])
+            self.details.show_doc(ids[0]) if ids else self.details.show_nothing()
         self._place_details()
 
     def show_details(self, doc_id):

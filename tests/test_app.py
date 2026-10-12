@@ -9,7 +9,7 @@ from PySide6.QtGui import QDragEnterEvent, QDragLeaveEvent, QDropEvent  # noqa: 
 from PySide6.QtTest import QTest  # noqa: E402
 from PySide6.QtWidgets import QApplication, QLabel  # noqa: E402
 
-from classifile.app.main import ALL, DECIDE, DOC, SETTINGS, MainWindow  # noqa: E402
+from classifile.app.main import ALL, DECIDE, DOC, RECENT, SETTINGS, MainWindow  # noqa: E402
 from classifile.app.reasons import reason_text  # noqa: E402
 from conftest import SAMPLE, EXPECT, source_state  # noqa: E402
 
@@ -786,4 +786,40 @@ def test_move_rename_and_delete_from_the_window(app, samples, make_org):
     assert "Unused" not in [c["name"] for c in w.org.catalog.categories()]
     assert w.toast.label.text() == "Deleted the category."
     assert source_state(samples) == before                         # the originals: untouched throughout
+    _close(w, rec)
+
+
+def test_sidebar_keeps_its_place_and_details_stay_on(app, samples, make_org):
+    w, rec = _window(make_org, [samples / SAMPLE["S4"], samples / SAMPLE["S5"]])
+    _pump(app, lambda: not w.inflight)
+    for n in range(40):
+        w.org.create_category(f"Category {n:02d}")
+    w.refresh()
+    bar = w.cats.verticalScrollBar()
+    _pump(app, lambda: bar.maximum() > 0)
+    bar.setValue(bar.maximum())
+    at = bar.value()
+    w.cats.itemClicked.emit(_category_node(w, "Category 38"), 0)   # a click rebuilds the list
+    for _ in range(10):
+        app.processEvents()
+    assert w.view[0] == "category" and bar.value() == at > 0       # it stays where it was scrolled
+    w.refresh()
+    for _ in range(10):
+        app.processEvents()
+    assert bar.value() == at
+
+    w.show_view(ALL)
+    w.details_toggle.click()                                       # nothing selected: it opens and says what to do
+    assert w.details.isVisible() and w.details.title.full == "Details"
+    assert "Select a document" in w.details.facts.text() and not w.details.locations_section.isVisible()
+    w.select_docs([_doc(w, SAMPLE["S4"])])
+    assert w.details.title.full == SAMPLE["S4"] and w.details.preview.page_label.text() == "Page 1 of 25"
+    assert w.details.locations_section.isVisible()
+    w.show_view(RECENT)                                            # still on, on another page
+    w.select_docs([_doc(w, SAMPLE["S5"])])
+    assert w.details.isVisible() and w.details.title.full == SAMPLE["S5"]
+    w.select_docs([])
+    assert w.details.isVisible() and w.details.title.full == "Details"
+    w.details_toggle.click()
+    assert not w.details.isVisible()
     _close(w, rec)

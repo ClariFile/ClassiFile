@@ -65,6 +65,7 @@ Run from the project folder (Windows, Python 3.11+; the venv uses 3.12).
 - Labelling windows: `.venv\Scripts\python -m tools.label_window` (E8), `... --quality` (OCR quality; sample with `tools.ocr_quality make`, count with `tools.ocr_quality check`)
 - Name review: `.venv\Scripts\python -m tools.name_review make <folder>...`, label with `tools.label_window --names`, count with `tools.name_review check`
 - The owner's grouping of development files, from the catalog (read-only): `.venv\Scripts\python -m tools.grouping <folder>...` (prints file and category names: keep the output local)
+- Inventory labels, one file at a time: `.venv\Scripts\python -m tools.label_inventory [data\inventory_incoming.csv] [--folder data\incoming]`
 - Window renders for layout checks: `.venv\Scripts\python -m tools.render_window [--size 1536x864] [--scale 1.25] [--out data]` (dark-theme PNGs: nine views, or five scaled views with `--scale`)
 - OCR needs Tesseract (`C:\Program Files\Tesseract-OCR`, or `TESSDATA_PREFIX`). Tests run OCR only when marked `ocr`; others set `CLASSIFILE_OCR=off`.
 - `data\final-eval\` is the held-out final evaluation: never open, read or test against it until the user says so. The tools refuse it.
