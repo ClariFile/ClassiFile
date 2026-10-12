@@ -37,7 +37,7 @@
 - Details open beside the "Needs your decision" page (a Details link on each item; the panel slides in from
   the right and the page stays), so a document's pages and its filing buttons are in view together. The
   details panel no longer bounces when a section is opened.
-- 214 automated tests.
+- 215 automated tests.
 
 ## Development results so far
 

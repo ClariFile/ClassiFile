@@ -527,3 +527,45 @@ def test_details_width_does_not_depend_on_scrolling(app, samples, make_org):
     # the bar goes or comes again: the panel bounced when a section was opened.
     assert len(widths) == 1
     _close(w, rec)
+
+
+def test_no_stray_windows_appear(app, samples, make_org, tmp_path):
+    from PySide6.QtCore import QEvent, QObject
+
+    (tmp_path / "src").mkdir()
+    twin = tmp_path / "src" / (SAMPLE["S2"].rsplit(".", 1)[0] + " (handout).pdf")  # groups with S2
+    twin.write_bytes((samples / SAMPLE["S2"]).read_bytes() + b"\n% another copy\n")
+
+    class Watch(QObject):
+        """Records every widget shown as a window of its own (a widget shown before it has a parent is one)."""
+        def __init__(self):
+            super().__init__()
+            self.seen = []
+
+        def eventFilter(self, obj, e):
+            if e.type() == QEvent.Show and obj.isWidgetType() and obj.isWindow():
+                self.seen.append(type(obj).__name__)
+            return False
+
+    watch = Watch()
+    app.installEventFilter(watch)
+    try:
+        w, rec = _window(make_org, [samples / SAMPLE["S2"], samples / SAMPLE["S5"], twin])
+        _pump(app, lambda: not w.inflight)
+        w.review()
+        assert any(i.group for i in w.decision.items)
+        for item in list(w.decision.items):
+            item.choose.click()
+        _item(w, SAMPLE["S5"]).details.click()
+        w.leave_pending([_doc(w, SAMPLE["S5"])])                   # any action redraws the items
+        w.show_view(ALL)
+        w.select_docs([_doc(w, SAMPLE["S5"])])
+        w.set_details_open(True)
+        w.select_docs([d["id"] for d in w.waiting()])              # the bar for several documents
+        w.bulk_file.click()
+        w.show_view(SETTINGS)
+        w.refresh()
+        assert watch.seen == ["MainWindow"]
+    finally:
+        app.removeEventFilter(watch)
+    _close(w, rec)

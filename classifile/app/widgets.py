@@ -59,7 +59,9 @@ QToolButton::menu-indicator {{ image: none; width: 0; }}
 QPushButton#link, QToolButton#link {{ background: transparent; border: none; color: palette(text);
                                       text-decoration: underline; padding: {RELATED}px {RELATED}px; }}
 QToolButton#disclosure {{ background: transparent; border: none; font-weight: 600; padding: {RELATED}px 0; }}
-QToolButton#more {{ border-radius: 6px; min-width: 20px; min-height: 20px; padding: {RELATED}px; }}
+QToolButton#more {{ border: 1px solid rgba(127, 127, 127, 90); border-radius: 6px; font-size: 20px;
+                    font-weight: 700; min-width: 28px; min-height: 20px; max-height: 20px; padding: 3px {RELATED}px; }}
+QToolButton#more:hover {{ background: rgba(127, 127, 127, 40); }}
 QPushButton#icon {{ padding: {RELATED}px 0; min-width: {CONTROL}px; max-width: {CONTROL}px; }}
 QPushButton:focus, QToolButton:focus, QLineEdit:focus, QComboBox:focus {{ outline: none;
                                       border: 2px solid {ICON_TEAL}; }}
@@ -379,7 +381,8 @@ class Preview(QWidget):
         self.page_label.setAlignment(Qt.AlignCenter)
         self.expand = QPushButton("Expand")
         self.expand.clicked.connect(self.expand_requested)
-        self.expand.setVisible(expandable)
+        if not expandable:                      # hide(), never show(): shown without a parent it is a window
+            self.expand.hide()
         self.note = QLabel()
         self.note.setObjectName("secondary")
         self.note.setWordWrap(True)

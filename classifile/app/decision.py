@@ -47,9 +47,9 @@ class DecisionItem(QFrame):
         self.title = ElidedLabel(f"{len(docs)} documents with the same suggestion" if self.group
                                  else first["file_name"])
         self.title.setStyleSheet("font-weight: 600;")
-        head = box(QHBoxLayout())
-        head.addWidget(icon)
-        head.addWidget(self.title, 1)
+        self.head = box(QHBoxLayout())
+        self.head.addWidget(icon)
+        self.head.addWidget(self.title, 100)    # the name takes the room it needs; "more" follows it directly
 
         self.line = QLabel()
         self.line.setWordWrap(True)
@@ -60,7 +60,8 @@ class DecisionItem(QFrame):
             shown = [d["file_name"] for d in docs[:6]]
             more = len(docs) - len(shown)
             self.names.setText(", ".join(shown) + (f" and {more} more" if more else ""))
-        self.names.setVisible(self.group)
+        if not self.group:                      # hide(), never show(): shown without a parent it is a window
+            self.names.hide()
 
         self.primary = QPushButton()
         self.primary.setObjectName("primary")
@@ -83,23 +84,25 @@ class DecisionItem(QFrame):
         self.details.setObjectName("link")
         self.details.setToolTip("Show this document's pages beside this list")
         self.details.clicked.connect(lambda: self.c.show_details(first["id"]))
-        self.details.setVisible(not self.group)
+        if self.group:
+            self.details.hide()
         menu = QMenu(self)
         for d in docs if self.group else ():    # a group: each member's pages
             menu.addAction(f"Details: {d['file_name']}", lambda i=d["id"]: self.c.show_details(i))
         menu.addAction("Remove from ClassiFile", lambda: self.c.remove_docs(self.ids))
         self.more_menu.setMenu(menu)
+        self.head.addWidget(self.more_menu)
+        self.head.addStretch(1)
         actions = box(QHBoxLayout())
         actions.addWidget(self.primary)
         actions.addSpacing(GROUP - RELATED)     # the primary action stands apart from the others
         for w in (self.choose, self.pending, self.remove, self.details):
             actions.addWidget(w)
         actions.addStretch(1)
-        actions.addWidget(self.more_menu)
 
         self.expanded = self._expanded_area(top)
         v = box(QVBoxLayout(self), (0, PANEL, 0, PANEL))
-        v.addLayout(head)
+        v.addLayout(self.head)
         v.addWidget(self.line)
         v.addWidget(self.names)
         v.addSpacing(RELATED)                   # description, then the controls
@@ -250,6 +253,7 @@ class DecisionItem(QFrame):
 
     def resizeEvent(self, e):
         super().resizeEvent(e)
+        self.title.setMaximumWidth(self.title.fontMetrics().horizontalAdvance(self.title.full) + RELATED)
         # The small preview needs room; when the item is narrow the choices get the space (Details shows pages).
         self.preview.setVisible(not self.group and self.width() >= 760)
 
