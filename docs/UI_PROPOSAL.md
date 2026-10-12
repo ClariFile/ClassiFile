@@ -1,6 +1,7 @@
 # ClassiFile interface: proposal for the next pass
 
-2026-10-12 · a proposal only; nothing in the app was changed for it.
+2026-10-12 · the proposal as written before any change. Phase 1 has since been built: section 9 says what was
+done and measured. Phases 2 to 5 are not started.
 
 **The short version.** The app is slow and forgetful in one specific way: whenever anything changes, it throws
 away the whole window's contents and builds them again. That, not the toolkit, is what makes it feel rough.
@@ -245,3 +246,57 @@ Run at the end of every phase that touches the window.
    deliver, or a performance limit is measured after optimization. Phase 4 can be a review point; it is not a
    mandatory wait. Before any migration is proposed, the limitation is shown and a small QML prototype is
    compared against the improved Widgets implementation.
+
+---
+
+## 9. Phase 1 as built (2026-10-12)
+
+**What changed**
+- **Nothing is rebuilt.** `refresh()` still brings the window in line with the catalog, but in place: decision
+  cards are kept while their question is unchanged (`DecisionPage.show_items`), and the document list and the
+  sidebar are models that change only the rows that differ (`classifile/app/models.py`). What is typed, opened,
+  focused, selected or scrolled to stays.
+- **One refresh per document read**, not two; a refresh is five queries whatever the size of the catalog. When
+  many reads end together they are taken one per turn of the event loop, so the mouse and keyboard are answered
+  in between. A background read no longer looks on disk for every waiting original.
+- **Sidebar (decision 1):** category names with counts; no documents under them and no arrows.
+- **Search:** one field per page, also on the decision page. It matches file name and category, shows
+  "3 of 7" while active, says "Nothing here matches …" with a Clear search button, is cleared when the view
+  changes, and reads nothing from the catalog. Ctrl+F puts the cursor in it; Esc clears it, a second Esc closes
+  details. No debounce.
+- Looking up one document is one query (`Catalog.document_row`).
+- Two small things found by the checks and fixed: the list's columns now follow the list's own width (with
+  details beside it at 1280 the list used to scroll sideways), and Esc in a card's field leaves the keyboard on
+  that card.
+
+**Measured** with `tools.measure_ui`, the same script on the code before and after (200 documents, 60 waiting,
+30 categories, 1536×864 off-screen, this laptop; not promises):
+
+| What | Before | After |
+|------|--------|-------|
+| 20 imports while on the decision page | 2,806 cards built; interface busy 32.0 s of 32.7 s; longest stall 26.0 s | 20 cards built; busy 0.5 s of 0.9 s; longest stall 42 ms |
+| Refresh, "Needs your decision" | 510.6 ms, 336 statements | 10.2 ms, 5 statements |
+| Refresh, All documents | 57.7 ms, 99 statements | 8.9 ms, 5 statements |
+| Refresh, a category | 46.1 ms, 99 statements | 11.0 ms, 5 statements |
+| Sidebar | 20.4 ms, 31 statements | 0.4 ms, 2 statements |
+| One search key, median of 9 | 16.2 ms, 2 statements | 0.8 ms, none |
+| One search key, slowest | 24.8 ms | 19.3 ms (the key that halves the list: it is drawn again once) |
+| Text, open panel, cursor and scroll in a card during the imports | lost | kept |
+
+Where this differs from the "after" column of section 1: a search key that changes the list costs one redraw
+(about 19 ms), not 0.2 ms; and adding one card costs about 10 ms, not 2.3 ms, because showing it the first
+time costs more than building it.
+
+**Acceptance checks** (`tools.check_ui`; 100%, 125% and 150% scaling)
+- Pass at every scaling: 1280×720, 1536×864 and 1920×1080 (nothing clipped, no sideways scrolling, buttons
+  fit, 120-character names end in "…" with the full name on hover); 60 categories scroll and keep their
+  place; Details clicked ten times ends matching the last click; typing in a card while 20 documents import;
+  keyboard reach of the search, both lists, details, opening, categories and decision cards.
+- **Fails at every scaling: 1024×640, decision page with details beside it** scrolls sideways by 16 pixels.
+  This is problem 11, unchanged by this phase; decisions 3 and 4 (phase 3) remove it.
+- Not checked by the script: the menu key on a row (it cannot be pressed off-screen); whether focus can be
+  seen (the two lists draw no focus mark of their own); light theme. Not built yet: "Find category…" (phase
+  5), Reduce motion (phase 4).
+
+**Decisions 2 to 4** belong to later phases as planned: Reduce motion (phase 4), the ⋯ menu and stacked buttons
+(phase 3). Decision 5 (stay on Widgets) holds: nothing measured here points at the toolkit.

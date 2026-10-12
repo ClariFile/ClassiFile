@@ -5,7 +5,7 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtCore import QMimeData, QPoint, Qt, QUrl  # noqa: E402
-from PySide6.QtGui import QDragEnterEvent, QDragLeaveEvent, QDropEvent  # noqa: E402
+from PySide6.QtGui import QDragEnterEvent, QDragLeaveEvent, QDropEvent, QKeySequence  # noqa: E402
 from PySide6.QtTest import QTest  # noqa: E402
 from PySide6.QtWidgets import QApplication, QLabel  # noqa: E402
 
@@ -65,7 +65,12 @@ def _doc(w, file_name):
 
 
 def _rows(w):
-    return [w.table.topLevelItem(i).text(0) for i in range(w.table.topLevelItemCount())]
+    return [_cell(w, i, 0) for i in range(w.table.model().rowCount())]
+
+
+def _cell(w, row, column, role=Qt.DisplayRole):
+    """What the document list shows, as the user sees it (after the view, the search and the sort)."""
+    return w.table.model().index(row, column).data(role)
 
 
 def _item(w, title):
@@ -84,9 +89,15 @@ def _pick(picker, text, starts=None):
     return picker.current()
 
 
-def _category_node(w, name):
-    return next(w.cats.topLevelItem(i) for i in range(w.cats.topLevelItemCount())
-                if w.cats.topLevelItem(i).text(0) == name)
+def _cats(w):
+    """The sidebar's categories in the order shown: {name: the count beside it}."""
+    m = w.cats.model()
+    return {m.index(i, 0).data(): m.index(i, 1).data() for i in range(m.rowCount())}
+
+
+def _click_category(w, name):
+    m = w.cats.model()
+    w.cats.clicked.emit(m.index(list(_cats(w)).index(name), 0))
 
 
 def _notices(w):
@@ -134,7 +145,7 @@ def test_decision_page_two_step_filing_toast_and_details(app, samples, make_org)
     assert w.windowTitle() == "ClassiFile — 3 waiting" and w.nav[DECIDE].text() == "Needs your decision"
     assert w.decide_count.text() == "3"
     assert w.notices.items == [("info", "3 documents need your decision.", "Review")]
-    assert w.cats.topLevelItemCount() == 0                          # only categories the user created
+    assert _cats(w) == {}                                           # only categories the user created
 
     w.review()
     assert w.stack.currentWidget() is w.decision and len(w.decision.items) == 3 and not _notices(w)
@@ -161,8 +172,8 @@ def test_decision_page_two_step_filing_toast_and_details(app, samples, make_org)
     assert out.exists() and len(w.decision.items) == 2
     assert w.toast.isVisible() and w.toast.label.text() == f"Filed {SAMPLE['S1']} in {course}"
     assert w.toast.action.text() == "Show"
-    node = _category_node(w, course)
-    assert node.text(1) == "1" and node.childCount() == 1
+    assert _cats(w) == {course: "1"}                                # a name and its count: documents are in the list
+    assert not w.cats.model().hasChildren(w.cats.model().index(0, 0)) and not w.cats.rootIsDecorated()
 
     lec = _item(w, SAMPLE["S3"])                     # a category exists now: no new one with one click
     assert lec.primary.text() == "Choose category…" and not lec.choose.isVisible()
@@ -272,7 +283,7 @@ def test_failed_filing_leaves_nothing_half_done_and_the_error_stays(app, samples
     w, rec = _window(make_org, [original])
     _pump(app, lambda: not w.inflight)
     w.review()
-    w.org.original_missing = lambda doc_id: False                  # it moves between the check and the copy
+    w.org.original_missing = lambda doc_id, source_path=None: False   # it moves between the check and the copy
     original.unlink()
     _item(w, original.name).choose.click()
     item = _item(w, original.name)
@@ -282,7 +293,7 @@ def test_failed_filing_leaves_nothing_half_done_and_the_error_stays(app, samples
     expected = f"The original file is no longer at {original}. Import it again from its new location."
     assert w.notices.items[0] == ("error", f"The new category 'Course Notes' wasn't created, because "
                                   f"{original.name} couldn't be filed. {expected}", "Review")
-    assert w.org.catalog.categories() == [] and w.cats.topLevelItemCount() == 0  # no empty category left
+    assert w.org.catalog.categories() == [] and _cats(w) == {}      # no empty category left
     assert len(w.waiting()) == 1 and not (w.org.output_root / "Course Notes").exists()
     assert not w.toast.isVisible()
     w.show_view(ALL)
@@ -298,7 +309,7 @@ def test_bulk_bar_context_menu_keyboard_and_search(app, samples, make_org):
     w, rec = _window(make_org, [samples / n for n in names])
     _pump(app, lambda: not w.inflight)
     assert sorted(_rows(w)) == sorted(names) and w.page_title.full == "All documents · 3"
-    assert {w.table.topLevelItem(i).text(2) for i in range(3)} == {"Waiting"}   # icon plus a word
+    assert {_cell(w, i, 2) for i in range(3)} == {"Waiting"}       # icon plus a word
     w.search.setText("l-2")                                        # search filters by name
     assert _rows(w) == [SAMPLE["S4"]]
     w.search.clear()
@@ -321,8 +332,8 @@ def test_bulk_bar_context_menu_keyboard_and_search(app, samples, make_org):
     _pump(app, lambda: not w.filing)
     assert w.toast.label.text() == "Filed 2 documents in Networking"
     cat = w.org.catalog.category_by_key("networking")
-    assert len(w.org.catalog.documents(cat["id"])) == 2 and _category_node(w, "Networking").text(1) == "2"
-    assert {w.table.topLevelItem(i).text(2) for i in range(3)} == {"", "Waiting"}  # no status once filed
+    assert len(w.org.catalog.documents(cat["id"])) == 2 and _cats(w) == {"Networking": "2"}
+    assert {_cell(w, i, 2) for i in range(3)} == {"", "Waiting"}   # no status once filed
 
     filed = _doc(w, SAMPLE["S2"])
     w.select_docs([filed])
@@ -357,12 +368,11 @@ def test_remove_waiting_documents(app, samples, make_org):
     _close(w, rec)
 
 
-def test_close_notice_and_remembered_categories(app, samples, make_org):
+def test_close_notice_and_its_setting(app, samples, make_org):
     w, rec = _window(make_org, [samples / SAMPLE["S2"], samples / SAMPLE["S1"]])
     _pump(app, lambda: not w.inflight)
     w.file_docs([_doc(w, SAMPLE["S2"])], "Programming")
     _pump(app, lambda: not w.filing)
-    _category_node(w, "Programming").setExpanded(True)
     rec.close_answer = ("back", False)
     w.close()
     assert w.isVisible() and rec.closes == 1 and w.view[0] == DECIDE  # back to the decisions
@@ -372,7 +382,7 @@ def test_close_notice_and_remembered_categories(app, samples, make_org):
     w2 = MainWindow(w.org, ask_output_root=False)
     rec2 = Recorder(w2)
     w2.show()
-    assert _category_node(w2, "Programming").isExpanded()           # what was expanded is remembered
+    assert _cats(w2) == {"Programming": "1"}
     w2.show_view(SETTINGS)
     assert not w2.close_toggle.isChecked()
     w2.close()
@@ -401,7 +411,7 @@ def test_drop_overlay(app, samples, make_org, tmp_path):
     assert not w.overlay.skipped.isVisible()
     _drag(w, [samples / SAMPLE["S2"]], "drop")
     assert not w.overlay.isVisible() and w.inflight
-    assert _rows(w) == [SAMPLE["S2"]] and w.table.topLevelItem(0).text(2) in ("Reading", "Waiting")
+    assert _rows(w) == [SAMPLE["S2"]] and _cell(w, 0, 2) in ("Reading", "Waiting")
     _pump(app, lambda: not w.inflight)
     assert _rows(w) == [SAMPLE["S2"]]
     _close(w, rec)
@@ -462,12 +472,12 @@ def test_new_category_button_and_empty_hint(app, make_org):
     w.ask_category_name = lambda: "  Course   Notes "
     w.add_category.click()
     assert [c["name"] for c in w.org.catalog.categories()] == ["Course Notes"]
-    assert not w.cats_empty.isVisible() and _category_node(w, "Course Notes").text(1) == "0"
+    assert not w.cats_empty.isVisible() and _cats(w) == {"Course Notes": "0"}
     w.add_category.click()                                         # the same name again is refused
     assert "already exists" in w.toast.label.text() and len(w.org.catalog.categories()) == 1
     w.org.startup()                                                # an empty category the user made stays
     assert len(w.org.catalog.categories()) == 1
-    w.cats.itemClicked.emit(_category_node(w, "Course Notes"), 0)
+    _click_category(w, "Course Notes")
     assert w.view[0] == "category" and w.page_title.full == "Course Notes"
     _close(w, rec)
 
@@ -501,7 +511,7 @@ def test_responsive_breakpoints_and_elided_names(app, samples, make_org):
     assert all(os.path.isfile(c) for c in (CHEVRON_DOWN, CHEVRON_RIGHT)) and "chevron-down" in w.styleSheet()
     w.page_title.resize(60, 20)
     assert w.page_title.text().endswith("…") and w.page_title.toolTip() == "All documents · 1"
-    assert w.table.topLevelItem(0).toolTip(0) == SAMPLE["S5"]
+    assert _cell(w, 0, 0, Qt.ToolTipRole) == SAMPLE["S5"]
     _close(w, rec)
 
 
@@ -767,7 +777,7 @@ def test_move_rename_and_delete_from_the_window(app, samples, make_org):
     rec.new_name = "Networking"
     menu.actions()[0].trigger()
     _pump(app, lambda: not w.moving)
-    assert w.toast.label.text() == "Renamed to Networking." and _category_node(w, "Networking").text(1) == "3"
+    assert w.toast.label.text() == "Renamed to Networking." and _cats(w)["Networking"] == "3"
     assert sorted(p.name for p in (w.org.output_root / "Networking").iterdir()) == sorted(names)
     assert not (w.org.output_root / "Three").exists()
 
@@ -799,7 +809,7 @@ def test_sidebar_keeps_its_place_and_details_stay_on(app, samples, make_org):
     _pump(app, lambda: bar.maximum() > 0)
     bar.setValue(bar.maximum())
     at = bar.value()
-    w.cats.itemClicked.emit(_category_node(w, "Category 38"), 0)   # a click rebuilds the list
+    _click_category(w, "Category 38")
     for _ in range(10):
         app.processEvents()
     assert w.view[0] == "category" and bar.value() == at > 0       # it stays where it was scrolled
@@ -822,4 +832,157 @@ def test_sidebar_keeps_its_place_and_details_stay_on(app, samples, make_org):
     assert w.details.isVisible() and w.details.title.full == "Details"
     w.details_toggle.click()
     assert not w.details.isVisible()
+    _close(w, rec)
+
+
+def test_a_card_in_use_survives_background_reads(app, samples, make_org):
+    from classifile.app import decision
+
+    w, rec = _window(make_org, [samples / SAMPLE["S1"], samples / SAMPLE["S2"]])
+    _pump(app, lambda: not w.inflight)
+    w.org.create_category("Elsewhere")
+    w.review()
+    item = _item(w, SAMPLE["S1"])
+    item.primary.click()                                           # the choices open; something is typed
+    item.picker.field.setText("my draft")
+    item.picker.field.setCursorPosition(3)
+    assert item.picker.field.hasFocus() and item.expanded.isVisible()
+    built, refreshes, make, refresh = [], [], decision.DecisionItem.__init__, w.refresh
+    decision.DecisionItem.__init__ = lambda self, *a, **k: (built.append(1), make(self, *a, **k))[1]
+    w.refresh = lambda *a, **k: (refreshes.append(k), refresh(*a, **k))[1]
+    statements = []
+    w.org.catalog.db.set_trace_callback(statements.append)
+    try:
+        w.import_paths([str(samples / SAMPLE["S3"]), str(samples / SAMPLE["S4"])])
+        _pump(app, lambda: not w.inflight)
+    finally:
+        decision.DecisionItem.__init__ = make
+        w.org.catalog.db.set_trace_callback(None)
+    assert len(w.decision.items) == 4 and len(built) == 2          # only the two new cards were made
+    assert refreshes == [{}, {"recheck": False}, {"recheck": False}]   # once per document read, not twice
+    assert _item(w, SAMPLE["S1"]) is item and item.expanded.isVisible()
+    assert item.picker.field.text() == "my draft" and item.picker.field.cursorPosition() == 3
+    assert item.picker.field.hasFocus()
+
+    statements.clear()                                             # a refresh costs the same whatever the size
+    w.org.catalog.db.set_trace_callback(statements.append)
+    w.refresh()
+    w.org.catalog.db.set_trace_callback(None)
+    assert len([s for s in statements if s.lstrip().upper().startswith("SELECT")]) == 5
+    assert _item(w, SAMPLE["S1"]) is item and item.picker.field.text() == "my draft"
+
+    w.org.create_category("Brand New")                             # the open list follows the catalog
+    w.refresh()
+    assert _item(w, SAMPLE["S1"]) is item and item.picker.field.text() == "my draft"
+    item.picker.field.setText("brand")
+    assert _rows_of(item.picker) == ["Brand New · 0", "Create category 'brand'"]
+    w.show_view(ALL)                                               # leaving the page and coming back: still there
+    w.review()
+    assert _item(w, SAMPLE["S1"]) is item and item.expanded.isVisible() and item.picker.field.text() == "brand"
+    w.leave_pending(item.ids)                                      # moved to the end, not rebuilt
+    assert w.decision.items[-1] is item and item.expanded.isVisible()
+    _close(w, rec)
+
+
+def test_search_name_and_category_count_and_keys(app, samples, make_org):
+    names = [SAMPLE["S1"], SAMPLE["S2"], SAMPLE["S4"]]
+    w, rec = _window(make_org, [samples / n for n in names])
+    _pump(app, lambda: not w.inflight)
+    w.file_docs([_doc(w, SAMPLE["S1"])], "Quantum Optics")
+    _pump(app, lambda: not w.filing)
+    w.show_view(ALL)
+    assert w.search.placeholderText() == "Search all documents…" and not w.result_count.isVisible()
+    statements = []
+    w.org.catalog.db.set_trace_callback(statements.append)
+    w.search.setText("QUANT")                                      # the category matches too
+    assert _rows(w) == [SAMPLE["S1"]] and w.result_count.text() == "1 of 3" and w.result_count.isVisible()
+    assert w.page_title.full == "All documents · 3"                # the heading keeps the whole count
+    w.search.setText("l-2")
+    assert _rows(w) == [SAMPLE["S4"]]
+    w.search.setText("no such thing")
+    assert statements == []                                        # a key reads nothing from the catalog
+    w.org.catalog.db.set_trace_callback(None)
+    assert w.stack.currentWidget() is w.no_match and w.result_count.text() == "0 of 3"
+    assert w.no_match_text.text() == "Nothing here matches “no such thing”."
+    w.clear_search.click()
+    assert w.search.text() == "" and w.stack.currentWidget() is w.table and len(_rows(w)) == 3
+
+    w.select_docs([_doc(w, SAMPLE["S4"])])
+    w.set_details_open(True)
+    QTest.keySequence(w.table, QKeySequence(QKeySequence.Find))    # Ctrl+F puts the cursor in the field
+    assert w.search.hasFocus()
+    QTest.keyClicks(w.search, "l-2")
+    QTest.keyClick(w.search, Qt.Key_Escape)                        # Esc clears the text first
+    assert w.search.text() == "" and w.details.isVisible()
+    QTest.keyClick(w.search, Qt.Key_Escape)                        # and then closes details
+    assert not w.details.isVisible()
+
+    w.search.setText("l-2")
+    _click_category(w, "Quantum Optics")                           # another view: no hidden text filters it
+    assert w.search.text() == "" and w.search.placeholderText() == "Search Quantum Optics…"
+    assert _rows(w) == [SAMPLE["S1"]] and w.page_title.full == "Quantum Optics · 1"
+    w.show_view(RECENT)
+    assert w.search.placeholderText() == "Search recently added…" and len(_rows(w)) == 3
+
+    w.review()                                                     # the same field on the decision page
+    assert w.toolbar.isVisible() and not w.sort.isVisible() and not w.details_toggle.isVisible()
+    assert w.search.placeholderText() == "Search these documents…"
+    cards = list(w.decision.items)
+    w.search.setText(SAMPLE["S4"][:6].upper())
+    shown = [c for c in cards if c.isVisible()]
+    assert w.decision.items == cards and shown == [_item(w, SAMPLE["S4"])]   # hidden, not rebuilt
+    assert w.result_count.text() == "1 of 2" and w.page_title.full == "Needs your decision · 2"
+    w.search.setText("no such thing")
+    assert w.stack.currentWidget() is w.no_match
+    QTest.keyClick(w.search, Qt.Key_Escape)
+    assert w.stack.currentWidget() is w.decision and all(c.isVisible() for c in cards)
+    w.show_view(SETTINGS)
+    assert not w.toolbar.isVisible()
+    _close(w, rec)
+
+
+def test_the_list_is_updated_in_place(app, samples, make_org):
+    names = [SAMPLE["S1"], SAMPLE["S2"], SAMPLE["S4"]]
+    w, rec = _window(make_org, [samples / n for n in names])
+    _pump(app, lambda: not w.inflight)
+
+    w.sort.setCurrentText("Name A–Z")
+    assert _rows(w) == sorted(names, key=str.casefold)
+    doc = _doc(w, SAMPLE["S2"])
+    w.select_docs([doc])
+    resets = []
+    w.docs.modelReset.connect(lambda: resets.append(1))
+    w.file_docs([_doc(w, SAMPLE["S1"])], "Quantum Optics")         # another row changes; this one stays selected
+    _pump(app, lambda: not w.filing)
+    w.refresh()
+    assert w.selected_ids() == [doc] and resets == []
+    assert _cell(w, _rows(w).index(SAMPLE["S1"]), 1) == "Quantum Optics"
+    assert w.document_row(doc)["file_name"] == SAMPLE["S2"] and w.document_row("no such id") is None
+    w.sort.setCurrentText("Newest first")                          # what is still being read comes first
+    w.import_paths([str(samples / SAMPLE["S5"])])
+    assert _rows(w)[0] == SAMPLE["S5"] and _cell(w, 0, 2) == "Reading" and w.selected_ids() == [doc]
+    _pump(app, lambda: not w.inflight)
+    assert _cell(w, _rows(w).index(SAMPLE["S5"]), 2) == "Waiting" and len(_rows(w)) == 4
+    _close(w, rec)
+
+
+def test_the_list_fits_beside_the_details_panel(app, samples, make_org):
+    w, rec = _window(make_org, [samples / SAMPLE["S4"], samples / SAMPLE["S5"]])
+    _pump(app, lambda: not w.inflight)
+    w.resize(1280, 720)
+    _pump(app, lambda: w.width() == 1280 and not w.table.isColumnHidden(3))
+    w.select_docs([_doc(w, SAMPLE["S5"])])
+    w.set_details_open(True)                                       # beside the list: the list gets narrow
+    _pump(app, lambda: w.table.isColumnHidden(3))                  # so the date column goes
+    assert w.details.parent() is w.content and w.table.horizontalScrollBar().maximum() == 0
+    w.close_details()
+    _pump(app, lambda: not w.table.isColumnHidden(3))
+
+    w.org.create_category("Elsewhere")                             # with a category, Enter opens the choices
+    w.review()                                                     # Esc in a card's field: the keyboard stays on the card
+    item = _item(w, SAMPLE["S4"])
+    QTest.keyClick(item, Qt.Key_Return)
+    assert item.expanded.isVisible() and item.picker.field.hasFocus()
+    QTest.keyClick(item.picker.field, Qt.Key_Escape)
+    assert not item.expanded.isVisible() and item.hasFocus()
     _close(w, rec)

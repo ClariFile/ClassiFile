@@ -35,8 +35,19 @@ def group_items(docs):
     return sorted(items, key=lambda m: (attention(m), min(order[d["id"]] for d in m)))  # problems first
 
 
+def card_state(members, categories):
+    """Everything a card shows. While this is unchanged, the card is kept exactly as it is."""
+    first = members[0]
+    top = top_names(first["suggestions"], 1) if first["status"] == "needs_decision" else []
+    existing = categories.get(name_key(top[0]["name"])) if top else None
+    return ([(d["id"], d["file_name"]) for d in members], first["status"], first["status_reason"], first["missing"],
+            first["source_path"], first["suggestions"], first["unit"],
+            existing["name"] if existing else bool(categories))
+
+
 class DecisionItem(QFrame):
-    def __init__(self, docs, controller):
+    def __init__(self, docs, controller, categories=None):
+        """categories: {name key: category} as the catalog has them now (asked for when not given)."""
         super().__init__()
         self.setObjectName("decision")
         self.setFocusPolicy(Qt.StrongFocus)
@@ -112,10 +123,14 @@ class DecisionItem(QFrame):
         choices.addWidget(self.expanded, 100)   # up to its widest, at the left
         choices.addStretch(1)
         v.addLayout(choices)
-        self._configure(first, top)
+        categories = controller.categories_by_key() if categories is None else categories
+        existing = categories.get(name_key(self.best)) if self.best else None
+        self.search_text = " ".join([d["file_name"] for d in docs] + [existing["name"] if existing else self.best]
+                                    ).casefold()             # what the page's search looks at
+        self._configure(first, existing, bool(categories))
 
     # -- what the item asks ------------------------------------------------------------------------------------
-    def _configure(self, first, top):
+    def _configure(self, first, existing, any_categories):
         problem = first["status"] in ("failed", "pending")
         if problem:
             self.line.setText(f"⚠ This document couldn't be read: {first['status_reason'] or 'unknown reason'}.")
@@ -130,7 +145,6 @@ class DecisionItem(QFrame):
             self._only(self.primary, self.remove)
             self.line.setToolTip(f"It was at {first['source_path']}")
         else:
-            existing = self.c.existing_category(self.best) if self.best else None
             only = "  ·  Only one suggestion found" if len(first["suggestions"]) == 1 else ""
             if existing:
                 self.line.setText(f"Suggested category: {existing['name']}{only}")
@@ -138,7 +152,7 @@ class DecisionItem(QFrame):
                 self.primary.setText(f"File in {shown}".replace("&", "&&"))
                 self.primary.setToolTip(f"File in '{existing['name']}'")
                 self.one_click = True
-            elif self.best and not self.c.category_names():  # the very first category: one click is enough
+            elif self.best and not any_categories:  # the very first category: one click is enough
                 self.line.setText(f"Suggested new category: {self.best}{only}")
                 self.primary.setText("Create && file")
                 self.primary.setToolTip(f"Create category '{self.best}' and file")
@@ -214,6 +228,11 @@ class DecisionItem(QFrame):
         self.none_fit.setVisible(bool(top or rest) and not self.rejected)
         self.reasons.setVisible(self.rejected)
 
+    def refresh_choices(self):
+        """The categories changed while the choices were open: the list follows; what is typed and chosen stays."""
+        if self.expanded.isVisible():
+            self._fill_choices()
+
     def _toggle_more(self):
         self.show_all = not self.show_all
         self._fill_choices()
@@ -228,11 +247,15 @@ class DecisionItem(QFrame):
 
     def toggle_expanded(self):
         open_ = not self.expanded.isVisible()
+        focus = QApplication.focusWidget()
+        inside = focus is not None and self.isAncestorOf(focus)
         self.expanded.setVisible(open_)
         self.choose.setText("Hide choices" if open_ else "Choose another…")
         if open_:
             self._fill_choices()
             self.picker.field.setFocus()
+        elif inside:
+            self.setFocus()                     # the field went away: the keyboard stays on this card
 
     def _update_confirm(self):
         choice = self.picker.current()
@@ -274,10 +297,11 @@ class DecisionPage(QWidget):
         self.c = controller
         self.title = QLabel()
         self.title.setObjectName("pageTitle")
-        self.items = []
+        self.items, self.query, self.version = [], "", None
         self.holder = QWidget()
         self.holder.setMaximumWidth(READING_MAX)    # readable on large screens; the scroll area keeps it left
         self.list = box(QVBoxLayout(self.holder), (0, 0, GROUP, 0), 0)  # room for the scroll bar
+        self.list.addStretch(1)                     # always last; the cards go before it
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
@@ -289,21 +313,58 @@ class DecisionPage(QWidget):
         v.addWidget(scroll, 1)
         v.addWidget(self.empty)
 
-    def show_items(self, docs):
+    def show_items(self, docs, categories=None, version=None, enter=False):
+        """Bring the cards in line with the waiting documents, in place. A card whose question is unchanged is
+        kept, with whatever is typed, opened or focused in it; only new and changed ones are built.
+        categories: {name key: category}; version: anything that changes when the category list or its counts
+        do; enter: the page has just been opened (the first card takes the focus)."""
+        categories = self.c.categories_by_key() if categories is None else categories
         focus = QApplication.focusWidget()
-        at = next((n for n, i in enumerate(self.items) if focus and (i is focus or i.isAncestorOf(focus))), 0)
-        if focus and self.holder.isAncestorOf(focus):
+        at = next((n for n, i in enumerate(self.items) if focus and (i is focus or i.isAncestorOf(focus))), None)
+        old = {tuple(i.ids): i for i in self.items}
+        items, kept = [], []
+        for members in group_items(docs):
+            state = card_state(members, categories)
+            item = old.get(tuple(d["id"] for d in members))
+            if item is not None and item.state == state:
+                del old[tuple(item.ids)]
+                kept.append(item)
+            else:
+                item = DecisionItem(members, self.c, categories)
+                item.state = state
+            items.append(item)
+        refocus = at is not None and self.items[at] in old.values()
+        if refocus:
             focus.clearFocus()  # hiding the focused item hands focus down the list, and the page scrolls after it
-        while self.list.count():
-            w = self.list.takeAt(0).widget()
-            if w:
-                w.hide()
-                w.deleteLater()
-        self.items = [DecisionItem(members, self.c) for members in group_items(docs)]
+        for gone in old.values():
+            self.list.removeWidget(gone)
+            gone.hide()
+            gone.deleteLater()
+        for n, item in enumerate(items):
+            if self.list.itemAt(n).widget() is not item:
+                self.list.removeWidget(item)
+                self.list.insertWidget(n, item)
+                item.setVisible(self._matches(item))  # now, not after the next layout pass
+        if version != self.version:
+            for item in kept:
+                item.refresh_choices()
+        self.items, self.version = items, version
+        self.empty.setVisible(not items)
+        shown = [i for i in items if self._matches(i)]
+        if shown and (refocus or (enter and at is None)):
+            target = items[min(at or 0, len(items) - 1)]
+            (target if target in shown else shown[0]).setFocus()  # where the user was, not back at the top
+
+    def _matches(self, item):
+        return not self.query or self.query in item.search_text
+
+    def set_query(self, query):
+        """The page's search: cards that don't match are hidden, not rebuilt."""
+        self.query = query.strip().casefold()
         for item in self.items:
-            self.list.addWidget(item)
-            item.show()  # now, not after the next layout pass
-        self.list.addStretch(1)
-        self.empty.setVisible(not self.items)
-        if self.items:
-            self.items[min(at, len(self.items) - 1)].setFocus()  # where the user was, not back at the top
+            match = self._matches(item)
+            if item.isHidden() == match:    # only the cards whose answer changed
+                item.setVisible(match)
+
+    def shown_documents(self):
+        return sum(len(i.ids) for i in self.items if self._matches(i))

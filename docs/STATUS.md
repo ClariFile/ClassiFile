@@ -62,10 +62,18 @@
 - `tools.label_inventory`: a window to fill in the labels of an inventory one file at a time (pages shown,
   the category picker, saved into the CSV after every answer). After a split, `--splits` shows each file from
   its split's folder and `--only <label>` just the files recorded under one label, to give them other labels.
-- `docs/UI_PROPOSAL.md`: measurements and a phased proposal for the next interface pass (nothing built yet).
+- `docs/UI_PROPOSAL.md`: measurements and a phased proposal for the interface; phase 1 is built (below).
+- **Interface phase 1 (responsiveness and search):** the window is updated in place instead of rebuilt.
+  Decision cards are kept while their question is unchanged; the document list and the sidebar are models
+  (`classifile/app/models.py`) with the view, the search and the sort as a filter; one refresh per document
+  read, five queries each. The sidebar shows category names with counts only. Search matches file name and
+  category on every page (Ctrl+F, Esc, "3 of 7", a nothing-found state, cleared on view change).
+  Measurements and the acceptance results are in section 9 of the proposal.
+- `tools.measure_ui` (timings on a made-up catalog) and `tools.check_ui` (the acceptance checks at four window
+  sizes and three scalings).
 - `tools.apply_split`: moves a split's files into `data\development`, `data\validation` and `data\final-eval`,
-  all or nothing, never over an existing file.
-- 236 automated tests.
+  all or nothing, never over an existing file; `--previous` applies a split made again.
+- 240 automated tests.
 
 ## Development results so far
 
@@ -107,6 +115,13 @@ These counts describe development data only. They are not accuracy estimates.
   `data\validation`, final evaluation 23 (22) in `data\final-eval`. No family is in two splits; no two
   families share page text. The 9 families with several files are lectures sharing a cover page, kept together.
   The small labels fell unevenly (two labels have no development file). Record: `data\splits_incoming.csv`.
+- **Incoming files, split again (2026-10-12):** the owner gave 39 of the files under the one broad label three
+  new labels (9 labels now; no typos, no family with two labels; three of the labels are not catalog
+  categories). Split again by family 50/25/25 with the same seed, before anything was built on the first one:
+  development 50 files (45 families), validation 23 (22), final evaluation 28 (22). 62 files changed folder;
+  the rest were not touched. The split balances families, not files, so the file shares are 50/23/28 of 101.
+  Three small labels still have no development file or no held-out file. Record: `data\splits_incoming_2.csv`
+  (the first record is kept).
 - **Incoming files, inventory:** 104 PDFs in `data\incoming` (one flat folder), inventoried in
   `data\inventory_incoming.csv`. Suggested families: 92, of which 9 hold several files (21 files) because
   their first page reads the same; no two files have the same bytes; 3 files look like versions of development
@@ -156,10 +171,9 @@ These counts describe development data only. They are not accuracy estimates.
 
 ## Next
 
-1. The owner relabels the 85 files under the one broad label into real subjects
-   (`tools.label_inventory --splits ... --only ...`). The split is not redone until the owner says so.
-2. Interface: Phase 1 of `docs/UI_PROPOSAL.md` (responsiveness and search), on the owner's go-ahead. The five
-   decisions are made and recorded there.
+1. Interface: phase 2 of `docs/UI_PROPOSAL.md` (the page preview), on the owner's go-ahead. Phase 1 is done.
+2. Known from the phase 1 checks: at 1024×640 the decision page with details beside it scrolls sideways by 16
+   pixels (phase 3 removes it); the two lists draw no focus mark of their own (phase 3).
 3. CP3 (after the user's go-ahead): scorer comparison (E2) and abstention baseline (E4) on development data,
    selected-category mode with permissions through the queue, "Belongs to" / "Also belongs to", primary
    replacement and edited-copy protection.

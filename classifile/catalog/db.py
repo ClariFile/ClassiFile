@@ -344,6 +344,23 @@ class Catalog:
                            "filed_at": None} for d in self.documents(None) if d["id"] not in ids]
         return sorted([dict(d) for d in filed] + rest, key=lambda d: (d["file_name"].casefold(), d["id"]))
 
+    def document_row(self, doc_id):
+        """One document as all_documents() gives it, without reading the others."""
+        filed = self.one(self._FILED + "WHERE d.id = ? AND d.status = 'filed'", doc_id)
+        if filed:
+            return dict(filed)
+        d = self.one("SELECT d.*, s.sha256, s.file_name, s.imported_at, s.source_path FROM documents d"
+                     " JOIN snapshots s ON s.document_id = d.id WHERE d.id = ?", doc_id)
+        return d and dict(d) | {"category_id": None, "category": None, "copy_path": None, "copy_status": None,
+                                "filed_at": None}
+
+    def waiting_documents(self):
+        """Every document that is not filed, each with its stored analysis as JSON text (or None): one query."""
+        return self.all("SELECT d.*, s.sha256, s.file_name, s.imported_at, s.source_path, e.analysis_json"
+                        " FROM documents d JOIN snapshots s ON s.document_id = d.id"
+                        " LEFT JOIN extractions e ON e.snapshot_id = s.id WHERE d.status != 'filed'"
+                        " ORDER BY s.file_name, d.id")
+
     def remove_document(self, doc_id):
         """Delete a waiting document's catalog rows: snapshot, stored text and analysis, any membership.
         Refused when the document has a copy that exists or may exist (the original is never involved)."""

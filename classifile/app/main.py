@@ -8,27 +8,28 @@ import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
+from functools import lru_cache
 from pathlib import Path
 
 from PySide6.QtCore import (
-    QCoreApplication, QEasingCurve, QEvent, QItemSelectionModel, QObject, QPoint, QPropertyAnimation, QSize, Qt,
-    QTimer, QUrl, Signal,
+    QCoreApplication, QEasingCurve, QEvent, QItemSelection, QItemSelectionModel, QObject, QPoint,
+    QPropertyAnimation, QSize, Qt, QTimer, QUrl, Signal,
 )
-from PySide6.QtGui import QDesktopServices, QIcon
+from PySide6.QtGui import QDesktopServices, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
-    QAbstractItemView, QButtonGroup, QCheckBox, QComboBox, QCompleter, QFileDialog, QFrame, QHBoxLayout,
+    QAbstractItemView, QButtonGroup, QCheckBox, QComboBox, QFileDialog, QFrame, QHBoxLayout,
     QHeaderView, QInputDialog, QLabel, QLineEdit, QMenu, QMessageBox, QPushButton, QSizePolicy, QSplitter,
-    QListView, QStackedWidget, QStyleFactory, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
+    QListView, QStackedWidget, QStyleFactory, QTreeView, QVBoxLayout, QWidget,
 )
 
 from classifile.analysis.candidates import name_key
 from classifile.app import app_icon, make_app
 from classifile.app.decision import DecisionPage
 from classifile.app.details import DetailsPanel
+from classifile.app.models import DOC, SORTS, CategoryModel, DocumentFilter, DocumentModel, sorted_by_name
 from classifile.app.widgets import (
-    DETAILS_MAX, DETAILS_MIN, DETAILS_WIDTH, GROUP, READING_MAX, PAD, RELATED, ROW, SECTION, STYLE, SUPPORTED, box,
-    DropOverlay, ElidedLabel, Notices, PickerDialog, PreviewOverlay, Toast, format_icon, restyle, status_icon,
-    status_word, wrappable,
+    DETAILS_MAX, DETAILS_MIN, DETAILS_WIDTH, GROUP, READING_MAX, PAD, RELATED, SECTION, STYLE, SUPPORTED, box,
+    DropOverlay, ElidedLabel, Notices, PickerDialog, PreviewOverlay, Toast, wrappable,
 )
 from classifile.copies.engine import CopyError
 from classifile.catalog.db import Catalog
@@ -40,17 +41,27 @@ VIEW_TITLES = {ALL: "All documents", DECIDE: "Needs your decision", RECENT: "Rec
 RECENT_DAYS = 7
 READ_WORKERS = min(4, os.cpu_count() or 2)  # documents read (and OCR'd) at once, each in its own process
 WAITING = ("needs_decision", "pending", "failed")
-DOC = Qt.UserRole
 SIDEBAR_WIDTH = 240
 WIDE = 1280          # from here the details panel sits beside the list; narrower, it opens over the list
 NARROW = 1024        # below this the sidebar collapses to a menu button
-DATE_COLUMN_MIN = 1100
+DATE_COLUMN_MIN = 760   # the list itself, not the window: narrower (the details panel beside it), no date column
 MIN_WINDOW = (900, 560)
-SORTS = ("Newest first", "Oldest first", "Name A–Z")
+SEARCH_HINTS = {ALL: "Search all documents…", RECENT: "Search recently added…", DECIDE: "Search these documents…"}
 
 
+@lru_cache(maxsize=4096)
 def short_date(iso):
     return datetime.fromisoformat(iso).astimezone().strftime("%Y-%m-%d") if iso else ""
+
+
+@lru_cache(maxsize=4096)
+def stored_analysis(text):
+    """A document's stored analysis, parsed once per distinct text. Shared: never change what it returns."""
+    return json.loads(text) if text else {}
+
+
+def recent_since():
+    return (datetime.now(timezone.utc) - timedelta(days=RECENT_DAYS)).isoformat(timespec="seconds")
 
 
 class Bridge(QObject):
@@ -65,6 +76,7 @@ class MainWindow(QWidget):
         self.org = organizer
         self.inflight = {}          # path -> "queued" | "reading"
         self.read_total = 0         # documents in the current reading run, for "Reading 3 of 12…"
+        self.read_results = []      # finished reads not recorded yet: taken one per turn of the event loop
         self.filing = {}            # doc_id -> category id, while its copy is being made
         self.batch, self.batch_name, self.new_category = [], "", None
         self.failure = None         # (doc ids, sentence): stays as a notice until those documents are resolved
@@ -75,6 +87,11 @@ class MainWindow(QWidget):
         self.view = (ALL, None)     # ("all" | "decide" | "recent" | "settings" | "category", category id)
         self.details_open = False
         self.decide_doc = None      # the waiting document whose details are open beside the decision page
+        self.missing = {}           # waiting doc_id -> its original is not where it was (looked for on request)
+        self.waiting_docs = []      # the waiting documents as of the last refresh, with what their cards show
+        self.doc_rows = []          # every document as of the last refresh
+        self.entered = None         # the view the last refresh showed
+        self.since = recent_since() # "Recently added" starts here; set again whenever a view is opened
         self.pool = ThreadPoolExecutor(max_workers=READ_WORKERS)
         self.workers = workers or WorkerPool(read_and_analyze, size=READ_WORKERS)
         self.bridge = Bridge()
@@ -88,8 +105,6 @@ class MainWindow(QWidget):
         self.resize(1280, 760)
         self._build()
         self.org.startup()
-        expanded = self._setting("ui_expanded", [])
-        self.expanded = set(expanded)
         self.refresh()
         if ask_output_root and self.org.output_root is None:
             self.choose_output_root()
@@ -202,14 +217,17 @@ class MainWindow(QWidget):
         head.addWidget(self.add_button)
 
         self.notices = Notices()
-        self.search = QLineEdit()
-        self.search.setPlaceholderText("Search documents…")
+        self.search = QLineEdit()             # one field per page, always here; it filters what is loaded
         self.search.setClearButtonEnabled(True)
-        self.search.textChanged.connect(lambda *_: self._fill_list())
+        self.search.textChanged.connect(lambda *_: self._search_changed())
+        self.search.installEventFilter(self)  # Esc clears it first
+        QShortcut(QKeySequence.Find, self, activated=self.focus_search)
+        self.result_count = QLabel()          # "3 of 7", while a search is on
+        self.result_count.setObjectName("secondary")
         self.sort = QComboBox()
         self.sort.setView(QListView())           # the opened list takes the shared style
         self.sort.addItems(SORTS)
-        self.sort.currentIndexChanged.connect(lambda *_: self._fill_list())
+        self.sort.currentIndexChanged.connect(lambda *_: self.filter.show(order=self.sort.currentText()))
         self.details_toggle = QPushButton("Details")
         self.details_toggle.setToolTip("Show the selected document's pages and details beside the list (Space)")
         self.details_toggle.setCheckable(True)
@@ -218,6 +236,7 @@ class MainWindow(QWidget):
         tools = box(QHBoxLayout(self.toolbar))
         self.search.setMaximumWidth(480)
         tools.addWidget(self.search, 1)
+        tools.addWidget(self.result_count)
         tools.addStretch(0)
         tools.addWidget(self.sort)
         tools.addSpacing(GROUP - RELATED)       # finding documents | showing details
@@ -229,7 +248,8 @@ class MainWindow(QWidget):
         self.empty_state = self._empty_state()
         self.decision = DecisionPage(self)
         self.settings_page = self._settings_page()
-        for page in (self.table, self.empty_state, self.decision, self.settings_page):
+        self.no_match = self._no_match_page()
+        for page in (self.table, self.empty_state, self.decision, self.settings_page, self.no_match):
             self.stack.addWidget(page)
         self.details = DetailsPanel(self)
         self.details.setMinimumWidth(DETAILS_MIN)
@@ -295,21 +315,25 @@ class MainWindow(QWidget):
         cat_head = box(QHBoxLayout(), (GROUP, SECTION, RELATED, RELATED))
         cat_head.addWidget(header, 1)
         cat_head.addWidget(self.add_category)
-        self.cats = QTreeWidget()
+        self.cat_model = CategoryModel(self)      # names with counts; the documents are in the main list
+        self.cat_sorted = sorted_by_name(self.cat_model)
+        self.cats = QTreeView()
         self.cats.setObjectName("categories")
+        self.cats.setModel(self.cat_sorted)
         self.cats.setHeaderHidden(True)
-        self.cats.setColumnCount(2)
+        self.cats.setRootIsDecorated(False)
+        self.cats.setItemsExpandable(False)
+        self.cats.setIndentation(0)
+        self.cats.setUniformRowHeights(True)
         self.cats.header().setStretchLastSection(False)
         self.cats.header().setSectionResizeMode(0, QHeaderView.Stretch)
         self.cats.header().setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        self.cats.setIndentation(14)
         self.cats.setStyle(self.list_style)
         self.cats.setTextElideMode(Qt.ElideRight)
-        self.cats.itemClicked.connect(self._category_clicked)
+        self.cats.clicked.connect(self._category_clicked)
+        self.cats.activated.connect(self._category_clicked)   # Enter
         self.cats.setContextMenuPolicy(Qt.CustomContextMenu)
         self.cats.customContextMenuRequested.connect(self._category_menu_at)
-        self.cats.itemExpanded.connect(lambda item: self._remember_expand(item, True))
-        self.cats.itemCollapsed.connect(lambda item: self._remember_expand(item, False))
         self.cats_empty = QLabel("No categories yet. Press + to create one, or file a document.")
         self.cats_empty.setObjectName("secondary")
         self.cats_empty.setWordWrap(True)
@@ -331,10 +355,12 @@ class MainWindow(QWidget):
         return side
 
     def _table(self):
-        table = QTreeWidget()
-        table.setColumnCount(4)
-        table.setHeaderLabels(["Name", "Category", "Status", "Date added"])
+        self.docs = DocumentModel(self)           # every document; the view, search and sort are a filter over it
+        self.filter = DocumentFilter(self.docs)
+        table = QTreeView()
+        table.setModel(self.filter)
         table.setRootIsDecorated(False)
+        table.setItemsExpandable(False)
         table.setUniformRowHeights(True)
         table.setSelectionMode(QAbstractItemView.ExtendedSelection)
         table.setIconSize(QSize(16, 16))
@@ -346,11 +372,12 @@ class MainWindow(QWidget):
             header.setSectionResizeMode(col, QHeaderView.Interactive)
             table.setColumnWidth(col, width)
         header.setStretchLastSection(False)
-        table.itemSelectionChanged.connect(self._selection_changed)
-        table.itemDoubleClicked.connect(lambda *_: self.activate_selected())
+        table.selectionModel().selectionChanged.connect(lambda *_: self._selection_changed())
+        table.doubleClicked.connect(lambda *_: self.activate_selected())
         table.setContextMenuPolicy(Qt.CustomContextMenu)
         table.customContextMenuRequested.connect(self._context_menu)
         table.installEventFilter(self)
+        table.viewport().installEventFilter(self)   # its width decides the columns
         return table
 
     def _bulk_bar(self):
@@ -401,6 +428,19 @@ class MainWindow(QWidget):
         self.empty_texts = [title.text()] + [l.text() for l in lines]
         return page
 
+    def _no_match_page(self):
+        page = QWidget()
+        self.no_match_text = QLabel()
+        self.no_match_text.setObjectName("secondary")
+        self.clear_search = QPushButton("Clear search")
+        self.clear_search.clicked.connect(self.search.clear)
+        v = box(QVBoxLayout(page), spacing=GROUP)
+        v.addStretch(1)
+        v.addWidget(self.no_match_text, 0, Qt.AlignCenter)
+        v.addWidget(self.clear_search, 0, Qt.AlignCenter)
+        v.addStretch(2)
+        return page
+
     def _settings_page(self):
         outer = QWidget()
         page = QWidget()
@@ -440,7 +480,8 @@ class MainWindow(QWidget):
 
     # -- views ------------------------------------------------------------------------------------------------
     def show_view(self, key, category=None):
-        self.view = (key, category)
+        self._clear_search()        # no hidden text ever filters a page
+        self.view, self.since = (key, category), recent_since()
         if key in self.nav:
             self.nav[key].setChecked(True)
         else:
@@ -449,25 +490,17 @@ class MainWindow(QWidget):
                 self.nav_group.setExclusive(False)
                 checked.setChecked(False)
                 self.nav_group.setExclusive(True)
-        if key != "category":
-            self.cats.clearSelection()
         self.refresh()
 
-    def _category_clicked(self, item, column):
-        doc_id = item.data(0, DOC)
-        cat = item.data(0, Qt.UserRole + 1)
-        if doc_id:  # a document under its category: show the category with that document selected
-            self.show_view("category", item.parent().data(0, Qt.UserRole + 1))
-            self.select_docs([doc_id])
-            return
+    def _clear_search(self):
+        self.search.blockSignals(True)   # the refresh that follows applies it
+        self.search.clear()
+        self.search.blockSignals(False)
+
+    def _category_clicked(self, index):
+        cat = index.siblingAtColumn(0).data(DOC)
         if cat:
             self.show_view("category", cat)
-
-    def _remember_expand(self, item, expanded):
-        cat = item.data(0, Qt.UserRole + 1)
-        if cat:
-            (self.expanded.add if expanded else self.expanded.discard)(cat)
-            self._save("ui_expanded", sorted(self.expanded))
 
     def review(self):
         self.show_view(DECIDE)
@@ -476,41 +509,32 @@ class MainWindow(QWidget):
     def waiting(self):
         return [d for d in self.org.catalog.documents(None) if d["status"] in WAITING]
 
-    def decision_docs(self):
+    def decision_docs(self, recheck=True):
+        """The waiting documents with what their cards show, from one query. recheck: look on disk for every
+        original again; otherwise only for documents not looked for yet."""
         docs = []
-        for d in self.waiting():
-            analysis = self.org.catalog.analysis(d["id"]) or {}
-            docs.append(dict(d) | {"missing": d["status"] == "needs_decision" and self.org.original_missing(d["id"]),
-                                   "suggestions": analysis.get("suggestions", []),
-                                   "unit": analysis.get("unit", "page")})
+        for d in self.org.catalog.waiting_documents():
+            if d["status"] not in WAITING:
+                continue
+            analysis = stored_analysis(d["analysis_json"])
+            if d["status"] != "needs_decision":
+                missing = False
+            elif recheck or d["id"] not in self.missing:
+                missing = self.missing[d["id"]] = self.org.original_missing(d["id"], d["source_path"])
+            else:
+                missing = self.missing[d["id"]]
+            d = dict(d)
+            del d["analysis_json"]
+            docs.append(d | {"missing": missing, "suggestions": analysis.get("suggestions", []),
+                             "unit": analysis.get("unit", "page")})
+        self.missing = {d["id"]: d["missing"] for d in docs}
         return sorted(docs, key=lambda d: d["id"] in self.deferred)
 
-    def _rows(self):
-        key, cat = self.view
-        if key == "category":
-            docs = [dict(d) for d in self.org.catalog.documents(cat)]
-        elif key == RECENT:
-            since = (datetime.now(timezone.utc) - timedelta(days=RECENT_DAYS)).isoformat(timespec="seconds")
-            ids = {d["id"] for d in self.org.catalog.recent_documents(since)}
-            docs = [d for d in self.org.catalog.all_documents() if d["id"] in ids]
-        else:
-            docs = self.org.catalog.all_documents()
-        inflight = [{"id": None, "file_name": Path(p).name, "status": st, "category": None, "imported_at": None,
-                     "status_reason": None} for p, st in self.inflight.items()] if key in (ALL, RECENT) else []
-        q = self.search.text().strip().casefold()
-        rows = [r for r in inflight + docs if not q or q in r["file_name"].casefold()]
-        order = self.sort.currentText()
-        if order == "Name A–Z":
-            rows.sort(key=lambda r: r["file_name"].casefold())
-        else:
-            rows.sort(key=lambda r: (r["imported_at"] is not None, r["imported_at"] or ""),
-                      reverse=order == "Newest first")
-            if order == "Newest first":
-                rows.sort(key=lambda r: r["id"] is not None)  # documents still being read first
-        return rows
-
     def document_row(self, doc_id):
-        return next((d for d in self.org.catalog.all_documents() if d["id"] == doc_id), None)
+        return self.org.catalog.document_row(doc_id)
+
+    def categories_by_key(self):
+        return {c["name_key"]: c for c in self.org.catalog.categories()}
 
     def existing_category(self, name):
         return self.org.catalog.category_by_key(name_key(name)) if name else None
@@ -518,9 +542,6 @@ class MainWindow(QWidget):
     def display_name(self, name):
         existing = self.existing_category(name)
         return existing["name"] if existing else name
-
-    def category_names(self):
-        return [c["name"] for c in self.org.catalog.categories()]
 
     def first_lines(self, doc_id):
         return self.org.catalog.first_page_lines(doc_id)
@@ -539,102 +560,120 @@ class MainWindow(QWidget):
         return self.filed_copy(doc_id) or Path(self.org.catalog.document(doc_id)["source_path"])
 
     # -- refresh ----------------------------------------------------------------------------------------------
-    def refresh(self, select_docs=None):
-        waiting = self.waiting()
+    def refresh(self, select_docs=None, recheck=True):
+        """Bring the window in line with the catalog, in place: rows, cards and counts that did not change are
+        left alone, so what is typed, opened, selected or scrolled to stays. Five queries, whatever the size.
+        recheck: look on disk for the waiting documents' originals again (a background read ending is no reason)."""
+        self.waiting_docs = waiting = self.decision_docs(recheck)
         n = len(waiting)
         if self.decide_doc not in [d["id"] for d in waiting]:
             self.decide_doc = None  # filed or removed: its details close
         self.setWindowTitle(f"ClassiFile — {n} waiting" if n else "ClassiFile")
         self.decide_count.setText(str(n) if n else "")
-        self._fill_categories()
-        self._show_root()
-        key, cat = self.view
-        if key == "category" and (self.org.catalog.category(cat) or {"deleted_at": 1})["deleted_at"]:
-            self.view = key, cat = (ALL, None)  # the category was deleted
+        cats = self._fill_categories()
+        if self.view[0] == "category" and self.cat_model.get(self.view[1]) is None:
+            self.view = (ALL, None)  # the category was deleted
+        key = self.view[0]
         if key in self.nav:
             self.nav[key].setChecked(True)
-        empty = not self.org.catalog.all_documents() and not self.inflight
-        count = len(waiting) if key == DECIDE else None
-        if key == "category":
-            title = self.org.catalog.category(cat)["name"]
-            count = len(self.org.catalog.documents(cat))
-        else:
-            title = VIEW_TITLES[key]
-        if key in (ALL, RECENT):
-            count = len(self._rows()) if not self.search.text().strip() else None
-        self.page_title.setText(title + (f" · {count}" if count and key != SETTINGS else ""))
-        self.toolbar.setVisible(key not in (DECIDE, SETTINGS) and not empty)
+        self._select_category()
+        self._fill_list(self.org.catalog.all_documents())
+        if select_docs is not None:
+            self.select_docs(select_docs)
         if key == SETTINGS:
-            self.stack.setCurrentWidget(self.settings_page)
+            self._show_root()
             self.close_toggle.blockSignals(True)
             self.close_toggle.setChecked(self.org.catalog.get_setting("close_notice") != "off")
             self.close_toggle.blockSignals(False)
         elif key == DECIDE:
-            self.stack.setCurrentWidget(self.decision)
-            self.decision.show_items(self.decision_docs())
-        elif empty:
-            self.stack.setCurrentWidget(self.empty_state)
-        else:
-            self.stack.setCurrentWidget(self.table)
-            self._fill_list(select_docs)
+            self.decision.show_items(waiting, {c["name_key"]: c for c in cats},
+                                     [(r["key"], r["name"], r["count"]) for r in self.cat_model.rows],
+                                     enter=self.entered != DECIDE)
+        self.entered = key
+        self._show_page()
         self._show_processing()
         self._show_notices(waiting)
         self._selection_changed()
 
-    def _fill_categories(self):
-        cats = self.org.catalog.categories()
-        current = self.view[1] if self.view[0] == "category" else None
-        bar = self.cats.verticalScrollBar()
-        at = bar.value()
-        self.cats.blockSignals(True)
-        self.cats.clear()
-        for c in cats:
-            docs = self.org.catalog.documents(c["id"])
-            node = QTreeWidgetItem([c["name"], str(len(docs))])
-            node.setData(0, Qt.UserRole + 1, c["id"])
-            node.setToolTip(0, c["name"])
-            node.setForeground(1, self.palette().placeholderText())
-            node.setTextAlignment(1, Qt.AlignRight | Qt.AlignVCenter)
-            self.cats.addTopLevelItem(node)
-            for d in docs:
-                child = QTreeWidgetItem([d["file_name"]])
-                child.setIcon(0, format_icon(d["file_name"]))
-                child.setData(0, DOC, d["id"])
-                child.setToolTip(0, d["file_name"])
-                node.addChild(child)
-            node.setExpanded(c["id"] in self.expanded)
-            if c["id"] == current:
-                node.setSelected(True)
-        self.cats.blockSignals(False)
-        self.cats_empty.setVisible(not cats)
-        # The list was rebuilt: put it back where the user had scrolled it (now, and once it is laid out again).
-        bar.setValue(at)
-        QTimer.singleShot(0, lambda: bar.setValue(at))
+    def _show_page(self):
+        """The page, its title and the search for the current view and search text. Reads nothing from the
+        catalog, so a search key costs only this."""
+        key, cat = self.view
+        q = self.search.text().strip()
+        if key in (ALL, RECENT, "category"):
+            self.filter.show(key, cat, since=self.since, query=q)
+        empty = not self.docs.rows
+        title, total = VIEW_TITLES.get(key), None
+        if key == "category":
+            title = self.cat_model.get(cat)["name"]
+        if key == DECIDE:
+            total = len(self.waiting_docs)
+            self.decision.set_query(q)
+            shown = self.decision.shown_documents()
+        elif key != SETTINGS:
+            total, shown = self.filter.total(), self.filter.rowCount()
+        self.page_title.setText(title + (f" · {total}" if total else ""))
+        searchable = key != SETTINGS and not empty and (key != DECIDE or bool(total))
+        self.toolbar.setVisible(searchable)
+        for w in (self.sort, self.details_toggle):
+            w.setVisible(key != DECIDE)
+        self.search.setPlaceholderText(SEARCH_HINTS.get(key) or f"Search {title}…")
+        searching = bool(q) and searchable
+        self.result_count.setText(f"{shown} of {total}" if searching else "")
+        self.result_count.setVisible(searching)
+        if key == SETTINGS:
+            page = self.settings_page
+        elif searching and not shown:
+            self.no_match_text.setText(f"Nothing here matches “{q}”.")
+            page = self.no_match
+        elif key == DECIDE:
+            page = self.decision
+        else:
+            page = self.empty_state if empty else self.table
+        self.stack.setCurrentWidget(page)
+        if page is self.table:
+            self._apply_breakpoints()
 
-    def _fill_list(self, select_docs=None):
-        keep = set(select_docs if select_docs is not None else self.selected_ids())
-        self.table.blockSignals(True)
-        self.table.clear()
-        for r in self._rows():
-            status = "filing" if r["id"] in self.filing else r["status"]
-            filed = status == "filed"
-            item = QTreeWidgetItem([r["file_name"], r["category"] or "—", "" if filed else status_word(status),
-                                    short_date(r["imported_at"])])
-            item.setIcon(0, format_icon(r["file_name"]))
-            if not filed:
-                item.setIcon(2, status_icon(status))
-            item.setToolTip(0, r["file_name"])
-            if r.get("status_reason"):
-                item.setToolTip(2, r["status_reason"])
-            item.setData(0, DOC, r["id"])
-            item.setSizeHint(0, QSize(0, ROW))
-            if r["id"] is None:
-                item.setFlags(Qt.ItemIsEnabled)
-            self.table.addTopLevelItem(item)
-            if r["id"] in keep:
-                item.setSelected(True)
-        self.table.blockSignals(False)
-        self._apply_breakpoints()
+    def _search_changed(self):
+        self._show_page()
+        self._selection_changed()
+
+    def focus_search(self):
+        """Ctrl+F."""
+        if self.toolbar.isVisible():
+            self.search.setFocus()
+            self.search.selectAll()
+
+    def _fill_categories(self):
+        """The sidebar's categories with their counts, from two queries, updated in place. Returns the categories."""
+        counts = self.org.catalog.category_counts()
+        cats = self.org.catalog.categories()
+        self.cat_model.sync([{"key": c["id"], "name": c["name"], "count": counts.get(c["id"], 0)} for c in cats])
+        self.cats_empty.setVisible(not cats)
+        return cats
+
+    def _select_category(self):
+        row = self.cat_model.at.get(self.view[1]) if self.view[0] == "category" else None
+        selection = self.cats.selectionModel()
+        if row is None:
+            selection.clear()
+            return
+        index = self.cat_sorted.mapFromSource(self.cat_model.index(row, 0))
+        if not selection.isSelected(index):  # never scrolled to: the list stays where the user left it
+            selection.select(index, QItemSelectionModel.ClearAndSelect | QItemSelectionModel.Rows)
+
+    def _fill_list(self, docs=None):
+        """The list's rows: the catalog's documents (those of the last refresh when none are given) and the files
+        still being read. Only rows that differ are touched."""
+        if docs is not None:
+            self.doc_rows = docs
+        rows = [dict(r) | {"key": r["id"], "date": short_date(r["imported_at"]),
+                           "shown_status": "filing" if r["id"] in self.filing else r["status"]}
+                for r in self.doc_rows]
+        rows += [{"key": ("reading", p), "id": None, "file_name": Path(p).name, "status": st, "shown_status": st,
+                  "category": None, "category_id": None, "imported_at": None, "date": "", "status_reason": None}
+                 for p, st in self.inflight.items()]
+        self.docs.sync(rows)
 
     def _show_processing(self):
         if self.inflight:
@@ -647,7 +686,7 @@ class MainWindow(QWidget):
 
     def _show_notices(self, waiting):
         notices = []
-        unreadable = [d for d in waiting if d["status"] in ("failed", "pending")]
+        unreadable = [d for d in waiting if d["status"] in ("failed", "pending")]   # waiting: decision_docs()
         if self.failure:
             ids, text = self.failure
             if any(d["id"] in ids for d in waiting):
@@ -657,7 +696,7 @@ class MainWindow(QWidget):
         if unreadable:
             n = len(unreadable)
             notices.append(("error", f"{n} document{'s' if n > 1 else ''} couldn't be read.", "Review", self.review))
-        missing = [d for d in waiting if d["status"] == "needs_decision" and self.org.original_missing(d["id"])]
+        missing = [d for d in waiting if d["missing"]]
         if missing and not self.failure:
             n = len(missing)
             notices.append(("warning", f"{n} document{'s have' if n > 1 else ' has'} moved since it was added. "
@@ -670,24 +709,27 @@ class MainWindow(QWidget):
 
     # -- selection and the details panel ----------------------------------------------------------------------
     def selected_ids(self):
-        return [i.data(0, DOC) for i in self.table.selectedItems() if i.data(0, DOC)]
+        rows = sorted(self.table.selectionModel().selectedRows(0), key=lambda i: i.row())
+        return [i.data(DOC) for i in rows if i.data(DOC)]
 
     def select_docs(self, ids):
-        self.table.blockSignals(True)
-        self.table.clearSelection()
-        for i in range(self.table.topLevelItemCount()):
-            item = self.table.topLevelItem(i)
-            if item.data(0, DOC) in ids:
-                item.setSelected(True)
-                self.table.setCurrentItem(item, 0, QItemSelectionModel.NoUpdate)
-        self.table.blockSignals(False)
+        chosen, last = QItemSelection(), None
+        for row in range(self.filter.rowCount()):
+            index = self.filter.index(row, 0)
+            if index.data(DOC) in ids:
+                chosen.select(index, index)
+                last = index
+        selection = self.table.selectionModel()
+        selection.select(chosen, QItemSelectionModel.ClearAndSelect | QItemSelectionModel.Rows)
+        if last is not None:
+            selection.setCurrentIndex(last, QItemSelectionModel.NoUpdate)
         self._selection_changed()
 
     def _selection_changed(self):
         ids = self.selected_ids() if self.stack.currentWidget() is self.table else []
         self.bulk.setVisible(len(ids) > 1)
         if len(ids) > 1:
-            docs = [self.org.catalog.document(i) for i in ids]
+            docs = [self.docs.get(i) for i in ids]
             ready = [d for d in docs if d["status"] == "needs_decision"]
             self.bulk_count.setText(f"{len(ids)} selected")
             self.bulk_file.setEnabled(bool(ready))
@@ -695,12 +737,17 @@ class MainWindow(QWidget):
             self.bulk_move.setEnabled(any(d["status"] == "filed" for d in docs))
             self.bulk_move.setToolTip("" if self.bulk_move.isEnabled() else "Only filed documents can be moved.")
             self.bulk_remove.setEnabled(any(d["status"] in WAITING for d in docs))
-        if self.details_open and self.stack.currentWidget() is self.table:
-            if len(ids) == 1:
-                self.details.show_doc(ids[0])
-            elif not ids:
-                self.details.show_nothing()
+        if self.details_open and self.stack.currentWidget() is self.table and len(ids) < 2:
+            self._show_in_details(ids[0] if ids else None)
         self._place_details()
+
+    def _show_in_details(self, doc_id):
+        """Show a document (or the hint to select one) in the details panel, unless it shows just that already:
+        an unchanged document is not read or drawn again."""
+        state = ("nothing",) if doc_id is None else (doc_id, self.docs.get(doc_id), self.missing.get(doc_id))
+        if self.details.shown != state:
+            self.details.show_nothing() if doc_id is None else self.details.show_doc(doc_id)
+            self.details.shown = state
 
     def set_details_open(self, open_):
         """Details (the document's pages and facts) stay on, on every list page, until switched off."""
@@ -710,7 +757,7 @@ class MainWindow(QWidget):
         self.details_toggle.setChecked(self.details_open)
         self.details_toggle.blockSignals(False)
         if self.details_open:
-            self.details.show_doc(ids[0]) if ids else self.details.show_nothing()
+            self._show_in_details(ids[0] if ids else None)
         self._place_details()
 
     def show_details(self, doc_id):
@@ -784,10 +831,15 @@ class MainWindow(QWidget):
             self.sidebar.setVisible(not narrow)
             self._was_narrow = narrow
         self.menu_button.setVisible(narrow)
-        self.table.setColumnHidden(3, self.width() < DATE_COLUMN_MIN)
-        # Category grows with the window so wide screens don't leave a long empty gap after short names.
-        self.table.setColumnWidth(1, max(200, min(380, self.table.viewport().width() // 4)))
+        self._fit_columns()
         self._place_details()
+
+    def _fit_columns(self):
+        """The list's columns for the room it has now; the details panel beside it takes some. Category grows
+        with the list so wide screens don't leave a long empty gap after short names."""
+        width = self.table.viewport().width()
+        self.table.setColumnHidden(3, width < DATE_COLUMN_MIN)
+        self.table.setColumnWidth(1, max(140, min(380, width // 4)))
 
     # -- output folder ----------------------------------------------------------------------------------------
     def choose_output_root(self):
@@ -862,6 +914,7 @@ class MainWindow(QWidget):
         if refused:
             self.toast.show_message("Not added: " + "; ".join(refused), ms=8000)
         if self.view[0] in (SETTINGS, "category"):
+            self._clear_search()
             self.view = (ALL, None)
         self.refresh()
 
@@ -874,11 +927,24 @@ class MainWindow(QWidget):
         self.bridge.read_done.emit(path, out)
 
     def _read_done(self, path, out):
-        if out == "reading":
+        if out == "reading":  # only its row and the "Reading 3 of 12…" line change: nothing is read or rebuilt
             if path in self.inflight:
                 self.inflight[path] = "reading"
-            self.refresh()
+                self._fill_list()
+            self._show_processing()
             return
+        self.read_results.append((path, out))
+        if len(self.read_results) == 1:
+            QTimer.singleShot(0, self._record_next)
+
+    def _record_next(self):
+        """One finished read per turn of the event loop: when many end together, the mouse and keyboard are
+        answered between them."""
+        if not self.read_results:
+            return
+        path, out = self.read_results.pop(0)
+        if self.read_results:
+            QTimer.singleShot(0, self._record_next)
         self.inflight.pop(path, None)
         if isinstance(out, Exception):
             self.toast.show_message(f"{Path(path).name} couldn't be read.")
@@ -888,7 +954,7 @@ class MainWindow(QWidget):
                 self.toast.show_message(f"{Path(path).name} couldn't be read ({note}).")
             elif note == "already imported":
                 self.toast.show_message(f"{Path(path).name} is already in ClassiFile.")
-        self.refresh()
+        self.refresh(recheck=False)  # once per document; what the user is doing in the window stays
 
     # -- filing -----------------------------------------------------------------------------------------------
     def file_docs(self, ids, name, feedback=None):
@@ -934,7 +1000,7 @@ class MainWindow(QWidget):
         cat_id = self.filing.pop(doc_id, None)
         self.batch.append((doc_id, out))
         if any(c == cat_id for c in self.filing.values()):  # wait for the rest of this filing action
-            self.refresh()
+            self.refresh(recheck=False)
             return
         cat = self.org.catalog.category(cat_id)
         cat_name = cat["name"] if cat else self.batch_name
@@ -1003,7 +1069,7 @@ class MainWindow(QWidget):
             self.failure = None
         self.toast.show_message(f"Found {d['file_name']}. You can file it now.")
         self.refresh()
-        if self.details_open:
+        if self.details.isVisible() and self.details.doc_id == doc_id:
             self.details.show_doc(doc_id)
 
     def open_doc(self, doc_id):
@@ -1186,18 +1252,25 @@ class MainWindow(QWidget):
         return menu
 
     def _category_menu_at(self, pos):
-        item = self.cats.itemAt(pos)
-        cat_id = item.data(0, Qt.UserRole + 1) if item else None
+        cat_id = self.cats.indexAt(pos).siblingAtColumn(0).data(DOC)
         if cat_id:
             self.category_menu(cat_id).exec(self.cats.viewport().mapToGlobal(pos))
 
-    # -- keyboard: Space = details, Enter = open or decide, Delete = remove, Esc = close ---------------------
+    # -- keyboard: Space = details, Enter = open or decide, Delete = remove, Esc = close, Ctrl+F = search ---
     def eventFilter(self, obj, e):
         if obj is getattr(self, "content", None) and e.type() in (QEvent.Move, QEvent.Resize):
             if self.details.isVisible() and self.details.parent() is self.workspace:
                 self._place_details()
             return False
-        if obj is self.table and e.type() == QEvent.KeyPress:
+        if obj is getattr(self, "search", None) and e.type() == QEvent.KeyPress and e.key() == Qt.Key_Escape:
+            if self.search.text():      # Esc clears the search first; the next one closes details
+                self.search.clear()
+                return True
+            return False
+        if e.type() == QEvent.Resize and hasattr(self, "table") and obj is self.table.viewport():
+            self._fit_columns()         # the details panel opened or closed beside the list
+            return False
+        if obj is getattr(self, "table", None) and e.type() == QEvent.KeyPress:
             key = e.key()
             if key == Qt.Key_Space:
                 self.set_details_open(not self.details_open)
@@ -1208,17 +1281,25 @@ class MainWindow(QWidget):
             if key == Qt.Key_Delete:
                 self.remove_docs(self.selected_ids())
                 return True
-            if key == Qt.Key_Escape and self.details_open:
-                self.close_details()
+            if key == Qt.Key_Escape and self._escape():
                 return True
         return super().eventFilter(obj, e)
 
+    def _escape(self):
+        """Esc: the full-size preview, then the search text, then the details panel. False when none was there."""
+        if self.preview_overlay.isVisible():
+            self.preview_overlay.hide()
+        elif self.search.text():
+            self.search.clear()
+        elif self.details.isVisible():
+            self.close_details()
+        else:
+            return False
+        return True
+
     def keyPressEvent(self, e):
         if e.key() == Qt.Key_Escape:
-            if self.preview_overlay.isVisible():
-                self.preview_overlay.hide()
-            elif self.details.isVisible():
-                self.close_details()
+            self._escape()
             return
         super().keyPressEvent(e)
 
@@ -1233,6 +1314,7 @@ class MainWindow(QWidget):
                 self.show_view(DECIDE)
                 return
         self.details.preview.close_pdf()
+        self.read_results.clear()
         self.pool.shutdown(wait=False, cancel_futures=True)
         self.workers.close()
         super().closeEvent(e)

@@ -21,6 +21,7 @@ class DetailsPanel(QFrame):
         self.setObjectName("details")
         self.c = controller
         self.doc_id = None
+        self.shown = None       # set by the window: what it last asked for, so an unchanged document isn't redrawn
         self.title = ElidedLabel()
         self.title.setStyleSheet("font-size: 16px; font-weight: 600;")
         close = QPushButton("✕")
@@ -76,7 +77,7 @@ class DetailsPanel(QFrame):
 
     def show_nothing(self):
         """Open with no document selected: say what to do."""
-        self.doc_id = None
+        self.doc_id, self.shown = None, None
         self.title.setText("Details")
         self.preview.show_document(None, [])
         self.facts.setText("Select a document to see its pages and details here.")
@@ -84,7 +85,7 @@ class DetailsPanel(QFrame):
             w.hide()
 
     def show_doc(self, doc_id):
-        self.doc_id = doc_id
+        self.doc_id, self.shown = doc_id, None
         d = self.c.document_row(doc_id)
         if d is None:
             return

@@ -70,7 +70,9 @@ Run from the project folder (Windows, Python 3.11+; the venv uses 3.12).
 - Labels again after a split (files shown from their split folders, for the owner): `.venv\Scripts\python -m tools.label_inventory --splits data\splits_incoming.csv [--only "<label>"]`
 - Window renders for layout checks: `.venv\Scripts\python -m tools.render_window [--size 1536x864] [--scale 1.25] [--out data]` (dark-theme PNGs: nine views, or five scaled views with `--scale`)
 - OCR needs Tesseract (`C:\Program Files\Tesseract-OCR`, or `TESSDATA_PREFIX`). Tests run OCR only when marked `ocr`; others set `CLASSIFILE_OCR=off`.
-- Apply a split: `.venv\Scripts\python -m tools.apply_split data\splits.csv --from <folder>` (moves the files into `data\development`, `data\validation` and `data\final-eval`; all or nothing)
+- Apply a split: `.venv\Scripts\python -m tools.apply_split data\splits.csv --from <folder>` (moves the files into `data\development`, `data\validation` and `data\final-eval`; all or nothing). A split made again: `... data\splits_2.csv --previous data\splits.csv` (only files that change folder are touched)
+- Interface timings on a made-up catalog: `.venv\Scripts\python -m tools.measure_ui [--json FILE]`
+- Interface acceptance checks (four window sizes, 100/125/150%): `.venv\Scripts\python -m tools.check_ui`
 - `data\final-eval\` is the held-out final evaluation: never open, read or test against it until the user says so. The tools refuse it.
 - `data\validation\` is kept apart: not for building or tuning. Development data is `data\development`, `data\real-samples` and the six samples.
 

@@ -84,18 +84,19 @@ QPushButton#nav {{ text-align: left; border: none; background: transparent; padd
 QLabel#count {{ font-size: 13px; color: palette(placeholder-text); }}
 QPushButton#nav:checked {{ background: rgba(13, 148, 136, 40); border-left: 3px solid {ICON_TEAL}; }}
 QPushButton#nav:hover {{ background: rgba(127, 127, 127, 30); }}
-QTreeWidget, QListWidget {{ border: none; background: transparent; outline: none; }}
-QTreeWidget::item {{ min-height: {ROW - 2}px; border-bottom: 1px solid rgba(127, 127, 127, 40);
+QTreeView, QListWidget {{ border: none; background: transparent; outline: none; }}
+QTreeView::item {{ min-height: {ROW - 2}px; border-bottom: 1px solid rgba(127, 127, 127, 40);
                      padding-left: {RELATED}px; }}
-QTreeWidget#categories::item {{ min-height: 32px; border-bottom: none; padding-left: 0; padding-right: {GROUP}px; }}
+QTreeView#categories::item {{ min-height: 32px; border-bottom: none; border-left: 3px solid transparent;
+                              padding-left: {GROUP - 6}px; padding-right: {GROUP - 4}px; }}
 QListWidget::item {{ padding: 6px {RELATED}px; border-radius: 4px; }}
 QListWidget::item:hover {{ background: rgba(127, 127, 127, 30); }}
 QFrame#choices {{ border: 1px solid rgba(127, 127, 127, 60); border-radius: 8px; background: rgba(127, 127, 127, 18); }}
-QTreeWidget::item:selected, QListWidget::item:selected {{ background: rgba(13, 148, 136, 46);
+QTreeView::item:selected, QListWidget::item:selected {{ background: rgba(13, 148, 136, 46);
     color: palette(text); }}
-QListWidget::item:selected, QTreeWidget#categories::item:selected, QTreeWidget::item:selected:first {{
+QListWidget::item:selected, QTreeView#categories::item:selected:first, QTreeView::item:selected:first {{
     border-left: 3px solid {ICON_TEAL}; }}
-QTreeWidget::branch:selected {{ background: transparent; }}
+QTreeView::branch:selected {{ background: transparent; }}
 QHeaderView::section {{ background: transparent; border: none; border-bottom: 1px solid rgba(127, 127, 127, 60);
                         padding: {RELATED}px {RELATED}px; font-size: 12px; font-weight: 600;
                         color: palette(placeholder-text); }}
@@ -109,8 +110,6 @@ QComboBox QAbstractItemView {{ background: palette(base); color: palette(text); 
                                border-radius: 6px; padding: 4px; outline: none;
                                selection-background-color: rgba(13, 148, 136, 46); selection-color: palette(text); }}
 QComboBox QAbstractItemView::item {{ min-height: 32px; padding: 0 {RELATED}px; border-radius: 4px; }}
-QTreeWidget::branch:has-children:closed {{ image: url({CHEVRON_RIGHT}); border-image: none; }}
-QTreeWidget::branch:has-children:open {{ image: url({CHEVRON_DOWN}); border-image: none; }}
 QLineEdit[filled="true"] {{ border: 1px solid {ICON_TEAL}; font-weight: 600; }}
 QFrame#notice {{ border-radius: 6px; background: rgba(127, 127, 127, 28); }}
 QFrame#notice QLabel {{ font-size: 15px; }}
@@ -268,6 +267,8 @@ class Notices(QWidget):
 
     def show_notices(self, notices):
         """notices: [(kind "error" | "warning" | "info", text, action label or None, callback)]."""
+        if [n[:3] for n in notices] == self.items and self.box.count() == len(notices):
+            return self.setVisible(bool(notices))   # the same notices: nothing is rebuilt
         while self.box.count():
             old = self.box.takeAt(0).widget()
             old.hide()  # hidden at once; deleting happens later and must not leave it overlapping

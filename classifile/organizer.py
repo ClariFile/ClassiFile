@@ -271,8 +271,9 @@ class Organizer:
         except OSError:
             return folder
 
-    def original_missing(self, doc_id):
-        return not Path(self.catalog.document(doc_id)["source_path"]).is_file()
+    def original_missing(self, doc_id, source_path=None):
+        """source_path: where the catalog says the original is, when the caller has it already."""
+        return not Path(source_path or self.catalog.document(doc_id)["source_path"]).is_file()
 
     def locate(self, doc_id, path):
         """Point a document at its original's new location, if it is the same file (same content hash).
