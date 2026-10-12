@@ -151,6 +151,23 @@ MIGRATIONS = [
     ALTER TABLE extraction_units ADD COLUMN layout TEXT;      -- JSON
     ALTER TABLE extraction_units ADD COLUMN ocr_layout TEXT;  -- JSON
     """,
+    # v7: regrouping (move, rename, delete) and feedback on rejected suggestions
+    """
+    ALTER TABLE categories ADD COLUMN deleted_at TEXT;  -- deleted categories stay: earlier placements name them
+    CREATE TABLE moves (                                -- a move that has started; startup finishes it
+        document_id TEXT PRIMARY KEY REFERENCES documents(id),
+        category_id TEXT NOT NULL REFERENCES categories(id),
+        started_at TEXT NOT NULL
+    );
+    CREATE TABLE suggestion_feedback (                  -- the user set the suggested names aside and chose another
+        id INTEGER PRIMARY KEY,
+        document_id TEXT NOT NULL REFERENCES documents(id),
+        analyzer_version TEXT,
+        reason TEXT,                                    -- one of the fixed reasons, or NULL
+        category_id TEXT NOT NULL REFERENCES categories(id),
+        at TEXT NOT NULL
+    );
+    """,
 ]
 
 
@@ -348,6 +365,8 @@ class Catalog:
                             " (SELECT id FROM memberships WHERE document_id = ?)", (doc_id,))
             self.db.execute("DELETE FROM memberships WHERE document_id = ?", (doc_id,))
             self.db.execute("DELETE FROM copies WHERE document_id = ?", (doc_id,))
+            self.db.execute("DELETE FROM moves WHERE document_id = ?", (doc_id,))
+            self.db.execute("DELETE FROM suggestion_feedback WHERE document_id = ?", (doc_id,))
             self.db.execute("DELETE FROM documents WHERE id = ?", (doc_id,))
 
     def analysis(self, doc_id):
@@ -362,7 +381,32 @@ class Catalog:
 
     # -- categories --------------------------------------------------------------------------
     def categories(self):
-        return self.all("SELECT * FROM categories ORDER BY name COLLATE NOCASE, id")
+        return self.all("SELECT * FROM categories WHERE deleted_at IS NULL ORDER BY name COLLATE NOCASE, id")
+
+    def category_counts(self):
+        """{category id: documents in it}."""
+        return dict(self.all("SELECT category_id, COUNT(*) FROM memberships WHERE status = 'active'"
+                             " GROUP BY category_id"))
+
+    def recent_categories(self, n=5):
+        """Ids of the categories used last (a document was filed in or moved to them), latest first."""
+        return [r[0] for r in self.all(
+            "SELECT m.category_id FROM memberships m JOIN categories c ON c.id = m.category_id"
+            " WHERE c.deleted_at IS NULL GROUP BY m.category_id ORDER BY MAX(m.id) DESC LIMIT ?", n)]
+
+    def rename_category(self, cat_id, name, key, folder_name):
+        self.run("UPDATE categories SET name = ?, name_key = ?, folder_name = ? WHERE id = ?",
+                 name, key, folder_name, cat_id)
+
+    def delete_category(self, cat_id):
+        """Only a category without documents. The row stays for the history of earlier placements; its name and
+        folder name become free again. Folders are never touched here."""
+        with self.lock, self.db:
+            if self.db.execute("SELECT 1 FROM memberships WHERE category_id = ? AND status = 'active'",
+                               (cat_id,)).fetchone():
+                raise ValueError("this category still holds documents")
+            self.db.execute("UPDATE categories SET deleted_at = ?, name_key = ?, folder_name = ? WHERE id = ?",
+                            (now(), f"deleted:{cat_id}", f"deleted:{cat_id}", cat_id))
 
     def category(self, cat_id):
         return self.one("SELECT * FROM categories WHERE id = ?", cat_id)
@@ -372,8 +416,9 @@ class Catalog:
 
     def add_category(self, name, key, folder_name, level="user-defined", created_by="user", description=None):
         cat_id = str(uuid.uuid4())
-        self.run("INSERT INTO categories VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                 cat_id, name, key, folder_name, description, level, created_by, now())
+        self.run("INSERT INTO categories (id, name, name_key, folder_name, description, level, created_by, created_at)"
+                 " VALUES (?, ?, ?, ?, ?, ?, ?, ?)", cat_id, name, key, folder_name, description, level, created_by,
+                 now())
         return cat_id
 
     def folder_taken(self, folder_name):
@@ -394,6 +439,40 @@ class Catalog:
                             (mid, "created", provenance, t))
         return mid
 
+    def replace_primary(self, doc_id, cat_id, provenance):
+        """The user's later choice wins: the active primary placement is superseded (kept as history) and a new
+        one is recorded."""
+        t = now()
+        with self.lock, self.db:
+            for (mid,) in self.db.execute("SELECT id FROM memberships WHERE document_id = ? AND role = 'primary'"
+                                          " AND status = 'active'", (doc_id,)).fetchall():
+                self.db.execute("UPDATE memberships SET status = 'superseded', updated_at = ? WHERE id = ?", (t, mid))
+                self.db.execute("INSERT INTO membership_events (membership_id, event, provenance, at)"
+                                " VALUES (?, 'superseded', ?, ?)", (mid, provenance, t))
+            mid = self.db.execute(
+                "INSERT INTO memberships (document_id, category_id, role, provenance, status, created_at, updated_at)"
+                " VALUES (?, ?, 'primary', ?, 'active', ?, ?)", (doc_id, cat_id, provenance, t, t)).lastrowid
+            self.db.execute("INSERT INTO membership_events (membership_id, event, provenance, at) VALUES (?, ?, ?, ?)",
+                            (mid, "created", provenance, t))
+        return mid
+
+    def start_move(self, doc_id, cat_id):
+        self.run("INSERT INTO moves VALUES (?, ?, ?) ON CONFLICT(document_id) DO UPDATE SET"
+                 " category_id = excluded.category_id, started_at = excluded.started_at", doc_id, cat_id, now())
+
+    def end_move(self, doc_id):
+        self.run("DELETE FROM moves WHERE document_id = ?", doc_id)
+
+    def pending_moves(self):
+        return self.all("SELECT document_id, category_id FROM moves ORDER BY started_at, document_id")
+
+    def add_feedback(self, doc_id, cat_id, reason=None):
+        """The suggested names were set aside for this document; the user chose cat_id (reason: a fixed string)."""
+        row = self.one("SELECT e.analyzer_version FROM extractions e JOIN snapshots s ON e.snapshot_id = s.id"
+                       " WHERE s.document_id = ?", doc_id)
+        self.run("INSERT INTO suggestion_feedback (document_id, analyzer_version, reason, category_id, at)"
+                 " VALUES (?, ?, ?, ?, ?)", doc_id, row[0] if row else None, reason, cat_id, now())
+
     def remove_primary(self, doc_id):
         """Undo a placement whose copy never succeeded (the membership and its events)."""
         with self.lock, self.db:
@@ -408,7 +487,9 @@ class Catalog:
         Folders are never touched here."""
         with self.lock, self.db:
             used = self.db.execute("SELECT 1 FROM memberships WHERE category_id = ? UNION ALL SELECT 1 FROM copies"
-                                   " WHERE category_id = ? AND status != 'failed' LIMIT 1", (cat_id, cat_id)).fetchone()
+                                   " WHERE category_id = ? AND status != 'failed' UNION ALL SELECT 1 FROM moves"
+                                   " WHERE category_id = ? UNION ALL SELECT 1 FROM suggestion_feedback"
+                                   " WHERE category_id = ? LIMIT 1", (cat_id,) * 4).fetchone()
             if used:
                 return False
             self.db.execute("DELETE FROM copies WHERE category_id = ?", (cat_id,))
@@ -429,6 +510,9 @@ class Catalog:
     def update_copy(self, copy_id, **fields):
         cols = ", ".join(f"{k} = ?" for k in fields)
         self.run(f"UPDATE copies SET {cols}, updated_at = ? WHERE id = ?", *fields.values(), now(), copy_id)
+
+    def document_copies(self, doc_id, status="published"):
+        return self.all("SELECT * FROM copies WHERE document_id = ? AND status = ? ORDER BY id", doc_id, status)
 
     def copies(self, status=None):
         if status:

@@ -1,14 +1,19 @@
 """Read-only inventory of a folder -> CSV in data/.
 
-Usage: python -m tools.inventory <folder> [--out data/inventory.csv]
+Usage: python -m tools.inventory <folder> [--out data/inventory.csv] [--families] [--known <folder>...]
 
 Files are opened read-only and parsed from memory; nothing is written into the scanned folder.
 The output file is created exclusively and is never overwritten.
+--families pre-fills family_id: files that look like the same material share one (see prefill_families), and
+files in subfolders get the folder name as a suggested primary_label. --known names folders of files that are
+already development data: a scanned file that looks like a version of one is marked in the notes column.
+All of it is a suggestion for the owner to review.
 """
 import argparse
 import csv
 import hashlib
 import os
+import re
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -51,6 +56,7 @@ def scan(folder):
                 relative_path=path.relative_to(folder).as_posix(), file_name=name, extension=ext,
                 size=len(data), sha256=hashlib.sha256(data).hexdigest(), pages=pages,
             )
+            row["_first_page"] = digest  # for grouping only; never written to the CSV
             rows.append(row)
             first_page[row["relative_path"]] = digest
 
@@ -74,10 +80,63 @@ def _group(rows, key, column, prefix, distinct=lambda members: True):
                 r[column] = f"{prefix}{n}"
 
 
+def _name_key(file_name):
+    """The name without its extension, copy marks ("(2)", "copy", "converted"), case and punctuation; "" when
+    too little is left to mean anything."""
+    stem = re.sub(r"(\s*\(\d+\)|[\s_-]*copy|[\s_-]*converted)+$", "", Path(file_name).stem.casefold())
+    key = " ".join(re.findall(r"[a-z0-9]+", stem))
+    return key if len(key) >= 4 and re.search(r"[a-z]", key) else ""
+
+
+def prefill_families(rows, known=()):
+    """Give every row a family_id. Files share a family when they have the same bytes, the same first-page text
+    (PDF), or the same name apart from the extension and copy marks: the same material in another format or
+    version. A family that includes a known (development) file is named DEV-n and noted. Only what scan() already
+    collected is used. Rows that have a subfolder get its name as a suggested primary_label."""
+    everything = list(rows) + list(known)
+    parent = list(range(len(everything)))
+
+    def find(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    seen = {}
+    for i, r in enumerate(everything):
+        for key in (("bytes", r["sha256"]), ("page", r.get("_first_page")), ("name", _name_key(r["file_name"]))):
+            if key[1]:
+                parent[find(i)] = find(seen.setdefault(key, i))
+    families, n_new, n_dev = {}, 0, 0
+    for i, r in enumerate(everything):
+        families.setdefault(find(i), []).append(r)
+    for members in families.values():
+        dev = [r["file_name"] for r in members if any(r is k for k in known)]
+        mine = [r for r in members if not any(r is k for k in known)]
+        if not mine:
+            continue
+        if dev:
+            n_dev += 1
+            fid = f"DEV-{n_dev}"
+        else:
+            n_new += 1
+            fid = f"F{n_new:03d}"
+        for r in mine:
+            r["family_id"] = fid
+            if dev:
+                r["notes"] = f"looks like a version of a development file ({', '.join(sorted(dev))}): joins development"
+            elif len(mine) > 1:
+                r["notes"] = f"{len(mine)} files look like the same material"
+            folder = Path(r["relative_path"]).parent.as_posix()
+            if folder != ".":
+                r["primary_label"] = folder
+    return rows
+
+
 def write_csv(rows, out):
     out.parent.mkdir(parents=True, exist_ok=True)
     with open(out, "x", newline="", encoding="utf-8-sig") as f:  # "x": never overwrite
-        w = csv.DictWriter(f, fieldnames=COLUMNS)
+        w = csv.DictWriter(f, fieldnames=COLUMNS, extrasaction="ignore")
         w.writeheader()
         w.writerows(rows)
 
@@ -86,6 +145,8 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("folder")
     ap.add_argument("--out", type=Path, default=DEFAULT_OUT)
+    ap.add_argument("--families", action="store_true", help="pre-fill family_id (and labels from subfolders)")
+    ap.add_argument("--known", nargs="*", default=[], type=Path, help="folders of files already in development")
     a = ap.parse_args(argv)
     folder, out = Path(a.folder).resolve(), a.out.resolve()
     if not folder.is_dir():
@@ -96,6 +157,12 @@ def main(argv=None):
     if out.exists():
         sys.exit(f"Refusing to overwrite existing file: {out}. Choose another --out.")
     rows = scan(folder)
+    if a.families or a.known:
+        known = []
+        for k in a.known:
+            refuse_final_eval(k)
+            known += scan(k)
+        prefill_families(rows, known)
     write_csv(rows, out)
     print(f"{len(rows)} files -> {out}")
 

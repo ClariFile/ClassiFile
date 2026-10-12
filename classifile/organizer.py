@@ -4,7 +4,11 @@ from pathlib import Path
 
 from classifile.analysis.candidates import analyze, name_key
 from classifile.analysis.summary import summarize
-from classifile.copies.engine import CopyError, make_copy, move_copies, recover, sanitize_folder_name
+import json
+
+from classifile.copies.engine import (
+    CopyError, _Crash, _retire_old_copy, make_copy, move_copies, recover, sanitize_folder_name, settle_category,
+)
 from classifile.reader import READERS, read_document, sha256_file
 
 CLOUD_MARKERS = ("onedrive", "dropbox", "google drive", "googledrive", "icloud drive", "iclouddrive", "box sync")
@@ -60,6 +64,16 @@ class Organizer:
     def startup(self):
         """Recover interrupted copies and reconcile document statuses with copy records."""
         report = recover(self.catalog, self.output_root)
+        for m in self.catalog.pending_moves():  # a move that had started is finished, or dropped if it cannot be
+            try:
+                self.move(m["document_id"], m["category_id"])
+            except (CopyError, ValueError):
+                self.catalog.end_move(m["document_id"])
+        if self.output_root:
+            for cat_id in self._renaming():      # a rename that had started: the rest of its copies follow
+                if self.catalog.category(cat_id):
+                    settle_category(self.catalog, cat_id, self.output_root)
+            self.catalog.set_setting("renaming", "[]")
         for d in self.catalog.all("SELECT d.id, d.status, m.category_id FROM documents d JOIN memberships m"
                                   " ON m.document_id = d.id AND m.role = 'primary' AND m.status = 'active'"):
             row = self.catalog.document(d["id"])
@@ -128,7 +142,7 @@ class Organizer:
         doc = self.catalog.document(doc_id)
         current = self.catalog.active_primary(doc_id)
         if current and current["category_id"] != cat_id:
-            raise ValueError("Changing a document's category isn't available yet.")
+            raise ValueError("This document is already filed. Use Move to… to change its category.")
         if current and doc["status"] == "filed":
             return make_copy(self.catalog, doc_id, doc["sha256"], doc["source_path"], cat_id, self.output_root)
         if doc["status"] in ("pending", "failed"):
@@ -160,6 +174,102 @@ class Organizer:
             raise
         self.catalog.set_document_status(doc_id, "filed")
         return outcome, path
+
+    # -- regrouping: move, rename, delete (decision record B5) -------------------------------------------------
+    def _verified_copy(self, doc, cat_id):
+        """The document's published copy in a category, if the file is still exactly what was filed. A copy that
+        is gone or was edited is flagged and never used."""
+        c = self.catalog.published_copy(doc["sha256"], cat_id)
+        if not c:
+            return None
+        path = Path(c["path"])
+        if not path.exists():
+            self.catalog.update_copy(c["id"], status="missing")
+            return None
+        if sha256_file(path) != c["hash_at_creation"]:
+            self.catalog.update_copy(c["id"], status="edited")
+            return None
+        return path
+
+    def move(self, doc_id, cat_id, _crash_at=None):
+        """Replace a filed document's primary category. The new copy is made from a verified copy (or from the
+        original if its hash still matches) and verified; only then does the placement change (user-corrected) and
+        the old copy go, and only if it is unchanged: an edited copy stays and is flagged.
+        Returns "moved" | "edited" (an edited copy stayed behind) | "same"."""
+        doc = self.catalog.document(doc_id)
+        current = self.catalog.active_primary(doc_id)
+        if doc is None or doc["status"] != "filed" or not current:
+            raise ValueError("Only filed documents can be moved.")
+        root = self.output_root
+        if root is None or not root.is_dir():
+            raise CopyError(f"The output folder {root} can't be found. Choose it again with Change…")
+        if current["category_id"] == cat_id and not self.catalog.one(
+                "SELECT 1 FROM moves WHERE document_id = ?", doc_id):
+            return "same"
+        edited = lambda: len(self.catalog.document_copies(doc_id, "edited"))
+        before = edited()
+        self.catalog.start_move(doc_id, cat_id)  # the intent first: startup finishes a move that stopped
+        try:
+            if current["category_id"] != cat_id:
+                if not self._verified_copy(doc, cat_id):  # a copy already there is used only if it verifies
+                    source = self._verified_copy(doc, current["category_id"]) or Path(doc["source_path"])
+                    if not source.is_file():
+                        raise CopyError("Neither the filed copy nor the original file can be found, so the "
+                                        "document stays where it is.")
+                    make_copy(self.catalog, doc_id, doc["sha256"], source, cat_id, root)
+                if _crash_at == "after-copy":
+                    raise _Crash
+                self.catalog.replace_primary(doc_id, cat_id, "user-corrected")
+                if _crash_at == "after-switch":
+                    raise _Crash
+            for c in self.catalog.document_copies(doc_id):
+                if c["category_id"] != cat_id:
+                    _retire_old_copy(self.catalog, c)
+        except CopyError:
+            self.catalog.end_move(doc_id)
+            raise
+        self.catalog.end_move(doc_id)
+        return "edited" if edited() > before else "moved"
+
+    def _renaming(self):
+        return json.loads(self.catalog.get_setting("renaming", "[]"))
+
+    def rename_category(self, cat_id, name, _crash_at=None):
+        """Rename a category; only ClassiFile's copies move into the renamed folder.
+        Returns the old folders that still hold other files (left in place)."""
+        name = " ".join(name.split())
+        cat = self.catalog.category(cat_id)
+        if not name:
+            raise ValueError("category name is empty")
+        other = self.catalog.category_by_key(name_key(name))
+        if other and other["id"] != cat_id:
+            raise ValueError(f"A category named '{other['name']}' already exists. To combine them, move the "
+                             "documents there instead.")
+        folder = cat["folder_name"]
+        base = sanitize_folder_name(name)
+        if base.casefold() != folder.casefold():  # ponytail: a change of case only keeps the folder's spelling
+            folder, n = base, 2
+            while self.catalog.folder_taken(folder):
+                folder, n = f"{base} ({n})", n + 1
+        self.catalog.set_setting("renaming", json.dumps(self._renaming() + [cat_id]))  # startup finishes it
+        self.catalog.rename_category(cat_id, name, name_key(name), folder)
+        leftover = settle_category(self.catalog, cat_id, self.output_root, _crash_at) if self.output_root else []
+        self.catalog.set_setting("renaming", json.dumps([c for c in self._renaming() if c != cat_id]))
+        return leftover
+
+    def delete_category(self, cat_id):
+        """Delete a category that holds no documents. Its folder is removed only if it is empty.
+        Returns the folder if it stayed (it holds other files), else None."""
+        cat = self.catalog.category(cat_id)
+        self.catalog.delete_category(cat_id)  # refuses while documents are in it
+        folder = self.output_root / cat["folder_name"] if self.output_root else None
+        if folder is None or not folder.is_dir():
+            return None
+        try:
+            folder.rmdir()
+            return None
+        except OSError:
+            return folder
 
     def original_missing(self, doc_id):
         return not Path(self.catalog.document(doc_id)["source_path"]).is_file()

@@ -59,7 +59,7 @@ Run from the project folder (Windows, Python 3.11+; the venv uses 3.12).
 - Run the app: `.venv\Scripts\python -m classifile.app` (catalog in `%LOCALAPPDATA%\ClassiFile`; set `CLASSIFILE_DATA_DIR` to use another data folder)
 - GUI smoke test (CP0): `.venv\Scripts\python -m classifile.app.smoke`
 - Tests: `.venv\Scripts\python -m pytest -q` (temp files go to `test-output\`, recreated on each run)
-- Inventory: `.venv\Scripts\python -m tools.inventory <folder> [--out data\inventory.csv]`
+- Inventory: `.venv\Scripts\python -m tools.inventory <folder> [--out data\inventory.csv] [--families] [--known <folder>...]` (family IDs are suggestions for the owner to review)
 - Splits: `.venv\Scripts\python -m tools.split data\inventory.csv --dev P --val P --final P [--seed N] [--out data\splits.csv]`
 - E8 page labels: `.venv\Scripts\python -m tools.page_labels make <folder>... [--out data\page_labels.csv]`, then `... check [data\page_labels.csv]`
 - Labelling windows: `.venv\Scripts\python -m tools.label_window` (E8), `... --quality` (OCR quality; sample with `tools.ocr_quality make`, count with `tools.ocr_quality check`)
@@ -79,4 +79,4 @@ The sample fixtures actually live in `document-organizer-claude-handoff/claude-h
 
 ## Licensing
 
-PyMuPDF is AGPL. That is fine for personal use; flag it before any distribution.
+PyMuPDF is AGPL, and this repository is public, so ClassiFile is licensed under AGPL-3.0 (`LICENSE`).

@@ -161,3 +161,34 @@ def test_grouping_names_how_a_document_was_filed_and_compares_pairs():
     c = grouping.compare(own, {"a": "x", "b": "y", "c": "x", "d": None})
     assert (c["owner together"], c["over-merged"]) == (2, 1)                        # a with c
     assert (c["fragmented: placed apart"], c["fragmented: left pending"]) == (1, 1)  # a|b apart; d pending
+
+
+def test_inventory_prefills_families_as_suggestions(tmp_path):
+    import pymupdf
+
+    def pdf(path, text):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        doc = pymupdf.open()
+        doc.new_page().insert_text((72, 100), text)
+        doc.save(path)
+        doc.close()
+
+    new, dev = tmp_path / "new", tmp_path / "dev"
+    pdf(new / "Waves.pdf", "waves")
+    (new / "Waves (2).pdf").write_bytes((new / "Waves.pdf").read_bytes())       # the same bytes
+    pdf(new / "Physics" / "Optics notes.pdf", "optics")                          # a subfolder: a suggested label
+    pdf(new / "Algebra copy.pdf", "another edition")                             # a development file's name
+    pdf(new / "Sets.pdf", "sets")
+    pdf(new / "9.pdf", "nine")
+    pdf(dev / "algebra.pdf", "algebra")
+    (dev / "9.docx").write_bytes(b"not a real document")                         # too short a name to mean anything
+    out = tmp_path / "inv.csv"
+    inventory.main([str(new), "--out", str(out), "--known", str(dev)])
+    with open(out, newline="", encoding="utf-8-sig") as f:
+        rows = {r["relative_path"]: r for r in csv.DictReader(f)}
+    fam = {k: r["family_id"] for k, r in rows.items()}
+    assert fam["Waves.pdf"] == fam["Waves (2).pdf"] and len(set(fam.values())) == 5 and all(fam.values())
+    assert fam["Algebra copy.pdf"] == "DEV-1" and "algebra.pdf" in rows["Algebra copy.pdf"]["notes"]
+    assert "joins development" in rows["Algebra copy.pdf"]["notes"] and fam["9.pdf"].startswith("F")
+    assert rows["Physics/Optics notes.pdf"]["primary_label"] == "Physics" and rows["Sets.pdf"]["primary_label"] == ""
+    assert list(next(iter(rows.values()))) == inventory.COLUMNS                  # nothing else is written

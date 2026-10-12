@@ -26,9 +26,11 @@ from classifile.app import app_icon, make_app
 from classifile.app.decision import DecisionPage
 from classifile.app.details import DetailsPanel
 from classifile.app.widgets import (
-    DETAILS_MAX, DETAILS_MIN, DETAILS_WIDTH, GROUP, READING_MAX, PAD, RELATED, ROW, SECTION, STYLE, SUPPORTED, box, DropOverlay, ElidedLabel, Notices, PreviewOverlay, Toast, format_icon, restyle, status_icon,
+    DETAILS_MAX, DETAILS_MIN, DETAILS_WIDTH, GROUP, READING_MAX, PAD, RELATED, ROW, SECTION, STYLE, SUPPORTED, box,
+    DropOverlay, ElidedLabel, Notices, PickerDialog, PreviewOverlay, Toast, format_icon, restyle, status_icon,
     status_word, wrappable,
 )
+from classifile.copies.engine import CopyError
 from classifile.catalog.db import Catalog
 from classifile.organizer import Organizer, is_cloud_synced, read_and_analyze
 from classifile.worker import WorkerPool
@@ -54,6 +56,7 @@ def short_date(iso):
 class Bridge(QObject):
     read_done = Signal(str, object)       # path, (result, analysis, summary) | "reading"
     file_done = Signal(str, object)       # doc_id, (outcome, path) or Exception
+    job_done = Signal(object, object)     # what to call in the window, with what a background job returned
 
 
 class MainWindow(QWidget):
@@ -65,6 +68,9 @@ class MainWindow(QWidget):
         self.filing = {}            # doc_id -> category id, while its copy is being made
         self.batch, self.batch_name, self.new_category = [], "", None
         self.failure = None         # (doc ids, sentence): stays as a notice until those documents are resolved
+        self.feedback = {}          # doc_id -> reason ("" = none given): the suggested names were set aside
+        self.moving = 0             # moves and renames under way (they copy files, so they run off this thread)
+        self.picker_dialog = None
         self.deferred = []          # "Leave pending": moved to the end of the decision page for this session
         self.view = (ALL, None)     # ("all" | "decide" | "recent" | "settings" | "category", category id)
         self.details_open = False
@@ -74,6 +80,7 @@ class MainWindow(QWidget):
         self.bridge = Bridge()
         self.bridge.read_done.connect(self._read_done)
         self.bridge.file_done.connect(self._file_done)
+        self.bridge.job_done.connect(lambda done, result: done(result))
         self.list_style = QStyleFactory.create("Fusion")  # one selection bar (Windows 11 adds a second)
         self.setStyleSheet(STYLE)
         self.setAcceptDrops(True)
@@ -111,6 +118,23 @@ class MainWindow(QWidget):
     def ask_category_name(self):
         text, ok = QInputDialog.getText(self, "New category", "Category name:")
         return text if ok else ""
+
+    def ask_new_name(self, current):
+        text, ok = QInputDialog.getText(self, "Rename category", "New name:", text=current)
+        return text if ok else ""
+
+    def ask_delete_empty(self, n):
+        """After a move: asked once for all the categories it left empty."""
+        text = "1 category is now empty. Delete it?" if n == 1 else f"{n} categories are now empty. Delete them?"
+        return QMessageBox.question(self, "Empty categories", text) == QMessageBox.Yes
+
+    def pick_category(self, title, verb, on_choice):
+        """The category picker in its own small window; on_choice(kind, category id or None, name)."""
+        self.picker_dialog = PickerDialog(self, title, verb, on_choice)
+        self.picker_dialog.picker.set_choices(*self.picker_choices())
+        self.picker_dialog.finished.connect(self.picker_dialog.deleteLater)
+        self.picker_dialog.open()
+        self.picker_dialog.picker.field.setFocus()
 
     def confirm_remove(self, n):
         box = QMessageBox(self)
@@ -281,6 +305,8 @@ class MainWindow(QWidget):
         self.cats.setStyle(self.list_style)
         self.cats.setTextElideMode(Qt.ElideRight)
         self.cats.itemClicked.connect(self._category_clicked)
+        self.cats.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.cats.customContextMenuRequested.connect(self._category_menu_at)
         self.cats.itemExpanded.connect(lambda item: self._remember_expand(item, True))
         self.cats.itemCollapsed.connect(lambda item: self._remember_expand(item, False))
         self.cats_empty = QLabel("No categories yet. Press + to create one, or file a document.")
@@ -332,42 +358,22 @@ class MainWindow(QWidget):
         self.bulk_count = QLabel()
         self.bulk_file = QPushButton("File in…")
         self.bulk_file.clicked.connect(self._bulk_file_clicked)
+        self.bulk_move = QPushButton("Move to…")
+        self.bulk_move.clicked.connect(lambda: self.move_docs(self.selected_ids()))
         self.bulk_remove = QPushButton("Remove")
         self.bulk_remove.clicked.connect(lambda: self.remove_docs(self.selected_ids()))
         clear = QPushButton("Clear")
         clear.clicked.connect(lambda: self.table.clearSelection())  # the list is built after this bar
         self.bulk_clear = clear
-        self.bulk_field = QLineEdit()
-        self.bulk_field.setPlaceholderText("Category name")
-        self.bulk_field.setCompleter(QCompleter([], self))
-        self.bulk_field.completer().setCaseSensitivity(Qt.CaseInsensitive)
-        self.bulk_field.completer().setFilterMode(Qt.MatchContains)
-        self.bulk_field.textChanged.connect(self._update_bulk_confirm)
-        self.bulk_field.returnPressed.connect(self._bulk_confirm)
-        self.bulk_tag = QLabel()
-        self.bulk_tag.setMinimumWidth(self.bulk_tag.fontMetrics().horizontalAdvance("Existing") + 28)
-        self.bulk_tag.setAlignment(Qt.AlignCenter)
-        self.bulk_go = QPushButton("File")
-        self.bulk_go.setObjectName("primary")
-        self.bulk_go.clicked.connect(self._bulk_confirm)
-        self.bulk_form = QWidget()               # its own row, so the bar never squeezes the field
-        form = box(QHBoxLayout(self.bulk_form))
-        form.addWidget(QLabel("File in:"))
-        form.addWidget(self.bulk_field, 1)
-        form.addWidget(self.bulk_tag, 0, Qt.AlignVCenter)
-        form.addWidget(self.bulk_go)
-        self.bulk_form.hide()
-        self.bulk_tag.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         h = box(QHBoxLayout())
         h.addWidget(self.bulk_count)
         h.addSpacing(GROUP - RELATED)
-        h.addWidget(self.bulk_file)
-        h.addWidget(self.bulk_remove)
+        for b in (self.bulk_file, self.bulk_move, self.bulk_remove):
+            h.addWidget(b)
         h.addStretch(1)
         h.addWidget(clear)
         rows = box(QVBoxLayout(bar), (GROUP, RELATED, RELATED, RELATED))
         rows.addLayout(h)
-        rows.addWidget(self.bulk_form)
         bar.hide()
         return bar
 
@@ -542,8 +548,8 @@ class MainWindow(QWidget):
         self._fill_categories()
         self._show_root()
         key, cat = self.view
-        if key == "category" and not self.org.catalog.category(cat):
-            self.view = key, cat = (ALL, None)
+        if key == "category" and (self.org.catalog.category(cat) or {"deleted_at": 1})["deleted_at"]:
+            self.view = key, cat = (ALL, None)  # the category was deleted
         if key in self.nav:
             self.nav[key].setChecked(True)
         empty = not self.org.catalog.all_documents() and not self.inflight
@@ -598,8 +604,6 @@ class MainWindow(QWidget):
                 node.setSelected(True)
         self.cats.blockSignals(False)
         self.cats_empty.setVisible(not cats)
-        names = [c["name"] for c in cats]
-        self.bulk_field.completer().model().setStringList(names)
 
     def _fill_list(self, select_docs=None):
         keep = set(select_docs if select_docs is not None else self.selected_ids())
@@ -682,9 +686,9 @@ class MainWindow(QWidget):
             self.bulk_count.setText(f"{len(ids)} selected")
             self.bulk_file.setEnabled(bool(ready))
             self.bulk_file.setToolTip("" if ready else "Only documents waiting for a decision can be filed.")
+            self.bulk_move.setEnabled(any(d["status"] == "filed" for d in docs))
+            self.bulk_move.setToolTip("" if self.bulk_move.isEnabled() else "Only filed documents can be moved.")
             self.bulk_remove.setEnabled(any(d["status"] in WAITING for d in docs))
-        else:
-            self.bulk_form.hide()
         if self.details_open and len(ids) == 1:
             self.details.show_doc(ids[0])
         self._place_details()
@@ -877,8 +881,9 @@ class MainWindow(QWidget):
         self.refresh()
 
     # -- filing -----------------------------------------------------------------------------------------------
-    def file_docs(self, ids, name):
-        """File waiting documents in a category (created if new). Only these documents; never a rule or alias."""
+    def file_docs(self, ids, name, feedback=None):
+        """File waiting documents in a category (created if new). Only these documents; never a rule or alias.
+        feedback: the suggested names were set aside ("" or one of the fixed reasons); None when they were not."""
         docs = [self.org.catalog.document(i) for i in ids]
         docs = [d for d in docs if d and d["status"] == "needs_decision" and d["id"] not in self.filing
                 and not self.org.original_missing(d["id"])]
@@ -901,6 +906,8 @@ class MainWindow(QWidget):
         self.new_category = None if existing else cat_id  # removed again if every copy fails
         for d in docs:
             self.filing[d["id"]] = cat_id
+            if feedback is not None:
+                self.feedback[d["id"]] = feedback
         for d in docs:
             self.pool.submit(self._file_job, d["id"], cat_id)
         self.refresh()
@@ -923,6 +930,10 @@ class MainWindow(QWidget):
         cat_name = cat["name"] if cat else self.batch_name
         ok = [i for i, o in self.batch if not isinstance(o, Exception)]
         bad = [(i, o) for i, o in self.batch if isinstance(o, Exception)]
+        for i, _ in self.batch:
+            reason = self.feedback.pop(i, None)
+            if reason is not None and i in ok:
+                self.org.catalog.add_feedback(i, cat_id, reason or None)
         discarded = bool(not ok and cat_id == self.new_category and self.org.discard_unused_category(cat_id))
         if bad:
             first_name = self.org.catalog.document(bad[0][0])["file_name"]
@@ -1034,35 +1045,141 @@ class MainWindow(QWidget):
         docs = [self.org.catalog.document(i) for i in ids]
         if single and docs[0]["status"] == "needs_decision" and self.org.original_missing(single):
             menu.addAction("Locate file…", lambda: self.locate_doc(single))
+        if any(d["status"] == "filed" for d in docs):
+            menu.addAction("Move to…", lambda: self.move_docs(ids))
         if any(d["status"] in WAITING for d in docs):
             menu.addAction("Remove from ClassiFile", lambda: self.remove_docs(ids))
         return menu
 
-    # -- bulk filing --------------------------------------------------------------------------------------------
+    # -- filing several documents, moving, renaming and deleting categories ----------------------------------
+    def picker_choices(self):
+        """What the category picker shows: [(id, name, documents)] and the recently used ids."""
+        counts = self.org.catalog.category_counts()
+        return ([(c["id"], c["name"], counts.get(c["id"], 0)) for c in self.org.catalog.categories()],
+                self.org.catalog.recent_categories())
+
     def _bulk_file_clicked(self):
-        self.bulk_form.setVisible(not self.bulk_form.isVisible())
-        if self.bulk_form.isVisible():
-            self.bulk_field.setFocus()
-            self._update_bulk_confirm()
+        ids = [i for i in self.selected_ids() if self.org.catalog.document(i)["status"] == "needs_decision"]
+        if ids:
+            self.pick_category(f"File {len(ids)} document{'s' if len(ids) > 1 else ''} in…", "File",
+                               lambda kind, cat_id, name: self.file_docs(ids, name))
 
-    def _update_bulk_confirm(self):
-        name = " ".join(self.bulk_field.text().split())
-        self.bulk_field.setProperty("filled", bool(name))
-        restyle(self.bulk_field)
-        existing = self.existing_category(name)
-        self.bulk_tag.setVisible(bool(name))
-        self.bulk_tag.setText("Existing" if existing else "New")
-        self.bulk_tag.setObjectName("tagExisting" if existing else "tagNew")
-        restyle(self.bulk_tag)
-        self.bulk_go.setText("File" if existing or not name else "Create && file")
-        self.bulk_go.setEnabled(bool(name))
+    def _background(self, job, done):
+        """Run job() off this thread, then done(result or the exception) in the window."""
+        def run():
+            try:
+                result = job()
+            except Exception as e:
+                result = e
+            self.bridge.job_done.emit(done, result)
+        self.moving += 1
+        self.pool.submit(run)
 
-    def _bulk_confirm(self):
-        name = self.bulk_field.text()
-        if name.strip():
-            self.file_docs(self.selected_ids(), name)
-            self.bulk_field.clear()
-            self.bulk_form.hide()
+    def move_docs(self, ids):
+        ids = [i for i in ids if (self.org.catalog.document(i) or {"status": ""})["status"] == "filed"]
+        if ids:
+            what = "1 document" if len(ids) == 1 else f"{len(ids)} documents"
+            self.pick_category(f"Move {what} to…", "Move", lambda kind, cat_id, name: self._move(ids, cat_id, name))
+
+    def _move(self, ids, cat_id, name):
+        created = cat_id is None
+        try:
+            cat_id = cat_id or self.org.create_category(name)
+        except ValueError as e:
+            self.toast.show_message(str(e).capitalize())
+            return
+        sources = {self.org.catalog.active_primary(i)["category_id"] for i in ids} - {cat_id}
+
+        def job():
+            moved, edited, problems = [], 0, []
+            for i in ids:
+                try:
+                    outcome = self.org.move(i, cat_id)
+                except (CopyError, ValueError) as e:
+                    problems.append(str(e))
+                    continue
+                except Exception as e:
+                    problems.append(f"Something went wrong while moving ({type(e).__name__}). Try again.")
+                    continue
+                moved.append(i)
+                edited += outcome == "edited"
+            return moved, edited, problems
+
+        def done(result):
+            self.moving -= 1
+            moved, edited, problems = result if not isinstance(result, Exception) else ([], 0, [
+                f"Something went wrong while moving ({type(result).__name__}). Try again."])
+            if created and not moved:
+                self.org.discard_unused_category(cat_id)
+            cat = self.org.catalog.category(cat_id)
+            text = f"Moved {len(moved)} document{'s' if len(moved) != 1 else ''} to {cat['name'] if cat else name}."
+            if edited:
+                text += (" 1 copy was changed after filing: it stays in its old folder and is flagged." if edited == 1
+                         else f" {edited} copies were changed after filing: they stay in their old folders, flagged.")
+            if problems:
+                text += f" {len(problems)} couldn't be moved. {problems[0]}"
+            self.toast.show_message(text, ms=10000 if edited or problems else 5000)
+            self.refresh(select_docs=[])
+            counts = self.org.catalog.category_counts()
+            empty = [c for c in sources if not counts.get(c)]
+            if empty and self.ask_delete_empty(len(empty)):  # asked once, for all of them
+                self.delete_categories(empty, quiet=True)
+
+        self._background(job, done)
+
+    def delete_categories(self, cat_ids, quiet=False):
+        kept, deleted = [], 0
+        for cat_id in cat_ids:
+            try:
+                folder = self.org.delete_category(cat_id)
+            except ValueError:
+                self.toast.show_message("This category still holds documents. Move them to another category first.")
+                continue
+            deleted += 1
+            if folder:
+                kept.append(folder)
+        if kept:
+            self.toast.show_message(
+                f"Deleted. Other files remain in {wrappable(kept[0])}"
+                + (f" and {len(kept) - 1} more folder{'s' if len(kept) > 2 else ''}" if len(kept) > 1 else "")
+                + ", so " + ("it was" if len(kept) == 1 else "they were") + " left in place.", ms=10000)
+        elif deleted and not quiet:
+            self.toast.show_message("Deleted the category." if deleted == 1 else f"Deleted {deleted} categories.")
+        self.refresh()
+
+    def rename_category(self, cat_id):
+        cat = self.org.catalog.category(cat_id)
+        name = " ".join(self.ask_new_name(cat["name"]).split())
+        if not name or name == cat["name"]:
+            return
+
+        def done(result):
+            self.moving -= 1
+            if isinstance(result, Exception):
+                self.toast.show_message(str(result) if isinstance(result, ValueError) else
+                                        f"Something went wrong while renaming ({type(result).__name__}). Try again.",
+                                        ms=10000)
+            elif result:
+                self.toast.show_message(f"Renamed to {name}. Other files remain in {wrappable(result[0])}, so that "
+                                        "folder was left in place.", ms=10000)
+            else:
+                self.toast.show_message(f"Renamed to {name}.")
+            self.refresh()
+
+        self._background(lambda: self.org.rename_category(cat_id, name), done)
+
+    def category_menu(self, cat_id):
+        menu = QMenu(self)
+        menu.addAction("Rename category…", lambda: self.rename_category(cat_id))
+        delete = menu.addAction("Delete category", lambda: self.delete_categories([cat_id]))
+        delete.setEnabled(not self.org.catalog.category_counts().get(cat_id))  # only when it holds no documents
+        return menu
+
+    def _category_menu_at(self, pos):
+        item = self.cats.itemAt(pos)
+        cat_id = item.data(0, Qt.UserRole + 1) if item else None
+        if cat_id:
+            self.category_menu(cat_id).exec(self.cats.viewport().mapToGlobal(pos))
 
     # -- keyboard: Space = details, Enter = open or decide, Delete = remove, Esc = close ---------------------
     def eventFilter(self, obj, e):

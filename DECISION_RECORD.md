@@ -1,6 +1,6 @@
 # Decision Record — ClassiFile (Offline Document Organizer)
 
-Version 1.9 · 2026-10-08
+Version 2.0 · 2026-10-12
 
 **Names**
 - **ClariFile:** the suite.
@@ -101,6 +101,7 @@ Version 1.9 · 2026-10-08
 - A separate project, usable standalone or called by ClassiFile on demand.
 - User-facing; accepts documents or pasted text.
 - At least three summary levels.
+- Summaries come from the document's content, never from its file name.
 - Built after the categorizer.
 - A fully separate project, with its own folder, environment and repository.
 - ClassiFile detects an installed SummarEase through a registration file in `%LOCALAPPDATA%\ClariFile`, and asks before using it. Each works alone.
@@ -124,7 +125,8 @@ Version 1.9 · 2026-10-08
   - The matcher measures fit to existing categories, always against all categories.
   - A selection only filters actions. It never renormalizes scores, so selecting fewer categories cannot manufacture confidence.
 - **[Decision] Evidence is weighted, not absolute.**
-  - Identity positions (cover, running headers and footers, metadata, filename) and body text can all count, and any of them can mislead.
+  - Identity positions (cover, running headers and footers, metadata) and body text can all count, and any of them can mislead.
+  - A file name never suggests a category. Suggestions come from the document's content (cover, headings, text, OCR). A file name may count only as weak support for a name the content already gives.
   - Text in prerequisite, reference or "see also" contexts never counts as self-description (A4).
   - Instance identifiers (invoice numbers, dates, lecture or section numbers) are guarded against becoming category names. Complete titles are not banned.
   - A single-member category is not automatically a mistake.
@@ -155,6 +157,10 @@ Version 1.9 · 2026-10-08
 - **[Decision]** One persistent "Needs your decision" queue, with no repeated pop-ups. Selected-mode creation approvals go through it.
 - **[Decision]** Items are grouped only when the underlying ambiguity is equivalent. A batch answer applies only to the listed documents and never silently authorizes an alias or future rule.
 - **[Decision]** New evidence triggers silent recomputation. The user is notified only when a new decision is needed. Unresolved items are not re-asked without meaningful new evidence.
+- **[Decision] No one-click category creation once categories exist.**
+  - No categories yet: the main action may create the suggested category and file ("Create & file").
+  - The top suggestion matches an existing category: the main action files in it ("File in <name>").
+  - Otherwise: the main action opens the category picker ("Choose category…"), with existing categories first and the suggested names offered as new categories. Creating a category always takes an explicit choice.
 - **[Decision]** Effort is reported as four numbers:
   - pending documents;
   - distinct questions;
@@ -233,6 +239,18 @@ Version 1.9 · 2026-10-08
   - Removing a document's final membership leaves a retained, unfiled app copy. It is never a deletion.
   - "Remove membership" is recorded separately from an explicit "incorrect category" judgment.
 - **[Decision]** Each membership has its own copy.
+- **[Decision] Move to…** (one or several filed documents).
+  - Replaces the primary category by the primary-replacement rules above: the new copy is made from a verified copy, the old copy is removed only if it is unchanged, edited copies stay in place and are flagged, nothing is ever overwritten.
+  - An interrupted move is finished at the next start.
+  - Each move is recorded as user-corrected. The latest explicit choice wins.
+- **[Decision] Rename category.**
+  - Only ClassiFile's copies move into the renamed folder, by the verified-copy rules.
+  - If other files remain in the old folder, it is left in place and the user is told.
+  - If the new name already exists, the rename is refused and moving the documents is suggested instead.
+- **[Decision] Delete category.**
+  - Only a category that holds no documents. Its folder is deleted only if it is empty.
+  - When a move leaves categories empty, the user is asked once whether to delete them.
+- **[Decision]** No merge command and no aliases for now.
 - **[Decision] Remove from ClassiFile** (documents waiting for a decision only).
   - The original file is never touched, and no app copy exists yet for a waiting document.
   - Removing deletes the text, analysis and internal summary ClassiFile stored for that document.
@@ -366,6 +384,7 @@ Partial checkpoints are not the completed v1. Evaluation runs alongside developm
 - Scorer comparison (E2) and abstention baseline (E4) on development data, producing the initial matcher.
 - Selected-category mode, with permissions through the queue.
 - "Belongs to" and "Also belongs to", primary replacement rules, and edited-copy protection.
+  - Brought forward in 2.0: "Belongs to" (as Move to…), with primary replacement and edited-copy protection (B5). "Also belongs to" stays here.
 
 **CP4 Automatic mode and discovery**
 - The documented policy (E1) drives the proposer.
@@ -387,7 +406,7 @@ Partial checkpoints are not the completed v1. Evaluation runs alongside developm
 - Copies verified by hash; unrelated files never overwritten.
 - Interrupted operations recover. Crash-injection tests cover the operations shipped so far; merge tests come only once merging ships.
 - Selected-mode permissions enforced (from CP3).
-- Edited app copies protected (from CP3).
+- Edited app copies protected (from CP3; for Move to… and Rename category since 2.0).
 - Evaluation-family separation maintained.
 - An offline run works with networking disabled after installation.
 - Decisions and results are reproducible for the same inputs and versions.
@@ -419,7 +438,7 @@ Partial checkpoints are not the completed v1. Evaluation runs alongside developm
 - Separate packages.
 - Additional representations, unless E2 or E3 justify them.
 - Automatic version linking.
-- Elaborate category management: merging, and renaming beyond the minimum the workflow needs.
+- Elaborate category management: merging and aliases. The minimum the workflow needs (rename, delete an empty category) is in B5 since 2.0.
 - Installer packaging.
 - Burmese and other languages.
 - Both GitHub repositories already exist in the ClariFile organization: ClassiFile (this project, `https://github.com/ClariFile/ClassiFile.git`) and SummarEase (empty until its development starts). The reader stays isolated so SummarEase can reuse it.
@@ -448,3 +467,4 @@ Partial checkpoints are not the completed v1. Evaluation runs alongside developm
 - **1.7 (2026-10-08):** B3: the extraction record keeps layout (line, paragraph and block boundaries, positions and text sizes) for native and OCR text, for SummarEase's later readable view; categorizing text and ClassiFile's interface are unchanged. Authorized by the user.
 - **1.8 (2026-10-08):** B4: name review result on development data (21 of 34 files with a good name in the top three; 3 better names typed); the acceptable names are kept in `data\acceptable_names.csv` outside the repository, not in this record. Authorized by the user.
 - **1.9 (2026-10-08):** neutral wording before the first push: the sample with conflicting identities (B1) is described instead of named by its course code. No requirement or decision changed. File names, course codes, people, institutions and titles from the user's documents stay out of tracked files; tests refer to development files by neutral IDs through a local map in `data\`. Authorized by the user.
+- **2.0 (2026-10-12):** regrouping and naming, after the first filing of the development files gave one category per document. B5: Move to… (primary replacement, recorded as user-corrected), Rename category and Delete category (empty ones only), with the question about emptied categories; no merge and no aliases. D/CP3: "Belongs to" brought forward as Move to…; F: rename and delete of empty categories no longer deferred. B2: no one-click category creation once categories exist. B1: file names never suggest a category and count only as weak support for what the content says. A11: SummarEase summaries come from the content, never the file name. Authorized by the user.

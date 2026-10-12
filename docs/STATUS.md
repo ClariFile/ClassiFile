@@ -1,6 +1,6 @@
 # ClassiFile status
 
-2026-10-12 · decision record version 1.9
+2026-10-12 · decision record version 2.0
 
 ## Done
 
@@ -11,7 +11,7 @@
 **CP1 First end-to-end slice**
 - Import by drag-and-drop or file chooser.
 - PDF extraction with observations and source locations, in a versioned extraction record.
-- Rule-based candidate names with evidence (rules-7 since the name reviews).
+- Rule-based candidate names with evidence (rules-8: file names no longer suggest names).
 - Two-step filing: the user picks or types a category; filing happens only on the button or Enter.
 - Verified copies: temporary name, hash check, publish without overwriting, catalog record.
 - SQLite catalog; reopening the app shows the same state. Startup repairs half-done filings.
@@ -42,7 +42,22 @@
   style and size, and focus changes only the border colour; "Choose another…" opens one panel whose list is as
   tall as its names (the second, small preview is gone: Details shows the pages).
 - `tools.grouping`: the owner's grouping of development files, read from the catalog (read-only).
-- 217 automated tests.
+- Regrouping (record 2.0, B5): Move to… for filed documents (right-click menu and the bar for several
+  documents), Rename category… and Delete category (right-click a category). Moves follow primary replacement:
+  a verified new copy first, the old copy goes only if unchanged, edited copies stay and are flagged, nothing is
+  overwritten, an interrupted move or rename finishes at the next start, each move is recorded as
+  user-corrected. After a move the app asks once about the categories it left empty. Deleted categories stay in
+  the catalog as history; their names are free again.
+- One category picker everywhere a category is chosen: search anywhere in the name, document counts, recently
+  used first, then alphabetical; "Create category 'X'" only as a separate last row; Up/Down, Enter, Esc.
+- No one-click category creation once categories exist (B2): "Create & file" only for the very first category,
+  "File in <name>" when the top suggestion is an existing category, otherwise "Choose category…".
+- "None of these fit — type my own" with optional reasons; the rejection, the reason and the chosen category
+  are recorded in the catalog. "Only one suggestion found" is said when that is the case.
+- File names never suggest a category (B1): they only support a name the content already gives.
+- `tools.inventory --families [--known <folder>...]` pre-fills family IDs as suggestions.
+- AGPL-3.0 licence file (PyMuPDF is AGPL and the repository is public).
+- 231 automated tests.
 
 ## Development results so far
 
@@ -64,6 +79,15 @@ These counts describe development data only. They are not accuracy estimates.
   No two documents share a category, so the comparison of grouping policies (E1) has no pair to measure:
   over-merging and fragmentation are 0 for every policy tried, and no policy put two documents together
   either. This grouping cannot rank policies; a grouping with shared categories would.
+- **The owner's ruling on it (2026-10-12):** one category per document is not wanted; the names were mostly
+  accepted as offered. The owner regroups the 34 files into broader folders, roughly one per course or
+  subject. The regrouped library is then the reference grouping (G3) for E1. The first filing and both name
+  reviews are history only: not labels, not training data.
+- **Incoming files:** 104 PDFs in `data\incoming` (one flat folder), inventoried in
+  `data\inventory_incoming.csv`. Suggested families: 92, of which 9 hold several files (21 files) because
+  their first page reads the same; no two files have the same bytes; 3 files look like versions of development
+  files and are marked to join development. Labels are empty (no subfolders). Suggestions for the owner to
+  review; nothing was read beyond hashes, page counts and a digest of each first page's text.
 
 ## Open
 
@@ -108,10 +132,11 @@ These counts describe development data only. They are not accuracy estimates.
 
 ## Next
 
-1. Discuss the grouping result with the user before any rule change: every document has its own category,
-   which the decision record's A4 rules out for automatic mode ("no folder per file"). Whether these are the
-   categories the user wants, or the suggestions were accepted as offered, decides what E1 needs next.
-2. The two development files still waiting.
+1. The owner regroups the 34 development files with Move to… (and files the two still waiting). Then
+   `tools.grouping` reports the reference grouping against the grouping policies (E1).
+2. The owner fills in the labels in `data\inventory_incoming.csv`, reviews the suggested families and gives
+   the split proportions. Then: split by family, move the final-evaluation files to `data\final-eval\` (never
+   opened until the final evaluation), keep validation separate; only development files are opened.
 3. CP3 (after the user's go-ahead): scorer comparison (E2) and abstention baseline (E4) on development data,
    selected-category mode with permissions through the queue, "Belongs to" / "Also belongs to", primary
    replacement and edited-copy protection.

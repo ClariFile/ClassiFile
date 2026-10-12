@@ -206,3 +206,12 @@ def test_a_title_inside_a_cover_picture_is_suggested_with_less_weight():
     assert ocr_name.score < by_name["Signal Processing"].score
     evidence = [{"source": e.source, "pages": e.pages} for e in ocr_name.evidence]
     assert reason_text(evidence) == "in a picture on the cover"
+
+
+def test_a_file_name_only_supports_what_the_content_says():
+    assert analyze(_record([]), "Signal Processing.pdf").suggestions == []          # never a suggestion by itself
+    a = analyze(_record(["Signal Processing", "Fourier Series"]), "L3-2 Signal_Processing.pdf")
+    by_name = {s.name: [e.source for e in s.evidence] for s in a.suggestions}
+    assert by_name == {"Signal Processing": ["first_page", "filename"], "Fourier Series": ["first_page"]}
+    assert a.suggestions[0].name == "Signal Processing"                              # weak support: one point more
+    assert {"text": "L3", "source": "filename"} in a.instance_markers               # markers are still recorded

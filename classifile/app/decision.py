@@ -1,17 +1,22 @@
 """The "Needs your decision" page: one item per question, with one primary action each."""
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QApplication, QCompleter, QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu, QPushButton,
-    QScrollArea, QSizePolicy, QToolButton, QVBoxLayout, QWidget,
+    QApplication, QButtonGroup, QFrame, QGridLayout, QHBoxLayout, QLabel, QMenu, QPushButton, QScrollArea, QToolButton,
+    QVBoxLayout, QWidget,
 )
 
 from classifile.analysis.candidates import name_key, top_names
 from classifile.app.reasons import reason_text
 from classifile.app.widgets import (
-    CHOICES_MAX, GROUP, PANEL, READING_MAX, RELATED, ElidedLabel, box, format_icon, restyle,
+    CHOICES_MAX, GROUP, PANEL, READING_MAX, RELATED, CategoryPicker, ElidedLabel, box, format_icon, restyle,
 )
 
 TOP = 3
+# Why the suggested names were set aside: (button, hint, what the catalog records). Optional.
+REASONS = (("Too narrow", "A lesson or a section", "too narrow"), ("Too broad", "", "too broad"),
+           ("Wrong topic", "", "wrong topic"), ("Not a real name", "A fragment, a person or a file name",
+                                                "not a real name"),
+           ("Couldn't read the document", "", "could not read"))
 
 
 def group_items(docs):
@@ -94,7 +99,9 @@ class DecisionItem(QFrame):
             actions.addWidget(w)
         actions.addStretch(1)
 
-        self.expanded = self._expanded_area(top)
+        self.all_suggestions = top[:1] if self.group else first["suggestions"]
+        self.one_click = False                  # the primary button files at once (else it opens the choices)
+        self.expanded = self._expanded_area()
         v = box(QVBoxLayout(self), (0, PANEL, 0, PANEL))
         v.addLayout(self.head)
         v.addWidget(self.line)
@@ -123,16 +130,24 @@ class DecisionItem(QFrame):
             self._only(self.primary, self.remove)
             self.line.setToolTip(f"It was at {first['source_path']}")
         else:
-            if self.best:
-                existing = self.c.existing_category(self.best)
-                self.line.setText(f"Suggested category: {existing['name']}" if existing
-                                  else f"Suggested new category: {self.best}")
-                self.primary.setText("File" if existing else "Create && file")
-                self.primary.setToolTip(f"File in '{existing['name']}'" if existing
-                                        else f"Create category '{self.best}' and file")
-            else:
-                self.line.setText("No suggested name. Choose a category.")
-                self.primary.setText("Choose…")
+            existing = self.c.existing_category(self.best) if self.best else None
+            only = "  ·  Only one suggestion found" if len(first["suggestions"]) == 1 else ""
+            if existing:
+                self.line.setText(f"Suggested category: {existing['name']}{only}")
+                shown = existing["name"] if len(existing["name"]) <= 32 else existing["name"][:31] + "…"
+                self.primary.setText(f"File in {shown}".replace("&", "&&"))
+                self.primary.setToolTip(f"File in '{existing['name']}'")
+                self.one_click = True
+            elif self.best and not self.c.category_names():  # the very first category: one click is enough
+                self.line.setText(f"Suggested new category: {self.best}{only}")
+                self.primary.setText("Create && file")
+                self.primary.setToolTip(f"Create category '{self.best}' and file")
+                self.one_click = True
+            else:  # categories exist: a new one is never created with one click (decision record B2)
+                self.line.setText(f"Suggested new category: {self.best}{only}" if self.best
+                                  else "No suggested name. Choose a category.")
+                self.primary.setText("Choose category…")
+                self.choose.hide()
             if first["status_reason"]:
                 self.line.setText(self.line.text() + f"\nLast attempt: {first['status_reason']}")
             self.remove.hide()
@@ -142,107 +157,107 @@ class DecisionItem(QFrame):
         for w in (self.primary, self.choose, self.pending, self.remove):
             w.setVisible(w in keep)
 
-    # -- "Choose another…" -------------------------------------------------------------------------------------
-    def _expanded_area(self, top):
+    # -- the choices: one picker, the suggested names as "New: …" rows -------------------------------------------
+    def _expanded_area(self):
         area = QFrame()
         area.setObjectName("choices")
         area.setMaximumWidth(CHOICES_MAX)
-        self.sugg = QListWidget()               # as tall as its names: nothing cut off, no bar inside the panel
-        self.sugg.setSizeAdjustPolicy(QListWidget.AdjustToContents)
-        self.sugg.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.sugg.setMinimumWidth(200)          # a long name ends in "…" (hover shows it) and never widens the item
-        for bar in (self.sugg.setVerticalScrollBarPolicy, self.sugg.setHorizontalScrollBarPolicy):
-            bar(Qt.ScrollBarAlwaysOff)
-        self.sugg.itemClicked.connect(lambda item: self.field.setText(item.data(Qt.UserRole)))
+        self.picker = CategoryPicker()
+        self.picker.changed.connect(self._update_confirm)
+        self.picker.activated.connect(self.confirm_action)
+        self.picker.cancelled.connect(self.toggle_expanded)
+        self.show_all, self.rejected = False, False
         self.more_button = QPushButton()
         self.more_button.setObjectName("link")
         self.more_button.clicked.connect(self._toggle_more)
-        self.all_suggestions = self.docs[0]["suggestions"] if not self.group else []
-        self.show_all = False
-        self.field = QLineEdit()
-        self.field.setPlaceholderText("Category name")
-        self.field.setCompleter(QCompleter(self.c.category_names(), self))
-        self.field.completer().setCaseSensitivity(Qt.CaseInsensitive)
-        self.field.completer().setFilterMode(Qt.MatchContains)
-        self.field.textChanged.connect(self._update_confirm)
-        self.field.returnPressed.connect(self.confirm_action)
-        self.tag = QLabel()
-        self.tag.setAlignment(Qt.AlignCenter)
-        self.tag.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-        self.tag.setMinimumWidth(self.tag.fontMetrics().horizontalAdvance("Existing") + 28)
-        self.tag.hide()
+        self.none_fit = QPushButton("None of these fit — type my own")
+        self.none_fit.setObjectName("link")
+        self.none_fit.clicked.connect(self._none_fit)
+        links = box(QHBoxLayout())
+        links.addWidget(self.more_button)
+        links.addWidget(self.none_fit)
+        links.addStretch(1)
+        self.reasons = QWidget()                # shown after "None of these fit": optional, one click
+        self.reason_group = QButtonGroup(self)
+        grid = box(QGridLayout(self.reasons))
+        grid.addWidget(QLabel("What was wrong with the suggestions? (optional)"), 0, 0, 1, 3)
+        for n, (label, hint, key) in enumerate(REASONS):
+            b = QPushButton(label)
+            b.setCheckable(True)
+            b.setToolTip(hint)
+            b.setProperty("reason", key)
+            self.reason_group.addButton(b)
+            grid.addWidget(b, 1 + n // 3, n % 3)
         self.confirm = QPushButton("File")
         self.confirm.setObjectName("primary")
         self.confirm.clicked.connect(self.confirm_action)
-        row = box(QHBoxLayout())
-        row.addWidget(QLabel("File in:"))
-        row.addWidget(self.field, 1)
-        row.addWidget(self.tag, 0, Qt.AlignVCenter)
-        row.addWidget(self.confirm)
-        left = box(QVBoxLayout(area), GROUP)
-        left.addWidget(self.sugg)
-        left.addWidget(self.more_button, 0, Qt.AlignLeft)
-        left.addLayout(row)
-        self.sugg.setVisible(not self.group)
-        self.more_button.setVisible(not self.group)
+        bottom = box(QHBoxLayout())
+        bottom.addWidget(self.confirm)
+        bottom.addStretch(1)
+        v = box(QVBoxLayout(area), GROUP)
+        v.addWidget(self.picker)
+        v.addLayout(links)
+        v.addWidget(self.reasons)
+        v.addLayout(bottom)
+        self.reasons.hide()
         area.hide()
         return area
 
-    def _fill_suggestions(self):
-        self.sugg.clear()
+    def _fill_choices(self):
         top = top_names(self.all_suggestions, TOP)
         rest = [s for s in self.all_suggestions if s not in top]
-        for s in top + (rest if self.show_all else []):
-            reason = reason_text(s["evidence"], self.docs[0]["unit"])
-            item = QListWidgetItem(s["name"] + (f"\n    {reason}" if reason else ""))
-            item.setData(Qt.UserRole, s["name"])
-            item.setToolTip(s["name"])
-            self.sugg.addItem(item)
+        offered = [] if self.rejected else top + (rest if self.show_all else [])
+        self.picker.set_choices(*self.c.picker_choices(), suggestions=[
+            (s["name"], reason_text(s["evidence"], self.docs[0]["unit"])) for s in offered])
         self.more_button.setText("Fewer" if self.show_all else f"More ({len(rest)})")
-        self.more_button.setVisible(bool(rest) and not self.group)
+        self.more_button.setVisible(bool(rest) and not self.rejected)
+        self.none_fit.setVisible(bool(top or rest) and not self.rejected)
+        self.reasons.setVisible(self.rejected)
 
     def _toggle_more(self):
         self.show_all = not self.show_all
-        self._fill_suggestions()
+        self._fill_choices()
+
+    def _none_fit(self):
+        """The suggested names are set aside: the user types the category they want."""
+        self.rejected = True
+        self.picker.field.clear()
+        self.picker.field.setPlaceholderText("Type the category you want")
+        self._fill_choices()
+        self.picker.field.setFocus()
 
     def toggle_expanded(self):
         open_ = not self.expanded.isVisible()
         self.expanded.setVisible(open_)
         self.choose.setText("Hide choices" if open_ else "Choose another…")
         if open_:
-            self._fill_suggestions()
-            self.field.setText(self.c.display_name(self.best))
-            self.field.setFocus()
+            self._fill_choices()
+            self.picker.field.setFocus()
 
     def _update_confirm(self):
-        name = " ".join(self.field.text().split())
-        self.field.setProperty("filled", bool(name))
-        restyle(self.field)
-        if not name:
-            self.tag.hide()
-            self.confirm.setText("File")
-            self.confirm.setEnabled(False)
-            return
-        existing = self.c.existing_category(name)
-        self.tag.setText("Existing" if existing else "New")
-        self.tag.setObjectName("tagExisting" if existing else "tagNew")
-        restyle(self.tag)
-        self.tag.show()
-        self.confirm.setText("File" if existing else "Create && file")
-        self.confirm.setToolTip(f"File in '{existing['name']}'" if existing else f"Create category '{name}' and file")
-        self.confirm.setEnabled(True)
+        choice = self.picker.current()
+        self.confirm.setEnabled(bool(choice))  # nothing is filed until a category is chosen
+        new = bool(choice) and choice[0] == "new"
+        self.confirm.setText("Create && file" if new else "File")
+        self.confirm.setToolTip("" if not choice else f"Create category '{choice[2]}' and file" if new
+                                else f"File in '{choice[2]}'")
 
     # -- actions -----------------------------------------------------------------------------------------------
     def primary_action(self):
-        if self.best:
+        if self.one_click:
             self.c.file_docs(self.ids, self.best)
         else:
             self.toggle_expanded()
 
     def confirm_action(self):
-        name = " ".join(self.field.text().split())
-        if name and self.confirm.isEnabled():
-            self.c.file_docs(self.ids, name)
+        choice = self.picker.current()
+        if not choice:
+            return
+        feedback = None
+        if self.rejected and name_key(choice[2]) not in {name_key(s["name"]) for s in self.all_suggestions}:
+            checked = self.reason_group.checkedButton()
+            feedback = checked.property("reason") if checked else ""
+        self.c.file_docs(self.ids, choice[2], feedback)
 
     def keyPressEvent(self, e):
         if e.key() in (Qt.Key_Return, Qt.Key_Enter) and self.primary.isVisible() and self.primary.isEnabled():

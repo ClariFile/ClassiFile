@@ -189,6 +189,43 @@ def move_copies(catalog, new_root):
     return report
 
 
+def settle_category(catalog, cat_id, output_root, _crash_at=None):
+    """Bring a category's published copies into its folder (after a rename, also one that was interrupted), by the
+    verified-copy rules: a new verified copy first, then the old file goes only if it is unchanged. Edited copies
+    stay where they are and are flagged. Old folders are removed only when empty.
+    Returns the old folders that still hold files."""
+    home = Path(output_root) / catalog.category(cat_id)["folder_name"]
+    same = lambda a, b: os.path.normcase(str(a)) == os.path.normcase(str(b))
+    mine = [c for c in catalog.copies("published") if c["category_id"] == cat_id and _inside(c["path"], output_root)]
+    settled = {c["snapshot_sha256"] for c in mine if same(Path(c["path"]).parent, home)}
+    old_dirs = {}
+    for n, c in enumerate(c for c in mine if not same(Path(c["path"]).parent, home)):
+        old = Path(c["path"])
+        old_dirs[os.path.normcase(str(old.parent))] = old.parent
+        if c["snapshot_sha256"] not in settled:  # else a run that stopped already made its twin
+            if not old.exists():
+                catalog.update_copy(c["id"], status="missing")
+                continue
+            if _hash(old) != c["hash_at_creation"]:
+                catalog.update_copy(c["id"], status="edited")
+                continue
+            try:
+                make_copy(catalog, c["document_id"], c["snapshot_sha256"], old, cat_id, output_root, reuse=False)
+            except CopyError:
+                continue  # the old copy stays where it is, still published
+        if _crash_at == "between-copy-and-retire" and n == 0:
+            raise _Crash
+        _retire_old_copy(catalog, c)
+    leftover = []
+    for folder in old_dirs.values():
+        try:
+            folder.rmdir()  # only an empty folder goes; other files are never touched
+        except OSError:
+            if folder.exists():
+                leftover.append(folder)
+    return leftover
+
+
 def finish_moves(catalog, output_root):
     """After an interrupted move: a published copy outside the output folder whose twin (same snapshot and
     category) is published inside it is retired by the same rules."""

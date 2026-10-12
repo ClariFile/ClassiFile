@@ -4,7 +4,7 @@ Evidence weights are simple, provisional and documented here (E6/E7 revisit them
   first_page 2, template 2, recurring 2 (a template line is not also counted as recurring),
   first_page_ocr 1 (a line read from a picture on the cover or title slide),
   running 2 (DOCX/ODT headers and footers, PPTX master and layout text),
-  metadata_title 1, metadata_subject 1, filename 1.
+  metadata_title 1, metadata_subject 1, filename 1 (support only: a file name never suggests a name by itself).
 "first_page" is the first page or slide (its first six qualifying lines), or the first qualifying opening line of
 a DOCX/ODT: those have no cover page, and the lines after the first are headings and body text.
 A suggestion's score is the sum of the weights of its distinct sources. Scores are ranking aids,
@@ -35,7 +35,7 @@ import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-ANALYZER_VERSION = "rules-7"
+ANALYZER_VERSION = "rules-8"
 WEIGHTS = {"keyphrase": 1, "first_page": 2, "first_page_ocr": 1, "template": 2, "recurring": 2, "running": 2, "metadata_title": 1, "metadata_subject": 1, "filename": 1}
 FIRST_PAGE_LINES = 6    # only the first few qualifying first-page lines are candidates
 FLOW_START_LINES = 1    # DOCX/ODT have no cover page: after the first qualifying line come headings and body text
@@ -292,7 +292,10 @@ def analyze(record, file_name):
     stem = Path(file_name).stem.replace("_", " ")
     stem = re.sub(r"[()\[\]{}]", " ", stem)
     stem = re.sub(r"(?<=[A-Za-z])-(?=[A-Za-z])", " ", stem)
-    add(stem, "filename")
+    # The file name never suggests a category (decision record B1). It only supports a name the content already
+    # gave; its instance markers ("L2", "Lecture 5") are still recorded.
+    if name_key(_clean(stem, "filename", markers) or "") in found:
+        add(stem, "filename")
 
     def mark(s):
         s.demoted = ("person" if _is_person(s.name, people, author)

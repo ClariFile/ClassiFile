@@ -1,12 +1,16 @@
 """Small shared widgets and the visual style of the main window."""
 from pathlib import Path
 
-from PySide6.QtCore import QEasingCurve, QPoint, QPointF, QPropertyAnimation, QRectF, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import (
+    QEasingCurve, QEvent, QPoint, QPointF, QPropertyAnimation, QRectF, QSize, Qt, QTimer, Signal,
+)
 from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
-    QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea, QSizePolicy, QToolButton, QVBoxLayout, QWidget,
+    QDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QPushButton, QScrollArea,
+    QSizePolicy, QToolButton, QVBoxLayout, QWidget,
 )
 
+from classifile.analysis.candidates import name_key
 from classifile.app import ICON_DIR
 from classifile.app.preview import PdfPages, thumbnail_png
 from classifile.reader import READERS
@@ -33,6 +37,8 @@ DETAILS_MIN = 360
 DETAILS_MAX = 560
 READING_MAX = 1040      # decision items, notices and settings never stretch wider than this
 CHOICES_MAX = 680       # the "Choose another…" panel of a decision item
+PICKER_LIST_MAX = 280   # the category picker's list scrolls beyond this height
+PICKER_LIST_MAX = 280   # the category picker's list scrolls beyond this height
 PREVIEW_MAX = 560       # tallest details preview; the page is fitted to the panel width below this
 CHEVRON_DOWN = (ICON_DIR.parent / "ui" / "chevron-down.svg").as_posix()
 CHEVRON_RIGHT = (ICON_DIR.parent / "ui" / "chevron-right.svg").as_posix()
@@ -335,6 +341,282 @@ class Toast(QFrame):
     def place(self):
         parent = self.parent().rect()
         self.move(parent.right() - self.width() - 24, parent.bottom() - self.height() - 24)
+
+
+class CategoryPicker(QWidget):
+    """The one way to choose a category (filing, Move to…, several documents at once): a search field over the
+    existing categories, each with its document count, recently used ones first and the rest alphabetically;
+    suggested names as "New: …" rows; and a separate last row that creates the typed name, shown only when
+    nothing matches it exactly. Typing alone never creates a category. Up/Down, Enter and Esc work."""
+
+    changed = Signal()    # the chosen row changed
+    activated = Signal()  # Enter, or a double click on a row
+    cancelled = Signal()  # Esc
+    PROMPT = "Search categories, or type a new name"
+
+    def __init__(self):
+        super().__init__()
+        self.field = QLineEdit()
+        self.field.setPlaceholderText(self.PROMPT)
+        self.field.setClearButtonEnabled(True)
+        self.field.textChanged.connect(lambda *_: self._fill())
+        self.list = QListWidget()               # as tall as its rows up to a limit, then it scrolls
+        self.list.setSizeAdjustPolicy(QListWidget.AdjustToContents)
+        self.list.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.list.setMinimumWidth(200)          # a long name ends in "…" (hover shows it) and never widens the page
+        self.list.setMaximumHeight(PICKER_LIST_MAX)
+        self.list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.list.currentRowChanged.connect(lambda *_: self.changed.emit())
+        self.list.itemDoubleClicked.connect(lambda *_: self.activated.emit())
+        for w in (self.field, self.list):
+            w.installEventFilter(self)
+        self.empty = QLabel("No categories yet. Type a name to create the first one.")
+        self.empty.setObjectName("secondary")
+        self._categories, self._suggestions, self._rows = [], [], []
+        v = box(QVBoxLayout(self))
+        for w in (self.field, self.list, self.empty):
+            v.addWidget(w)
+        self._fill()
+
+    def set_choices(self, categories, recent=(), suggestions=()):
+        """categories: [(id, name, documents)]; recent: ids, latest first; suggestions: [(name, where found)],
+        offered as new categories unless a category of that name exists."""
+        by_id = {c[0]: c for c in categories}
+        first = [by_id[i] for i in recent if i in by_id]
+        self._categories = first + sorted((c for c in categories if c not in first), key=lambda c: c[1].casefold())
+        taken = {name_key(c[1]) for c in categories}
+        self._suggestions = [s for s in suggestions if name_key(s[0]) not in taken]
+        self._fill()
+
+    def current(self):
+        """("existing", category id, name) | ("new", None, name) | None."""
+        row = self.list.currentRow()
+        return self._rows[row] if 0 <= row < len(self._rows) else None
+
+    def _fill(self):
+        keep = self.current()
+        text = " ".join(self.field.text().split())
+        q = text.casefold()
+        rows = [(f"{name} · {count}", ("existing", cat_id, name)) for cat_id, name, count in self._categories
+                if q in name.casefold()]
+        rows += [(f"New: {name}" + (f"\n    {found}" if found else ""), ("new", None, name))
+                 for name, found in self._suggestions if q in name.casefold()]
+        known = {name_key(c[1]) for c in self._categories} | {name_key(s[0]) for s in self._suggestions}
+        if text and name_key(text) not in known:
+            rows.append((f"Create category '{text}'", ("new", None, text)))
+        self.list.blockSignals(True)
+        self.list.clear()
+        for label, choice in rows:
+            item = QListWidgetItem(label)
+            item.setToolTip(choice[2])
+            self.list.addItem(item)
+        self._rows = [choice for _, choice in rows]
+        # What was chosen stays chosen. Otherwise typing picks the first existing category, never a row that creates.
+        self.list.setCurrentRow(self._rows.index(keep) if keep in self._rows else next(
+            (i for i, r in enumerate(self._rows) if q and r[0] == "existing"), -1))
+        self.list.blockSignals(False)
+        self.list.setVisible(bool(rows))
+        self.empty.setVisible(not rows)
+        self.changed.emit()
+
+    def eventFilter(self, obj, e):
+        if e.type() == QEvent.KeyPress:
+            key = e.key()
+            if key in (Qt.Key_Down, Qt.Key_Up) and obj is self.field and self._rows:
+                step = 1 if key == Qt.Key_Down else -1
+                self.list.setCurrentRow(max(0, min(len(self._rows) - 1, self.list.currentRow() + step)))
+                return True
+            if key in (Qt.Key_Return, Qt.Key_Enter):
+                if self.current():
+                    self.activated.emit()
+                return True
+            if key == Qt.Key_Escape:
+                self.cancelled.emit()
+                return True
+        return super().eventFilter(obj, e)
+
+
+class PickerDialog(QDialog):
+    """The category picker in a small window: Move to… and filing several documents at once."""
+
+    def __init__(self, parent, title, verb, on_choice):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.setModal(True)
+        self.setMinimumWidth(440)
+        self.verb, self.on_choice = verb, on_choice
+        heading = QLabel(title)
+        heading.setStyleSheet("font-size: 16px; font-weight: 600;")
+        self.picker = CategoryPicker()
+        self.confirm = QPushButton(verb)
+        self.confirm.setObjectName("primary")
+        self.confirm.clicked.connect(self._accept)
+        cancel = QPushButton("Cancel")
+        cancel.clicked.connect(self.reject)
+        for b in (self.confirm, cancel):
+            b.setAutoDefault(False)             # Enter belongs to the picker
+        buttons = box(QHBoxLayout())
+        buttons.addStretch(1)
+        buttons.addWidget(cancel)
+        buttons.addWidget(self.confirm)
+        v = box(QVBoxLayout(self), PANEL, GROUP)
+        v.addWidget(heading)
+        v.addWidget(self.picker)
+        v.addStretch(1)
+        v.addLayout(buttons)
+        self.picker.changed.connect(self._update)
+        self.picker.activated.connect(self._accept)
+        self.picker.cancelled.connect(self.reject)
+        self._update()
+
+    def _update(self):
+        choice = self.picker.current()
+        self.confirm.setEnabled(bool(choice))
+        self.confirm.setText(f"Create && {self.verb.lower()}" if choice and choice[0] == "new" else self.verb)
+
+    def _accept(self):
+        choice = self.picker.current()
+        if choice:
+            self.accept()
+            self.on_choice(*choice)
+
+
+class CategoryPicker(QWidget):
+    """The one way to choose a category (filing, Move to…, several documents at once): a search field over the
+    existing categories, each with its document count, recently used ones first and the rest alphabetically;
+    suggested names as "New: …" rows; and a separate last row that creates the typed name, shown only when
+    nothing matches it exactly. Typing alone never creates a category. Up/Down, Enter and Esc work."""
+
+    changed = Signal()    # the chosen row changed
+    activated = Signal()  # Enter, or a double click on a row
+    cancelled = Signal()  # Esc
+    PROMPT = "Search categories, or type a new name"
+
+    def __init__(self):
+        super().__init__()
+        self.field = QLineEdit()
+        self.field.setPlaceholderText(self.PROMPT)
+        self.field.setClearButtonEnabled(True)
+        self.field.textChanged.connect(lambda *_: self._fill())
+        self.list = QListWidget()               # as tall as its rows up to a limit, then it scrolls
+        self.list.setSizeAdjustPolicy(QListWidget.AdjustToContents)
+        self.list.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.list.setMinimumWidth(200)          # a long name ends in "…" (hover shows it) and never widens the page
+        self.list.setMaximumHeight(PICKER_LIST_MAX)
+        self.list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.list.currentRowChanged.connect(lambda *_: self.changed.emit())
+        self.list.itemDoubleClicked.connect(lambda *_: self.activated.emit())
+        for w in (self.field, self.list):
+            w.installEventFilter(self)
+        self.empty = QLabel("No categories yet. Type a name to create the first one.")
+        self.empty.setObjectName("secondary")
+        self._categories, self._suggestions, self._rows = [], [], []
+        v = box(QVBoxLayout(self))
+        for w in (self.field, self.list, self.empty):
+            v.addWidget(w)
+        self._fill()
+
+    def set_choices(self, categories, recent=(), suggestions=()):
+        """categories: [(id, name, documents)]; recent: ids, latest first; suggestions: [(name, where found)],
+        offered as new categories unless a category of that name exists."""
+        by_id = {c[0]: c for c in categories}
+        first = [by_id[i] for i in recent if i in by_id]
+        self._categories = first + sorted((c for c in categories if c not in first), key=lambda c: c[1].casefold())
+        taken = {name_key(c[1]) for c in categories}
+        self._suggestions = [s for s in suggestions if name_key(s[0]) not in taken]
+        self._fill()
+
+    def current(self):
+        """("existing", category id, name) | ("new", None, name) | None."""
+        row = self.list.currentRow()
+        return self._rows[row] if 0 <= row < len(self._rows) else None
+
+    def _fill(self):
+        keep = self.current()
+        text = " ".join(self.field.text().split())
+        q = text.casefold()
+        rows = [(f"{name} · {count}", ("existing", cat_id, name)) for cat_id, name, count in self._categories
+                if q in name.casefold()]
+        rows += [(f"New: {name}" + (f"\n    {found}" if found else ""), ("new", None, name))
+                 for name, found in self._suggestions if q in name.casefold()]
+        known = {name_key(c[1]) for c in self._categories} | {name_key(s[0]) for s in self._suggestions}
+        if text and name_key(text) not in known:
+            rows.append((f"Create category '{text}'", ("new", None, text)))
+        self.list.blockSignals(True)
+        self.list.clear()
+        for label, choice in rows:
+            item = QListWidgetItem(label)
+            item.setToolTip(choice[2])
+            self.list.addItem(item)
+        self._rows = [choice for _, choice in rows]
+        # What was chosen stays chosen. Otherwise typing picks the first existing category, never a row that creates.
+        self.list.setCurrentRow(self._rows.index(keep) if keep in self._rows else next(
+            (i for i, r in enumerate(self._rows) if q and r[0] == "existing"), -1))
+        self.list.blockSignals(False)
+        self.list.setVisible(bool(rows))
+        self.empty.setVisible(not rows)
+        self.changed.emit()
+
+    def eventFilter(self, obj, e):
+        if e.type() == QEvent.KeyPress:
+            key = e.key()
+            if key in (Qt.Key_Down, Qt.Key_Up) and obj is self.field and self._rows:
+                step = 1 if key == Qt.Key_Down else -1
+                self.list.setCurrentRow(max(0, min(len(self._rows) - 1, self.list.currentRow() + step)))
+                return True
+            if key in (Qt.Key_Return, Qt.Key_Enter):
+                if self.current():
+                    self.activated.emit()
+                return True
+            if key == Qt.Key_Escape:
+                self.cancelled.emit()
+                return True
+        return super().eventFilter(obj, e)
+
+
+class PickerDialog(QDialog):
+    """The category picker in a small window: Move to… and filing several documents at once."""
+
+    def __init__(self, parent, title, verb, on_choice):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.setModal(True)
+        self.setMinimumWidth(440)
+        self.verb, self.on_choice = verb, on_choice
+        heading = QLabel(title)
+        heading.setStyleSheet("font-size: 16px; font-weight: 600;")
+        self.picker = CategoryPicker()
+        self.confirm = QPushButton(verb)
+        self.confirm.setObjectName("primary")
+        self.confirm.clicked.connect(self._accept)
+        cancel = QPushButton("Cancel")
+        cancel.clicked.connect(self.reject)
+        for b in (self.confirm, cancel):
+            b.setAutoDefault(False)             # Enter belongs to the picker
+        buttons = box(QHBoxLayout())
+        buttons.addStretch(1)
+        buttons.addWidget(cancel)
+        buttons.addWidget(self.confirm)
+        v = box(QVBoxLayout(self), PANEL, GROUP)
+        v.addWidget(heading)
+        v.addWidget(self.picker)
+        v.addStretch(1)
+        v.addLayout(buttons)
+        self.picker.changed.connect(self._update)
+        self.picker.activated.connect(self._accept)
+        self.picker.cancelled.connect(self.reject)
+        self._update()
+
+    def _update(self):
+        choice = self.picker.current()
+        self.confirm.setEnabled(bool(choice))
+        self.confirm.setText(f"Create && {self.verb.lower()}" if choice and choice[0] == "new" else self.verb)
+
+    def _accept(self):
+        choice = self.picker.current()
+        if choice:
+            self.accept()
+            self.on_choice(*choice)
 
 
 class DropOverlay(QFrame):

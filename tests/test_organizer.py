@@ -1,3 +1,4 @@
+import hashlib
 import sys
 
 import pymupdf
@@ -74,7 +75,7 @@ def test_persistence_across_reopen(samples, make_org):
     org.startup()
     assert _snapshot(org) == before
     assert org.catalog.analysis(ids[SAMPLE["S1"]]) == analysis
-    assert org.catalog.schema_version == 6
+    assert org.catalog.schema_version == 7
     assert {d[2] for d in before[2]} == {"needs_decision"} and len(before[2]) == 5
 
 
@@ -173,7 +174,7 @@ def test_catalog_migrates_v1_pdf_rows(tmp_path, monkeypatch):
     old.close()
     monkeypatch.undo()
     cat = db.Catalog(path)
-    assert cat.schema_version == len(db.MIGRATIONS) == 6
+    assert cat.schema_version == len(db.MIGRATIONS) == 7
     e = cat.one("SELECT format, unit, unit_count, record_version FROM extractions")
     assert tuple(e) == ("pdf", "page", 1, 1)  # old rows keep their record version
     u = cat.one("SELECT unit_index, kind, text, text_area FROM extraction_units")
@@ -217,3 +218,124 @@ def test_locate_checks_the_content_hash(samples, make_org, tmp_path):
     inside.write_bytes(moved.read_bytes())
     with pytest.raises(ValueError, match="inside the output folder"):
         org.locate(doc, inside)
+
+
+# -- regrouping: move, rename, delete (decision record B5) -----------------------------------------------------------
+def _filed(samples, make_org, names=("S2", "S3")):
+    org = make_org()
+    ids = _import_all(org, samples)
+    cat = org.create_category("First")
+    for s in names:
+        org.file(ids[SAMPLE[s]], cat)
+    return org, ids, cat
+
+
+def _files(folder):
+    return sorted(p.name for p in folder.iterdir()) if folder.is_dir() else None
+
+
+def test_move_replaces_the_primary_category(samples, make_org):
+    before = source_state(samples)
+    org, ids, first = _filed(samples, make_org)
+    doc, other = ids[SAMPLE["S2"]], ids[SAMPLE["S3"]]
+    second = org.create_category("Second")
+    assert org.move(doc, second) == "moved"
+    assert _files(org.output_root / "Second") == [SAMPLE["S2"]] and _files(org.output_root / "First") == [SAMPLE["S3"]]
+    assert [d["id"] for d in org.catalog.documents(second)] == [doc]
+    assert [d["id"] for d in org.catalog.documents(first)] == [other]
+    rows = org.catalog.all("SELECT category_id, provenance, status FROM memberships WHERE document_id = ? ORDER BY id", doc)
+    assert [tuple(r) for r in rows] == [(first, "user-confirmed", "superseded"), (second, "user-corrected", "active")]
+    assert org.move(doc, second) == "same" and org.catalog.pending_moves() == []
+    assert org.move(doc, first) == "moved"                      # back again: the latest explicit choice wins
+    assert _files(org.output_root / "First") == sorted([SAMPLE["S2"], SAMPLE["S3"]])
+    with pytest.raises(ValueError):
+        org.move(ids[SAMPLE["S1"]], second)                     # a waiting document is filed, not moved
+    assert source_state(samples) == before                      # originals: untouched by any of it
+
+
+def test_move_leaves_an_edited_copy_in_place_and_never_overwrites(samples, make_org):
+    org, ids, first = _filed(samples, make_org, names=("S2",))
+    doc = ids[SAMPLE["S2"]]
+    old = org.output_root / "First" / SAMPLE["S2"]
+    old.write_bytes(old.read_bytes() + b"\n% my notes\n")       # the user edited the filed copy
+    second = org.create_category("Second")
+    stranger = org.output_root / "Second" / SAMPLE["S2"]
+    stranger.parent.mkdir()
+    stranger.write_bytes(b"someone else's file")
+    assert org.move(doc, second) == "edited"                    # made from the original, whose hash still matches
+    assert old.read_bytes().endswith(b"% my notes\n")           # the edited copy stays, flagged
+    assert org.catalog.one("SELECT status FROM copies WHERE path = ?", str(old))[0] == "edited"
+    assert stranger.read_bytes() == b"someone else's file"      # never overwritten: the copy took another name
+    new = org.catalog.documents(second)[0]["copy_path"]
+    assert new != str(stranger) and hashlib.sha256(open(new, "rb").read()).hexdigest() == org.catalog.document(doc)["sha256"]
+
+
+@pytest.mark.parametrize("crash_at", ["after-copy", "after-switch"])
+def test_an_interrupted_move_finishes_at_startup(samples, make_org, crash_at):
+    from classifile.copies import engine
+
+    org, ids, first = _filed(samples, make_org, names=("S2",))
+    doc, second = ids[SAMPLE["S2"]], org.create_category("Second")
+    with pytest.raises(engine._Crash):
+        org.move(doc, second, _crash_at=crash_at)
+    assert _files(org.output_root / "First") == [SAMPLE["S2"]]  # the old copy is never gone before the end
+    org = make_org()                                            # the app starts again
+    org.startup()
+    assert org.catalog.pending_moves() == []
+    assert _files(org.output_root / "Second") == [SAMPLE["S2"]] and _files(org.output_root / "First") == []
+    assert [d["id"] for d in org.catalog.documents(second)] == [doc] and org.catalog.documents(first) == []
+    assert org.catalog.document(doc)["status"] == "filed"
+
+
+def test_rename_moves_only_the_apps_copies(samples, make_org):
+    before = source_state(samples)
+    org, ids, first = _filed(samples, make_org)
+    other = org.output_root / "First" / "my own notes.txt"
+    other.write_text("not ClassiFile's")
+    taken = org.create_category("Taken")
+    with pytest.raises(ValueError, match="move the documents there instead"):
+        org.rename_category(first, " taken ")
+    leftover = org.rename_category(first, "Renamed")
+    assert leftover == [org.output_root / "First"] and _files(org.output_root / "First") == ["my own notes.txt"]
+    assert _files(org.output_root / "Renamed") == sorted([SAMPLE["S2"], SAMPLE["S3"]])
+    cat = org.catalog.category(first)
+    assert (cat["name"], cat["folder_name"]) == ("Renamed", "Renamed")
+    assert all(d["copy_path"].startswith(str(org.output_root / "Renamed")) for d in org.catalog.documents(first))
+    assert org.rename_category(first, "RENAMED") == []          # a change of case only: the folder is the same one
+    assert org.catalog.category(first)["folder_name"] == "Renamed"
+    other.unlink()
+    assert org.rename_category(first, "Again") == [] and not (org.output_root / "Renamed").exists()
+    assert not (org.output_root / "First").exists() or _files(org.output_root / "First") == []
+    assert source_state(samples) == before and taken
+
+
+def test_an_interrupted_rename_finishes_at_startup(samples, make_org):
+    from classifile.copies import engine
+
+    org, ids, first = _filed(samples, make_org)
+    with pytest.raises(engine._Crash):
+        org.rename_category(first, "Renamed", _crash_at="between-copy-and-retire")
+    both = len(_files(org.output_root / "First")) + len(_files(org.output_root / "Renamed"))
+    assert both == 3                                            # one document is in both folders; none is lost
+    org = make_org()
+    org.startup()
+    assert _files(org.output_root / "Renamed") == sorted([SAMPLE["S2"], SAMPLE["S3"]])
+    assert not (org.output_root / "First").exists() and org.catalog.get_setting("renaming") == "[]"
+    assert len(org.catalog.documents(first)) == 2
+
+
+def test_delete_only_an_empty_category_and_only_an_empty_folder(samples, make_org):
+    org, ids, first = _filed(samples, make_org, names=("S2",))
+    with pytest.raises(ValueError):
+        org.delete_category(first)                              # it holds a document
+    second = org.create_category("Second")
+    org.move(ids[SAMPLE["S2"]], second)
+    (org.output_root / "First" / "kept.txt").write_text("mine")
+    assert org.delete_category(first) == org.output_root / "First"   # not empty: the folder stays
+    assert [c["name"] for c in org.catalog.categories()] == ["Second"]
+    assert org.catalog.category(first)["name"] == "First"       # the earlier placement still names it
+    again = org.create_category("First")                        # the name is free again
+    assert org.catalog.category(again)["folder_name"] == "First"
+    third = org.create_category("Third")
+    (org.output_root / "Third").mkdir()
+    assert org.delete_category(third) is None and not (org.output_root / "Third").exists()

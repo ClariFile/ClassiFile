@@ -39,6 +39,9 @@ class Recorder:
         w.ask_close = self._close
         w.ask_move = lambda n: self.move_answer
         w.pick_folder = lambda title: self.folder
+        self.empties, self.delete_answer, self.new_name = [], True, ""
+        w.ask_delete_empty = lambda n: self.empties.append(n) or self.delete_answer
+        w.ask_new_name = lambda current: self.new_name
 
     def _remove(self, n):
         self.removes += 1
@@ -67,6 +70,18 @@ def _rows(w):
 
 def _item(w, title):
     return next(i for i in w.decision.items if i.title.full == title)
+
+
+def _rows_of(picker):
+    return [picker.list.item(i).text() for i in range(picker.list.count())]
+
+
+def _pick(picker, text, starts=None):
+    """Type into a category picker; with `starts`, choose the first row that begins so. Returns the choice."""
+    picker.field.setText(text)
+    if starts is not None:
+        picker.list.setCurrentRow(next(i for i, r in enumerate(_rows_of(picker)) if r.startswith(starts)))
+    return picker.current()
 
 
 def _category_node(w, name):
@@ -129,18 +144,18 @@ def test_decision_page_two_step_filing_toast_and_details(app, samples, make_org)
     assert cst.primary.text() == "Create && file" and cst.choose.isVisible() and cst.pending.isVisible()
     cst.choose.click()                                              # expands in place
     # two names now: lines that only repeat on some pages are under "More"
-    assert cst.expanded.isVisible() and cst.sugg.count() == 2 and cst.more_button.isVisible()
-    assert f"{cover}\n    on the cover" in [cst.sugg.item(i).text() for i in range(2)]
-    assert cst.field.text() == cover and cst.field.property("filled") is True
+    assert cst.expanded.isVisible() and len(_rows_of(cst.picker)) == 2 and cst.more_button.isVisible()
+    assert f"New: {cover}\n    on the cover" in _rows_of(cst.picker)
+    assert cst.picker.current() is None and not cst.confirm.isEnabled()  # nothing is chosen for the user
     cst.more_button.click()
-    nde = next(i for i in range(cst.sugg.count()) if cst.sugg.item(i).text().startswith(course))
-    cst.sugg.itemClicked.emit(cst.sugg.item(nde))                   # a click only fills the field
-    assert cst.field.text() == course
-    assert cst.confirm.text() == "Create && file" and cst.tag.text() == "New"
+    cst.picker.list.setCurrentRow(next(i for i, r in enumerate(_rows_of(cst.picker))
+                                       if r.startswith(f"New: {course}")))  # choosing a row files nothing
+    assert cst.picker.current() == ("new", None, course)
+    assert cst.confirm.text() == "Create && file" and cst.confirm.isEnabled()
     assert cst.confirm.toolTip() == f"Create category '{course}' and file"
     assert w.org.catalog.categories() == [] and len(w.waiting()) == 3  # nothing filed yet
 
-    QTest.keyClick(cst.field, Qt.Key_Return)                        # Enter files
+    QTest.keyClick(cst.picker.field, Qt.Key_Return)                 # Enter files
     _pump(app, lambda: not w.filing)
     out = w.org.output_root / course / SAMPLE["S1"]
     assert out.exists() and len(w.decision.items) == 2
@@ -149,10 +164,12 @@ def test_decision_page_two_step_filing_toast_and_details(app, samples, make_org)
     node = _category_node(w, course)
     assert node.text(1) == "1" and node.childCount() == 1
 
-    lec = _item(w, SAMPLE["S3"])                     # an existing category, typed differently
-    lec.choose.click()
-    lec.field.setText(course.lower())
-    assert lec.tag.text() == "Existing" and lec.confirm.text() == "File"
+    lec = _item(w, SAMPLE["S3"])                     # a category exists now: no new one with one click
+    assert lec.primary.text() == "Choose category…" and not lec.choose.isVisible()
+    lec.primary.click()
+    assert lec.expanded.isVisible() and _rows_of(lec.picker)[0] == f"{course} · 1"  # existing first, with counts
+    assert _pick(lec.picker, course.lower()) == ("existing", w.org.catalog.categories()[0]["id"], course)
+    assert lec.confirm.text() == "File" and _rows_of(lec.picker) == [f"{course} · 1"]  # typed differently: no "Create"
     w.toast.action.click()                                          # Show: the category, the document selected
     assert w.view[0] == "category" and [w.org.catalog.document(i)["file_name"] for i in w.selected_ids()] == \
         [SAMPLE["S1"]]
@@ -192,8 +209,8 @@ def test_group_item_files_only_the_listed_documents(app, samples, make_org, tmp_
     assert group.group and group.names.isVisible() and SAMPLE["S2"] in group.names.text()
     assert second.name in group.names.text() and len(w.decision.items) == 2
     best = group.best
-    group.choose.click()                                            # one field for the group
-    assert not group.sugg.isVisible() and group.field.text() == best
+    group.choose.click()                                            # one picker for the group
+    assert [r.split("\n")[0] for r in _rows_of(group.picker)] == [f"New: {best}"]
     group.primary.click()
     _pump(app, lambda: not w.filing)
     cat = w.org.catalog.category_by_key(best.casefold())
@@ -241,7 +258,7 @@ def test_missing_original_on_decision_page_and_locate(app, samples, make_org, tm
     item = _item(w, original.name)
     assert item.primary.text() == "Create && file" and item.choose.isVisible()
     item.choose.click()
-    item.field.setText("Course Notes")
+    _pick(item.picker, "Course Notes", "Create category")
     item.confirm.click()
     _pump(app, lambda: not w.filing)
     assert (w.org.output_root / "Course Notes" / original.name).exists()
@@ -259,7 +276,7 @@ def test_failed_filing_leaves_nothing_half_done_and_the_error_stays(app, samples
     original.unlink()
     _item(w, original.name).choose.click()
     item = _item(w, original.name)
-    item.field.setText("Course Notes")
+    _pick(item.picker, "Course Notes", "Create category")
     item.confirm.click()
     _pump(app, lambda: not w.filing)
     expected = f"The original file is no longer at {original}. Import it again from its new location."
@@ -290,10 +307,17 @@ def test_bulk_bar_context_menu_keyboard_and_search(app, samples, make_org):
     assert w.bulk.isVisible() and w.bulk_count.text() == "2 selected"
     actions = [a.text() for a in w.context_menu(w.selected_ids()).actions()]
     assert actions == ["Remove from ClassiFile"]
-    w.bulk_file.click()
-    w.bulk_field.setText("Networking")
-    assert w.bulk_go.text() == "Create && file" and w.bulk_tag.text() == "New"
-    QTest.keyClick(w.bulk_field, Qt.Key_Return)
+    assert w.bulk_file.isEnabled() and not w.bulk_move.isEnabled()  # nothing filed yet
+    w.bulk_file.click()                                            # the same picker, in a small window
+    dialog = w.picker_dialog
+    assert dialog.windowTitle() == "File 2 documents in…" and not dialog.confirm.isEnabled()
+    dialog.picker.field.setText("Networking")
+    assert dialog.picker.current() is None                         # typing never creates a category by itself
+    QTest.keyClick(dialog.picker.field, Qt.Key_Return)             # so Enter does nothing yet
+    assert dialog.isVisible() and w.org.catalog.categories() == []
+    QTest.keyClick(dialog.picker.field, Qt.Key_Down)               # down to "Create category 'Networking'"
+    assert dialog.confirm.text() == "Create && file"
+    QTest.keyClick(dialog.picker.field, Qt.Key_Return)
     _pump(app, lambda: not w.filing)
     assert w.toast.label.text() == "Filed 2 documents in Networking"
     cat = w.org.catalog.category_by_key("networking")
@@ -304,7 +328,7 @@ def test_bulk_bar_context_menu_keyboard_and_search(app, samples, make_org):
     w.select_docs([filed])
     assert not w.bulk.isVisible()
     actions = [a.text() for a in w.context_menu([filed]).actions()]
-    assert actions == ["Open", "Show in folder", "Details"]        # filed documents can't be removed here
+    assert actions == ["Open", "Show in folder", "Details", "Move to…"]  # filed documents can't be removed here
     waiting = _doc(w, SAMPLE["S4"])
     actions = [a.text() for a in w.context_menu([waiting]).actions()]
     assert actions == ["Details", "Remove from ClassiFile"]
@@ -503,7 +527,7 @@ def test_details_open_beside_the_decision_page(app, samples, make_org):
     _pump(app, lambda: item.confirm.isVisible())
     right = item.confirm.mapTo(w.content, item.confirm.rect().topRight()).x()
     assert right < w.details.x() and w.details.geometry().right() < w.content.width()  # both in view at once
-    item.field.setText("My Category")
+    _pick(item.picker, "My Category", "Create category")
     item.confirm.click()
     _pump(app, lambda: not w.filing)
     assert w.view[0] == DECIDE and not w.details.isVisible()       # filed: its details close, the page stays
@@ -562,10 +586,11 @@ def test_no_stray_windows_appear(app, samples, make_org, tmp_path):
         w.select_docs([_doc(w, SAMPLE["S5"])])
         w.set_details_open(True)
         w.select_docs([d["id"] for d in w.waiting()])              # the bar for several documents
-        w.bulk_file.click()
+        w.bulk_file.click()                                        # the picker's own window: the only other one
+        w.picker_dialog.reject()
         w.show_view(SETTINGS)
         w.refresh()
-        assert watch.seen == ["MainWindow"]
+        assert watch.seen == ["MainWindow", "PickerDialog"]
     finally:
         app.removeEventFilter(watch)
     _close(w, rec)
@@ -582,7 +607,7 @@ def test_the_decision_page_stays_where_it_is_after_filing(app, samples, make_org
     _pump(app, lambda: bar.maximum() > 0)
     item = w.decision.items[1]
     item.choose.click()
-    item.field.setText("My Category")
+    _pick(item.picker, "My Category", "Create category")
     item.confirm.click()                                           # the focused field goes away with its item
     assert bar.value() == 0
     _pump(app, lambda: not w.filing)
@@ -591,4 +616,174 @@ def test_the_decision_page_stays_where_it_is_after_filing(app, samples, make_org
     assert w.toast.isVisible() and w.toast.parent() is w           # the message slides in over the corner
     _pump(app, lambda: w.toast.slide.state() != w.toast.slide.State.Running)
     assert w.toast.geometry().bottom() < w.height() and w.toast.geometry().right() < w.width()
+    _close(w, rec)
+
+
+def test_category_picker_rows_and_keys(app):
+    from classifile.app.widgets import CategoryPicker
+
+    p = CategoryPicker()
+    assert p.empty.text().startswith("No categories yet") and p.current() is None
+    cats = [("a", "Networks", 7), ("b", "algebra", 0), ("c", "Discrete Mathematics", 3), ("d", "Writing", 1)]
+    p.set_choices(cats, recent=["d", "c"], suggestions=[("Sampling Theorem", "on the cover"), ("networks", "")])
+    assert _rows_of(p) == ["Writing · 1", "Discrete Mathematics · 3", "algebra · 0", "Networks · 7",
+                           "New: Sampling Theorem\n    on the cover"]   # recent first, then A–Z; no "New" twin
+    assert p.current() is None
+    p.field.setText("MATH")                                        # anywhere in the name, ignoring case
+    assert _rows_of(p) == ["Discrete Mathematics · 3", "Create category 'MATH'"]
+    assert p.current() == ("existing", "c", "Discrete Mathematics")    # typing chooses only what exists
+    p.field.setText("  writing ")
+    assert _rows_of(p) == ["Writing · 1"]                          # an exact match: no row to create it again
+    p.field.setText("Thermodynamics")
+    assert _rows_of(p) == ["Create category 'Thermodynamics'"] and p.current() is None
+    seen = []
+    p.activated.connect(lambda: seen.append("enter"))
+    p.cancelled.connect(lambda: seen.append("esc"))
+    QTest.keyClick(p.field, Qt.Key_Return)                         # nothing chosen: Enter does nothing
+    QTest.keyClick(p.field, Qt.Key_Down)
+    assert p.current() == ("new", None, "Thermodynamics")
+    QTest.keyClick(p.field, Qt.Key_Return)
+    QTest.keyClick(p.field, Qt.Key_Escape)
+    assert seen == ["enter", "esc"]
+    p.field.setText("s")
+    QTest.keyClick(p.field, Qt.Key_Down)
+    QTest.keyClick(p.field, Qt.Key_Down)
+    QTest.keyClick(p.field, Qt.Key_Up)
+    assert p.current() == ("existing", "a", "Networks")           # typing chose the first; down, down, up
+
+
+def test_no_one_click_creation_once_categories_exist(app, samples, make_org):
+    w, rec = _window(make_org, [samples / SAMPLE[s] for s in ("S1", "S3", "S4")])
+    _pump(app, lambda: not w.inflight)
+    w.review()
+    assert {i.primary.text() for i in w.decision.items} == {"Create && file"}    # no categories yet
+    first = _item(w, SAMPLE["S4"])
+    best = first.best
+    first.primary.click()
+    _pump(app, lambda: not w.filing)
+    assert [c["name"] for c in w.org.catalog.categories()] == [best]
+    for item in w.decision.items:                                  # from now on a new category takes a choice
+        assert item.primary.text() == "Choose category…" and not item.choose.isVisible() and item.best
+    item = _item(w, SAMPLE["S3"])
+    QTest.keyClick(item, Qt.Key_Return)                            # Enter on the item only opens the choices
+    assert item.expanded.isVisible() and len(w.org.catalog.categories()) == 1 and not w.filing
+    assert _rows_of(item.picker)[0] == f"{best} · 1" and _rows_of(item.picker)[1].startswith(f"New: {item.best}")
+    w.org.create_category(item.best)                               # the top suggestion names an existing category
+    w.refresh()
+    item = _item(w, SAMPLE["S3"])
+    assert item.primary.text() == f"File in {item.best}" and item.choose.isVisible()
+    assert item.line.text().startswith(f"Suggested category: {item.best}")
+    item.primary.click()
+    _pump(app, lambda: not w.filing)
+    assert w.org.catalog.document(_doc(w, SAMPLE["S3"]))["status"] == "filed"
+    _close(w, rec)
+
+
+def test_none_of_these_fit_records_the_rejection(app, samples, make_org):
+    w, rec = _window(make_org, [samples / SAMPLE["S1"], samples / SAMPLE["S4"]])
+    _pump(app, lambda: not w.inflight)
+    w.review()
+    item = _item(w, SAMPLE["S1"])
+    item.choose.click()
+    assert item.none_fit.isVisible() and item.none_fit.text() == "None of these fit — type my own"
+    assert not item.reasons.isVisible()
+    item.picker.field.setText("something")
+    item.none_fit.click()
+    assert item.picker.field.text() == "" and item.picker.field.placeholderText() == "Type the category you want"
+    assert item.picker.field.hasFocus() and _rows_of(item.picker) == []          # the suggested names are gone
+    assert item.reasons.isVisible() and not item.none_fit.isVisible() and not item.more_button.isVisible()
+    assert [b.text() for b in item.reason_group.buttons()] == [
+        "Too narrow", "Too broad", "Wrong topic", "Not a real name", "Couldn't read the document"]
+    assert not item.confirm.isEnabled() and item.pending.isVisible()             # no filing without a category
+    item.confirm.click()
+    assert not w.filing and w.org.catalog.categories() == []
+    item.reason_group.buttons()[0].click()                                       # optional, one click
+    _pick(item.picker, "Networks", "Create category")
+    item.confirm.click()
+    _pump(app, lambda: not w.filing)
+    cat = w.org.catalog.category_by_key("networks")
+    rows = [tuple(r) for r in w.org.catalog.all(
+        "SELECT document_id, analyzer_version, reason, category_id FROM suggestion_feedback")]
+    assert rows == [(_doc(w, SAMPLE["S1"]), "rules-8", "too narrow", cat["id"])]
+    other = _item(w, SAMPLE["S4"])                                               # no reason given; no rejection
+    other.primary.click()
+    _pick(other.picker, "net")
+    other.confirm.click()
+    _pump(app, lambda: not w.filing)
+    assert w.org.catalog.one("SELECT COUNT(*) FROM suggestion_feedback")[0] == 1
+    assert len(w.org.catalog.documents(cat["id"])) == 2
+    _close(w, rec)
+
+
+def test_only_one_suggestion_is_said(app, make_org, tmp_path):
+    import pymupdf
+
+    src = tmp_path / "src"
+    src.mkdir()
+    doc = pymupdf.open()
+    for n in range(2):
+        doc.new_page().insert_text((72, 100), "Thermal Expansion" if n == 0 else "it gets longer when heated", fontsize=20)
+    doc.save(src / "x.pdf")
+    doc.close()
+    w, rec = _window(make_org, [src / "x.pdf"])
+    _pump(app, lambda: not w.inflight)
+    w.review()
+    assert w.decision.items[0].line.text() == "Suggested new category: Thermal Expansion  ·  Only one suggestion found"
+    _close(w, rec)
+
+
+def test_move_rename_and_delete_from_the_window(app, samples, make_org):
+    before = source_state(samples)
+    names = [SAMPLE["S1"], SAMPLE["S2"], SAMPLE["S3"]]
+    w, rec = _window(make_org, [samples / n for n in names])
+    _pump(app, lambda: not w.inflight)
+    ids = [_doc(w, n) for n in names]
+    for i, cat in zip(ids, ("One", "Two", "Three")):               # one category per document, as it happened
+        w.file_docs([i], cat)
+        _pump(app, lambda: not w.filing)
+    w.toast.hide()
+    w.select_docs(ids[:2])
+    assert w.bulk_move.isEnabled() and not w.bulk_file.isEnabled()
+    w.bulk_move.click()
+    dialog = w.picker_dialog
+    assert dialog.windowTitle() == "Move 2 documents to…"
+    assert _rows_of(dialog.picker) == ["Three · 1", "Two · 1", "One · 1"]   # most recently used first
+    assert _pick(dialog.picker, "thr")[2] == "Three" and dialog.confirm.text() == "Move"
+    dialog.confirm.click()
+    _pump(app, lambda: not w.moving)
+    three = w.org.catalog.category_by_key("three")
+    assert sorted(d["file_name"] for d in w.org.catalog.documents(three["id"])) == sorted(names)
+    assert w.toast.label.text() == "Moved 2 documents to Three."
+    assert rec.empties == [2]                                      # asked once, for both empty categories
+    assert [c["name"] for c in w.org.catalog.categories()] == ["Three"]
+    assert sorted(p.name for p in w.org.output_root.iterdir()) == ["Three"]
+    provenance = [r[0] for r in w.org.catalog.all(
+        "SELECT provenance FROM memberships WHERE status = 'active' ORDER BY document_id")]
+    assert sorted(provenance) == ["user-confirmed", "user-corrected", "user-corrected"]
+
+    menu = w.category_menu(three["id"])
+    assert [a.text() for a in menu.actions()] == ["Rename category…", "Delete category"]
+    assert not menu.actions()[1].isEnabled()                       # it holds documents
+    rec.new_name = "Networking"
+    menu.actions()[0].trigger()
+    _pump(app, lambda: not w.moving)
+    assert w.toast.label.text() == "Renamed to Networking." and _category_node(w, "Networking").text(1) == "3"
+    assert sorted(p.name for p in (w.org.output_root / "Networking").iterdir()) == sorted(names)
+    assert not (w.org.output_root / "Three").exists()
+
+    rec.delete_answer = False
+    w.context_menu([ids[0]]).actions()[-1].trigger()               # Move to…, into a new category
+    dialog = w.picker_dialog
+    _pick(dialog.picker, "Elsewhere", "Create category")
+    assert dialog.confirm.text() == "Create && move"
+    dialog.confirm.click()
+    _pump(app, lambda: not w.moving)
+    assert rec.empties == [2]                                      # nothing was left empty: no question
+    w.org.create_category("Unused")
+    w.refresh()
+    unused = w.org.catalog.category_by_key("unused")["id"]
+    w.category_menu(unused).actions()[1].trigger()
+    assert "Unused" not in [c["name"] for c in w.org.catalog.categories()]
+    assert w.toast.label.text() == "Deleted the category."
+    assert source_state(samples) == before                         # the originals: untouched throughout
     _close(w, rec)
