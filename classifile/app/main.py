@@ -10,7 +10,10 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QItemSelectionModel, QObject, QSize, Qt, QUrl, Signal
+from PySide6.QtCore import (
+    QCoreApplication, QEasingCurve, QEvent, QItemSelectionModel, QObject, QPoint, QPropertyAnimation, QSize, Qt,
+    QUrl, Signal,
+)
 from PySide6.QtGui import QDesktopServices, QIcon
 from PySide6.QtWidgets import (
     QAbstractItemView, QButtonGroup, QCheckBox, QComboBox, QCompleter, QFileDialog, QFrame, QHBoxLayout,
@@ -65,6 +68,7 @@ class MainWindow(QWidget):
         self.deferred = []          # "Leave pending": moved to the end of the decision page for this session
         self.view = (ALL, None)     # ("all" | "decide" | "recent" | "settings" | "category", category id)
         self.details_open = False
+        self.decide_doc = None      # the waiting document whose details are open beside the decision page
         self.pool = ThreadPoolExecutor(max_workers=READ_WORKERS)
         self.workers = workers or WorkerPool(read_and_analyze, size=READ_WORKERS)
         self.bridge = Bridge()
@@ -205,6 +209,10 @@ class MainWindow(QWidget):
         self.details = DetailsPanel(self)
         self.details.setMinimumWidth(DETAILS_MIN)
         self.details.hide()
+        self.slide = QPropertyAnimation(self.details, b"pos", self)   # the panel enters from the right edge
+        self.slide.setDuration(180)
+        self.slide.setEasingCurve(QEasingCurve.OutCubic)
+        self.slide.finished.connect(self._settle_details)
         self.content = QSplitter(Qt.Horizontal)
         self.content.setChildrenCollapsible(False)
         self.content.addWidget(self.stack)
@@ -527,6 +535,8 @@ class MainWindow(QWidget):
     def refresh(self, select_docs=None):
         waiting = self.waiting()
         n = len(waiting)
+        if self.decide_doc not in [d["id"] for d in waiting]:
+            self.decide_doc = None  # filed or removed: its details close
         self.setWindowTitle(f"ClassiFile — {n} waiting" if n else "ClassiFile")
         self.decide_count.setText(str(n) if n else "")
         self._fill_categories()
@@ -690,18 +700,26 @@ class MainWindow(QWidget):
         self._place_details()
 
     def show_details(self, doc_id):
-        if self.view[0] in (DECIDE, SETTINGS):
+        if self.view[0] == DECIDE:  # stays on the page: the pages open beside the item and its buttons
+            self.decide_doc = doc_id
+            self.details.show_doc(doc_id)
+            return self._place_details()
+        if self.view[0] == SETTINGS:
             self.show_view(ALL)
         self.select_docs([doc_id])
         self.set_details_open(True)
 
     def close_details(self):
+        self.decide_doc = None
         self.set_details_open(False)
 
     def _place_details(self):
-        """Wide windows: the panel sits beside the list. Narrower: it opens over the list."""
-        show = self.details_open and self.stack.currentWidget() is self.table
-        wide = self.width() >= WIDE
+        """Wide windows: the panel sits beside the list. Narrower: it opens over the list. On the decision page it
+        is always beside the items, so their buttons and the category field stay in reach."""
+        page = self.stack.currentWidget()
+        show = (self.details_open and page is self.table) or (self.decide_doc is not None and page is self.decision)
+        wide = self.width() >= WIDE or page is self.decision
+        was_hidden = self.details.isHidden()
         if not show:
             self.details.hide()
             return
@@ -718,6 +736,19 @@ class MainWindow(QWidget):
             width = max(DETAILS_MIN, min(DETAILS_WIDTH, g.width() - PAD))
             self.details.setGeometry(g.right() + 1 - width, g.top(), width, g.height())
             self.details.raise_()
+        if was_hidden:  # slides in at its final size, so the page picture is drawn once
+            QCoreApplication.sendPostedEvents(self.content, QEvent.LayoutRequest)  # the splitter places it now
+            self.slide.stop()
+            self.slide.setStartValue(QPoint(self.details.parentWidget().width(), self.details.y()))
+            self.slide.setEndValue(self.details.pos())
+            self.slide.start()
+
+    def _settle_details(self):
+        """After a slide: back where the layout wants it, in case the window changed on the way."""
+        if self.details.parent() is self.content:
+            self.content.refresh()
+        elif self.details.isVisible():
+            self._place_details()
 
     def expand_preview(self, doc_id, page=0):
         d = self.org.catalog.document(doc_id)
@@ -1059,7 +1090,7 @@ class MainWindow(QWidget):
         if e.key() == Qt.Key_Escape:
             if self.preview_overlay.isVisible():
                 self.preview_overlay.hide()
-            elif self.details_open:
+            elif self.details.isVisible():
                 self.close_details()
             return
         super().keyPressEvent(e)

@@ -3,8 +3,8 @@
 Usage: python -m tools.render_window [--out data] [--size 1280x720] [--scale 1.25]
 
 Saves render-empty.png, render-list.png, render-decision.png (with a missing original and a group item),
-render-decision-expanded.png, render-dropdown-open.png, render-details.png, render-drop-overlay.png and render-1024x640.png at --size.
-With --scale: render-scale-<N>-list.png, -decision.png, -decision-expanded.png and -details.png at --size
+render-decision-expanded.png, render-decision-details.png, render-dropdown-open.png, render-details.png, render-drop-overlay.png and render-1024x640.png at --size.
+With --scale: render-scale-<N>-list.png, -decision.png, -decision-expanded.png, -decision-details.png and -details.png at --size
 (logical pixels; the images are larger by the scale factor).
 Renders use the Windows 11 style with a dark palette modelled on Windows' dark theme (offscreen rendering cannot
 read the system theme, so colours are an approximation). Everything happens in a temporary folder with its own
@@ -53,7 +53,7 @@ def render(out, scale=None, size=(1280, 720)):
     from PySide6.QtCore import QMimeData, QPoint, Qt, QUrl
     from PySide6.QtGui import QDragEnterEvent, QFont, QFontDatabase, QPainter
     from classifile.app import make_app
-    from classifile.app.main import DECIDE, MainWindow
+    from classifile.app.main import ALL, DECIDE, MainWindow
     from classifile.catalog.db import Catalog
     from classifile.organizer import Organizer
 
@@ -123,6 +123,10 @@ def render(out, scale=None, size=(1280, 720)):
         item.toggle_expanded()
         pump()
         w.grab().save(str(out / f"{prefix}decision-expanded.png"))
+        w.show_details(item.ids[0])  # beside the item, on the same page
+        pump()
+        w.grab().save(str(out / f"{prefix}decision-details.png"))
+        w.show_view(ALL)
         w.show_details(cst)
         pump()
         w.grab().save(str(out / f"{prefix}details.png"))

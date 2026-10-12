@@ -479,3 +479,51 @@ def test_responsive_breakpoints_and_elided_names(app, samples, make_org):
     assert w.page_title.text().endswith("…") and w.page_title.toolTip() == "All documents · 1"
     assert w.table.topLevelItem(0).toolTip(0) == SAMPLE["S5"]
     _close(w, rec)
+
+
+def test_details_open_beside_the_decision_page(app, samples, make_org):
+    w, rec = _window(make_org, [samples / SAMPLE["S4"]])
+    _pump(app, lambda: not w.inflight)
+    w.resize(1024, 700)
+    w.review()
+    _item(w, SAMPLE["S4"]).details.click()
+    assert w.details.parent() is w.content                         # beside the items even in a narrow window
+    w.close_details()
+    w.resize(1280, 700)
+    w.review()
+    item = _item(w, SAMPLE["S4"])
+    item.details.click()
+    assert w.view[0] == DECIDE and w.stack.currentWidget() is w.decision   # no jump to the document list
+    assert w.details.isVisible() and w.details.title.full == SAMPLE["S4"]
+    assert w.details.preview.page_label.text() == "Page 1 of 25"
+    assert w.details.parent() is w.content                         # beside the items, never over them
+    assert w.slide.state() == w.slide.State.Running                # it slides in from the right edge
+    _pump(app, lambda: w.slide.state() != w.slide.State.Running)
+    item.choose.click()
+    _pump(app, lambda: item.confirm.isVisible())
+    right = item.confirm.mapTo(w.content, item.confirm.rect().topRight()).x()
+    assert right < w.details.x() and w.details.geometry().right() < w.content.width()  # both in view at once
+    item.field.setText("My Category")
+    item.confirm.click()
+    _pump(app, lambda: not w.filing)
+    assert w.view[0] == DECIDE and not w.details.isVisible()       # filed: its details close, the page stays
+    _close(w, rec)
+
+
+def test_details_width_does_not_depend_on_scrolling(app, samples, make_org):
+    w, rec = _window(make_org, [samples / SAMPLE["S4"]])
+    _pump(app, lambda: not w.inflight)
+    w.select_docs([_doc(w, SAMPLE["S4"])])
+    w.set_details_open(True)
+    viewport, widths = w.details.scroll.viewport(), set()
+    for height in (1000, 560):                                     # everything fits; an opened section must scroll
+        w.resize(1280, height)
+        _pump(app, lambda: w.height() == height)
+        w.details.locations_section.toggle.click()
+        for _ in range(20):
+            app.processEvents()
+        widths.add(viewport.width())
+    # A scroll bar that comes and goes changes the width; the page is then fitted again at another height, and
+    # the bar goes or comes again: the panel bounced when a section was opened.
+    assert len(widths) == 1
+    _close(w, rec)

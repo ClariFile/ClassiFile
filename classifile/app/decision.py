@@ -79,15 +79,20 @@ class DecisionItem(QFrame):
         self.more_menu.setText("⋯")
         self.more_menu.setToolTip("More actions")
         self.more_menu.setPopupMode(QToolButton.InstantPopup)
+        self.details = QPushButton("Details")
+        self.details.setObjectName("link")
+        self.details.setToolTip("Show this document's pages beside this list")
+        self.details.clicked.connect(lambda: self.c.show_details(first["id"]))
+        self.details.setVisible(not self.group)
         menu = QMenu(self)
-        if not self.group:
-            menu.addAction("Details", lambda: self.c.show_details(first["id"]))
+        for d in docs if self.group else ():    # a group: each member's pages
+            menu.addAction(f"Details: {d['file_name']}", lambda i=d["id"]: self.c.show_details(i))
         menu.addAction("Remove from ClassiFile", lambda: self.c.remove_docs(self.ids))
         self.more_menu.setMenu(menu)
         actions = box(QHBoxLayout())
         actions.addWidget(self.primary)
         actions.addSpacing(GROUP - RELATED)     # the primary action stands apart from the others
-        for w in (self.choose, self.pending, self.remove):
+        for w in (self.choose, self.pending, self.remove, self.details):
             actions.addWidget(w)
         actions.addStretch(1)
         actions.addWidget(self.more_menu)

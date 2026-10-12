@@ -34,7 +34,10 @@
 - Labelling windows for the E8 page labels, the OCR quality check and the name review.
 - Dropdowns and disclosure arrows share the control style; the layout was checked at 1920×1080.
 - Tests refer to development files by neutral IDs through a local map in `data\` and skip when it is absent.
-- 212 automated tests.
+- Details open beside the "Needs your decision" page (a Details link on each item; the panel slides in from
+  the right and the page stays), so a document's pages and its filing buttons are in view together. The
+  details panel no longer bounces when a section is opened.
+- 214 automated tests.
 
 ## Development results so far
 

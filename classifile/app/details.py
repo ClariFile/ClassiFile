@@ -63,6 +63,10 @@ class DetailsPanel(QFrame):
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        # Always there: a bar that came and went changed the width, the page picture was fitted again at
+        # another height, and the bar went or came again (the panel bounced when a section was opened).
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
+        self.scroll = scroll
         scroll.setWidget(body)
         outer = box(QVBoxLayout(self), (0, PANEL, 0, 0), GROUP)
         head.setContentsMargins(PANEL, 0, PANEL, 0)
