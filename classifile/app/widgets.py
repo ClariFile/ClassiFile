@@ -1,7 +1,7 @@
 """Small shared widgets and the visual style of the main window."""
 from pathlib import Path
 
-from PySide6.QtCore import QPointF, QRectF, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QEasingCurve, QPoint, QPointF, QPropertyAnimation, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea, QSizePolicy, QToolButton, QVBoxLayout, QWidget,
@@ -32,6 +32,7 @@ DETAILS_WIDTH = 420     # details panel: at least this wide by default, up to DE
 DETAILS_MIN = 360
 DETAILS_MAX = 560
 READING_MAX = 1040      # decision items, notices and settings never stretch wider than this
+CHOICES_MAX = 680       # the "Choose another…" panel of a decision item
 PREVIEW_MAX = 560       # tallest details preview; the page is fitted to the panel width below this
 CHEVRON_DOWN = (ICON_DIR.parent / "ui" / "chevron-down.svg").as_posix()
 CHEVRON_RIGHT = (ICON_DIR.parent / "ui" / "chevron-right.svg").as_posix()
@@ -51,20 +52,28 @@ QLabel#pageTitle {{ font-size: 22px; font-weight: 600; }}
 QLabel#secondary, QLabel#processing {{ font-size: 13px; color: palette(placeholder-text); }}
 QLabel#section {{ font-size: 12px; font-weight: 600; color: palette(placeholder-text); letter-spacing: 1px; }}
 QLabel#brand {{ font-size: 16px; font-weight: 600; }}
-QPushButton {{ border-radius: 6px; padding: {RELATED}px {GROUP}px; min-height: 20px; max-height: 20px; }}
-QPushButton#primary {{ background: {PRIMARY}; color: white; border: none; font-weight: 600; }}
-QPushButton#primary:hover {{ background: {PRIMARY_HOVER}; }}
-QPushButton#primary:disabled {{ background: palette(mid); color: palette(window); }}
+QPushButton {{ border: 1px solid rgba(127, 127, 127, 110); border-radius: 6px; background: transparent;
+               padding: {RELATED - 1}px {GROUP - 1}px; min-height: 20px; max-height: 20px; }}
+QPushButton:hover, QToolButton#more:hover {{ background: rgba(127, 127, 127, 40); }}
+QPushButton:checked {{ background: rgba(13, 148, 136, 46); border-color: {ICON_TEAL}; }}
+QPushButton:disabled {{ color: palette(placeholder-text); }}
+QPushButton#primary {{ background: {PRIMARY}; color: white; border-color: {PRIMARY}; font-weight: 600; }}
+QPushButton#primary:hover {{ background: {PRIMARY_HOVER}; border-color: {PRIMARY_HOVER}; }}
+QPushButton#primary:disabled {{ background: palette(mid); color: palette(window); border-color: palette(mid); }}
 QToolButton::menu-indicator {{ image: none; width: 0; }}
-QPushButton#link, QToolButton#link {{ background: transparent; border: none; color: palette(text);
-                                      text-decoration: underline; padding: {RELATED}px {RELATED}px; }}
-QToolButton#disclosure {{ background: transparent; border: none; font-weight: 600; padding: {RELATED}px 0; }}
-QToolButton#more {{ border: 1px solid rgba(127, 127, 127, 90); border-radius: 6px; font-size: 20px;
-                    font-weight: 700; min-width: 28px; min-height: 20px; max-height: 20px; padding: 3px {RELATED}px; }}
-QToolButton#more:hover {{ background: rgba(127, 127, 127, 40); }}
-QPushButton#icon {{ padding: {RELATED}px 0; min-width: {CONTROL}px; max-width: {CONTROL}px; }}
-QPushButton:focus, QToolButton:focus, QLineEdit:focus, QComboBox:focus {{ outline: none;
-                                      border: 2px solid {ICON_TEAL}; }}
+QPushButton#link, QToolButton#link {{ border-color: transparent; color: palette(text);
+                                      text-decoration: underline; padding: {RELATED - 1}px {RELATED - 1}px; }}
+QToolButton#disclosure {{ background: transparent; border: 1px solid transparent; border-radius: 6px;
+                          font-weight: 600; padding: {RELATED - 1}px 0; }}
+QToolButton#more {{ border: 1px solid rgba(127, 127, 127, 110); border-radius: 6px; font-size: 20px;
+                    font-weight: 700; padding: 0; min-width: {CONTROL - 2}px; max-width: {CONTROL - 2}px;
+                    min-height: {CONTROL - 2}px; max-height: {CONTROL - 2}px; }}
+QPushButton#icon {{ border-color: transparent; padding: {RELATED - 1}px 0; min-width: {CONTROL - 2}px;
+                    max-width: {CONTROL - 2}px; }}
+/* Focus changes only the border colour: every control keeps its size. */
+QPushButton:focus, QPushButton#link:focus, QPushButton#icon:focus, QToolButton#more:focus,
+QToolButton#disclosure:focus, QLineEdit:focus, QComboBox:focus {{ outline: none; border-color: {ICON_TEAL}; }}
+QPushButton#primary:focus {{ border-color: palette(text); }}
 QPushButton#nav {{ text-align: left; border: none; background: transparent; padding: 10px {GROUP - 3}px;
                    border-left: 3px solid transparent; border-radius: 0; max-height: none; }}
 QLabel#count {{ font-size: 13px; color: palette(placeholder-text); }}
@@ -74,7 +83,9 @@ QTreeWidget, QListWidget {{ border: none; background: transparent; outline: none
 QTreeWidget::item {{ min-height: {ROW - 2}px; border-bottom: 1px solid rgba(127, 127, 127, 40);
                      padding-left: {RELATED}px; }}
 QTreeWidget#categories::item {{ min-height: 32px; border-bottom: none; padding-left: 0; padding-right: {GROUP}px; }}
-QListWidget::item {{ padding: 6px 0; }}
+QListWidget::item {{ padding: 6px {RELATED}px; border-radius: 4px; }}
+QListWidget::item:hover {{ background: rgba(127, 127, 127, 30); }}
+QFrame#choices {{ border: 1px solid rgba(127, 127, 127, 60); border-radius: 8px; background: rgba(127, 127, 127, 18); }}
 QTreeWidget::item:selected, QListWidget::item:selected {{ background: rgba(13, 148, 136, 46);
     color: palette(text); }}
 QListWidget::item:selected, QTreeWidget#categories::item:selected, QTreeWidget::item:selected:first {{
@@ -300,6 +311,9 @@ class Toast(QFrame):
         self.timer.timeout.connect(self.hide)
         self._callback = None
         self.action.clicked.connect(lambda: self._callback and self._callback())
+        self.slide = QPropertyAnimation(self, b"pos", self)
+        self.slide.setDuration(200)
+        self.slide.setEasingCurve(QEasingCurve.OutCubic)
         self.hide()
 
     def show_message(self, text, action=None, callback=None, ms=5000):
@@ -308,7 +322,12 @@ class Toast(QFrame):
         self.action.setText(action or "")
         self.action.setVisible(bool(action))
         self.adjustSize()
+        self.slide.stop()
         self.place()
+        if self.isHidden():  # up from below the window's bottom edge, in the right corner
+            self.slide.setStartValue(QPoint(self.x(), self.parent().height()))
+            self.slide.setEndValue(self.pos())
+            self.slide.start()
         self.raise_()
         self.show()
         self.timer.start(ms)

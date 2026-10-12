@@ -37,7 +37,12 @@
 - Details open beside the "Needs your decision" page (a Details link on each item; the panel slides in from
   the right and the page stays), so a document's pages and its filing buttons are in view together. The
   details panel no longer bounces when a section is opened.
-- 215 automated tests.
+- Decision page: the list stays where it is after filing (it used to scroll to the bottom); the "filed" message
+  slides up into the bottom-right corner; the "more" button is first in every item; buttons share one outlined
+  style and size, and focus changes only the border colour; "Choose another…" opens one panel whose list is as
+  tall as its names (the second, small preview is gone: Details shows the pages).
+- `tools.grouping`: the owner's grouping of development files, read from the catalog (read-only).
+- 217 automated tests.
 
 ## Development results so far
 
@@ -53,6 +58,12 @@ These counts describe development data only. They are not accuracy estimates.
   text documents 4 bad). 25 of the 40 answers were the same in both rounds.
 - **OCR comparison:** blind, one pass against extra passes on the same 40 items: 4 extra, 3 current, 33 same.
 - **Second name review:** 34 files, 80 names marked not good, 7 skipped, none good, 3 category names typed.
+- **The owner's grouping (G3), rules-7 suggestions:** 32 of the 34 development files filed, 2 still waiting.
+  32 categories, one document in each. The category was a suggestion as shown for 29 documents (23 the first
+  name, 4 the second, 1 the third, 1 under "More"), part of a suggestion for 1, and typed for 2.
+  No two documents share a category, so the comparison of grouping policies (E1) has no pair to measure:
+  over-merging and fragmentation are 0 for every policy tried, and no policy put two documents together
+  either. This grouping cannot rank policies; a grouping with shared categories would.
 
 ## Open
 
@@ -97,11 +108,10 @@ These counts describe development data only. They are not accuracy estimates.
 
 ## Next
 
-1. Categories: the user files the 34 development files in the app with the categories they would use (G3).
-   Name rules and OCR stay frozen meanwhile.
-2. Then a report on those 34 files only: the user's categories and their sizes; per filing, whether a suggestion
-   was used as it was, in a near form, or a typed name, with the rank used; the candidate organizing policies
-   (E1) against the grouping, over-merging and fragmentation separately. No rule changes before discussing it.
+1. Discuss the grouping result with the user before any rule change: every document has its own category,
+   which the decision record's A4 rules out for automatic mode ("no folder per file"). Whether these are the
+   categories the user wants, or the suggestions were accepted as offered, decides what E1 needs next.
+2. The two development files still waiting.
 3. CP3 (after the user's go-ahead): scorer comparison (E2) and abstention baseline (E4) on development data,
    selected-category mode with permissions through the queue, "Belongs to" / "Also belongs to", primary
    replacement and edited-copy protection.

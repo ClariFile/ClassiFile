@@ -1,14 +1,14 @@
 """The "Needs your decision" page: one item per question, with one primary action each."""
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QCompleter, QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu, QPushButton,
+    QApplication, QCompleter, QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu, QPushButton,
     QScrollArea, QSizePolicy, QToolButton, QVBoxLayout, QWidget,
 )
 
 from classifile.analysis.candidates import name_key, top_names
 from classifile.app.reasons import reason_text
 from classifile.app.widgets import (
-    GROUP, PANEL, READING_MAX, RELATED, ElidedLabel, Preview, box, format_icon, restyle,
+    CHOICES_MAX, GROUP, PANEL, READING_MAX, RELATED, ElidedLabel, box, format_icon, restyle,
 )
 
 TOP = 3
@@ -47,9 +47,7 @@ class DecisionItem(QFrame):
         self.title = ElidedLabel(f"{len(docs)} documents with the same suggestion" if self.group
                                  else first["file_name"])
         self.title.setStyleSheet("font-weight: 600;")
-        self.head = box(QHBoxLayout())
-        self.head.addWidget(icon)
-        self.head.addWidget(self.title, 100)    # the name takes the room it needs; "more" follows it directly
+        self.head = box(QHBoxLayout())          # "more" comes first: the same place on every item
 
         self.line = QLabel()
         self.line.setWordWrap(True)
@@ -67,13 +65,10 @@ class DecisionItem(QFrame):
         self.primary.setObjectName("primary")
         self.primary.clicked.connect(self.primary_action)
         self.choose = QPushButton("Choose another…")
-        self.choose.setObjectName("link")
         self.choose.clicked.connect(self.toggle_expanded)
         self.pending = QPushButton("Leave pending")
-        self.pending.setObjectName("link")
         self.pending.clicked.connect(lambda: self.c.leave_pending(self.ids))
         self.remove = QPushButton("Remove from ClassiFile")
-        self.remove.setObjectName("link")
         self.remove.clicked.connect(lambda: self.c.remove_docs(self.ids))
         self.more_menu = QToolButton()
         self.more_menu.setObjectName("more")
@@ -81,7 +76,6 @@ class DecisionItem(QFrame):
         self.more_menu.setToolTip("More actions")
         self.more_menu.setPopupMode(QToolButton.InstantPopup)
         self.details = QPushButton("Details")
-        self.details.setObjectName("link")
         self.details.setToolTip("Show this document's pages beside this list")
         self.details.clicked.connect(lambda: self.c.show_details(first["id"]))
         if self.group:
@@ -91,11 +85,11 @@ class DecisionItem(QFrame):
             menu.addAction(f"Details: {d['file_name']}", lambda i=d["id"]: self.c.show_details(i))
         menu.addAction("Remove from ClassiFile", lambda: self.c.remove_docs(self.ids))
         self.more_menu.setMenu(menu)
-        self.head.addWidget(self.more_menu)
-        self.head.addStretch(1)
+        for w in (self.more_menu, icon):
+            self.head.addWidget(w)
+        self.head.addWidget(self.title, 1)
         actions = box(QHBoxLayout())
         actions.addWidget(self.primary)
-        actions.addSpacing(GROUP - RELATED)     # the primary action stands apart from the others
         for w in (self.choose, self.pending, self.remove, self.details):
             actions.addWidget(w)
         actions.addStretch(1)
@@ -107,7 +101,10 @@ class DecisionItem(QFrame):
         v.addWidget(self.names)
         v.addSpacing(RELATED)                   # description, then the controls
         v.addLayout(actions)
-        v.addWidget(self.expanded)
+        choices = box(QHBoxLayout(), (0, RELATED, 0, 0))
+        choices.addWidget(self.expanded, 100)   # up to its widest, at the left
+        choices.addStretch(1)
+        v.addLayout(choices)
         self._configure(first, top)
 
     # -- what the item asks ------------------------------------------------------------------------------------
@@ -147,10 +144,15 @@ class DecisionItem(QFrame):
 
     # -- "Choose another…" -------------------------------------------------------------------------------------
     def _expanded_area(self, top):
-        area = QWidget()
-        self.sugg = QListWidget()
-        self.sugg.setMaximumHeight(150)
-        self.sugg.setWordWrap(True)
+        area = QFrame()
+        area.setObjectName("choices")
+        area.setMaximumWidth(CHOICES_MAX)
+        self.sugg = QListWidget()               # as tall as its names: nothing cut off, no bar inside the panel
+        self.sugg.setSizeAdjustPolicy(QListWidget.AdjustToContents)
+        self.sugg.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.sugg.setMinimumWidth(200)          # a long name ends in "…" (hover shows it) and never widens the item
+        for bar in (self.sugg.setVerticalScrollBarPolicy, self.sugg.setHorizontalScrollBarPolicy):
+            bar(Qt.ScrollBarAlwaysOff)
         self.sugg.itemClicked.connect(lambda item: self.field.setText(item.data(Qt.UserRole)))
         self.more_button = QPushButton()
         self.more_button.setObjectName("link")
@@ -177,19 +179,12 @@ class DecisionItem(QFrame):
         row.addWidget(self.field, 1)
         row.addWidget(self.tag, 0, Qt.AlignVCenter)
         row.addWidget(self.confirm)
-        self.preview = Preview(expandable=False)
-        self.preview.setFixedHeight(220)
-        left = box(QVBoxLayout())
+        left = box(QVBoxLayout(area), GROUP)
         left.addWidget(self.sugg)
         left.addWidget(self.more_button, 0, Qt.AlignLeft)
-        left.addSpacing(RELATED)
         left.addLayout(row)
-        h = box(QHBoxLayout(area), (0, GROUP, 0, 0), GROUP)
-        h.addLayout(left, 3)
-        h.addWidget(self.preview, 2)
         self.sugg.setVisible(not self.group)
         self.more_button.setVisible(not self.group)
-        self.preview.setVisible(not self.group)
         area.hide()
         return area
 
@@ -201,6 +196,7 @@ class DecisionItem(QFrame):
             reason = reason_text(s["evidence"], self.docs[0]["unit"])
             item = QListWidgetItem(s["name"] + (f"\n    {reason}" if reason else ""))
             item.setData(Qt.UserRole, s["name"])
+            item.setToolTip(s["name"])
             self.sugg.addItem(item)
         self.more_button.setText("Fewer" if self.show_all else f"More ({len(rest)})")
         self.more_button.setVisible(bool(rest) and not self.group)
@@ -216,9 +212,6 @@ class DecisionItem(QFrame):
         if open_:
             self._fill_suggestions()
             self.field.setText(self.c.display_name(self.best))
-            if not self.group:
-                d = self.docs[0]
-                self.preview.show_document(self.c.preview_source(d["id"]), self.c.first_lines(d["id"]))
             self.field.setFocus()
 
     def _update_confirm(self):
@@ -251,12 +244,6 @@ class DecisionItem(QFrame):
         if name and self.confirm.isEnabled():
             self.c.file_docs(self.ids, name)
 
-    def resizeEvent(self, e):
-        super().resizeEvent(e)
-        self.title.setMaximumWidth(self.title.fontMetrics().horizontalAdvance(self.title.full) + RELATED)
-        # The small preview needs room; when the item is narrow the choices get the space (Details shows pages).
-        self.preview.setVisible(not self.group and self.width() >= 760)
-
     def keyPressEvent(self, e):
         if e.key() in (Qt.Key_Return, Qt.Key_Enter) and self.primary.isVisible() and self.primary.isEnabled():
             self.primary.click()
@@ -288,6 +275,10 @@ class DecisionPage(QWidget):
         v.addWidget(self.empty)
 
     def show_items(self, docs):
+        focus = QApplication.focusWidget()
+        at = next((n for n, i in enumerate(self.items) if focus and (i is focus or i.isAncestorOf(focus))), 0)
+        if focus and self.holder.isAncestorOf(focus):
+            focus.clearFocus()  # hiding the focused item hands focus down the list, and the page scrolls after it
         while self.list.count():
             w = self.list.takeAt(0).widget()
             if w:
@@ -300,4 +291,4 @@ class DecisionPage(QWidget):
         self.list.addStretch(1)
         self.empty.setVisible(not self.items)
         if self.items:
-            self.items[0].setFocus()
+            self.items[min(at, len(self.items) - 1)].setFocus()  # where the user was, not back at the top

@@ -142,3 +142,22 @@ def test_name_stats_scores_top_names_against_a_saved_review(tmp_path):
     c = name_stats.score([("x.pdf", rec)], name_stats.judged(good), name_stats.judged(bad))
     assert c["files with a good name first"] == c["top-3 names: good"] == 1
     assert c["top-3 names: not good"] == c["top-3 names: never judged"] == 1
+
+
+def test_grouping_names_how_a_document_was_filed_and_compares_pairs():
+    from tools import grouping
+
+    ev = lambda src: [{"source": src, "pages": [1]}]
+    suggestions = [{"name": "Signal Processing", "evidence": ev("first_page"), "demoted": None},
+                   {"name": "Dr. Example", "evidence": ev("first_page"), "demoted": "person"},
+                   {"name": "Sampling Theorems", "evidence": ev("recurring"), "demoted": None}]
+    assert grouping.how_filed("signal  processing", suggestions) == ("as shown", 1)
+    assert grouping.how_filed("Sampling theorem", suggestions) == ("near form", 2)   # shown before the person's name
+    assert grouping.how_filed("Sampling", suggestions) == ("part of a suggestion", 2)
+    assert grouping.how_filed("Filter Design", suggestions) == ("typed", None)
+    assert grouping.POLICIES["repeated line"](suggestions) == "sampling theorems"
+    assert grouping.POLICIES["file name"](suggestions) is None
+    own = {"a": 1, "b": 1, "c": 2, "d": 2}
+    c = grouping.compare(own, {"a": "x", "b": "y", "c": "x", "d": None})
+    assert (c["owner together"], c["over-merged"]) == (2, 1)                        # a with c
+    assert (c["fragmented: placed apart"], c["fragmented: left pending"]) == (1, 1)  # a|b apart; d pending

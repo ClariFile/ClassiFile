@@ -192,8 +192,8 @@ def test_group_item_files_only_the_listed_documents(app, samples, make_org, tmp_
     assert group.group and group.names.isVisible() and SAMPLE["S2"] in group.names.text()
     assert second.name in group.names.text() and len(w.decision.items) == 2
     best = group.best
-    group.choose.click()                                            # one field for the group; no per-file preview
-    assert not group.sugg.isVisible() and not group.preview.isVisible() and group.field.text() == best
+    group.choose.click()                                            # one field for the group
+    assert not group.sugg.isVisible() and group.field.text() == best
     group.primary.click()
     _pump(app, lambda: not w.filing)
     cat = w.org.catalog.category_by_key(best.casefold())
@@ -489,7 +489,7 @@ def test_details_open_beside_the_decision_page(app, samples, make_org):
     _item(w, SAMPLE["S4"]).details.click()
     assert w.details.parent() is w.content                         # beside the items even in a narrow window
     w.close_details()
-    w.resize(1280, 700)
+    w.resize(1920, 1000)                                           # test fonts are wide: room for both
     w.review()
     item = _item(w, SAMPLE["S4"])
     item.details.click()
@@ -568,4 +568,27 @@ def test_no_stray_windows_appear(app, samples, make_org, tmp_path):
         assert watch.seen == ["MainWindow"]
     finally:
         app.removeEventFilter(watch)
+    _close(w, rec)
+
+
+def test_the_decision_page_stays_where_it_is_after_filing(app, samples, make_org):
+    from PySide6.QtWidgets import QScrollArea
+
+    w, rec = _window(make_org, [samples / SAMPLE[s] for s in ("S1", "S2", "S3", "S4", "S5", "S6")])
+    _pump(app, lambda: not w.inflight)
+    w.resize(1280, 600)                                            # short: the items need scrolling
+    w.review()
+    bar = w.decision.findChild(QScrollArea).verticalScrollBar()
+    _pump(app, lambda: bar.maximum() > 0)
+    item = w.decision.items[1]
+    item.choose.click()
+    item.field.setText("My Category")
+    item.confirm.click()                                           # the focused field goes away with its item
+    assert bar.value() == 0
+    _pump(app, lambda: not w.filing)
+    assert bar.value() == 0 and bar.maximum() > 0                  # not dragged to the bottom
+    assert w.decision.items[1].hasFocus()                          # the next item took its place
+    assert w.toast.isVisible() and w.toast.parent() is w           # the message slides in over the corner
+    _pump(app, lambda: w.toast.slide.state() != w.toast.slide.State.Running)
+    assert w.toast.geometry().bottom() < w.height() and w.toast.geometry().right() < w.width()
     _close(w, rec)
