@@ -1,6 +1,6 @@
 # ClassiFile status
 
-2026-10-13 · decision record version 2.4
+2026-10-13 · decision record version 2.5
 
 ## Done
 
