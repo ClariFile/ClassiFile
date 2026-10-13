@@ -63,7 +63,14 @@ SCORER = "nearest-centroid-1"
 # [Default] An existing category is a good match when it leads the second-best by at least this much (the global
 # abstention baseline, E4). Chosen on development data; the user picks the level for automatic filing (Part E).
 GOOD_MATCH = 0.02
+# Automatic filing (decision record B2): a document is filed without a question when its best category's lead()
+# is at least the level in use. The levels were fixed on development data before validation was measured; the
+# user chose Strict. The level is a setting ("off" switches automatic filing off), and its changes are recorded.
+LEVELS = {"very strict": 0.15, "strict": 0.10, "balanced": 0.06, "lenient": 0.03}
+AUTO_DEFAULT = "strict"
+AUTO_MIN_CONFIRMED = 3      # no automatic filing into a category with fewer documents the user confirmed
 NEAR_TEXT = 0.9     # documents this similar count as versions of one another (a format twin, a revision)
+GROUP_LEVEL = 0.15  # [Default] unmatched waiting documents this alike on average form a group (B2); see tools.group_eval
 CHECK_FOLDS = 5
 
 
@@ -128,3 +135,30 @@ def check(texts, labels, previous):
 def record_text(record):
     """A freshly read document's full text, put together as the catalog stores it (Catalog.texts)."""
     return "\n".join(t for u in record.units for t in (u.text, u.notes, u.ocr_text) if t)
+
+
+def similar_groups(vectors, level):
+    """Groups of at least two among {document id: vector}, for waiting documents that match no existing category
+    (decision record B2: the narrow exception to the clustering deferral). Each document starts alone; the two
+    groups whose documents are most alike on average are joined, again and again, while that average similarity
+    is at least `level`. Returns lists of ids, largest first; documents left alone are not returned."""
+    groups = [[d] for d in sorted(vectors)]
+    sim = {(a, b): dot(vectors[a], vectors[b]) for a in vectors for b in vectors if a < b}
+    between = lambda g, h: sum(sim[min(a, b), max(a, b)] for a in g for b in h) / (len(g) * len(h))
+    while len(groups) > 1:      # ponytail: every pair of groups each round; fine for the tens of documents waiting
+        score, i, j = max((between(g, h), i, j) for i, g in enumerate(groups) for j, h in enumerate(groups) if i < j)
+        if score < level:
+            break
+        groups[i] += groups.pop(j)
+    return sorted((sorted(g) for g in groups if len(g) > 1), key=lambda g: (-len(g), g))
+
+
+def shared_words(vectors, n=6):
+    """The words that say what a group's documents have in common: in most of them, heaviest first."""
+    need = max(2, -(-len(vectors) * 3 // 5))        # at least 60% of the documents, and never fewer than two
+    weight, seen = Counter(), Counter()
+    for v in vectors:
+        for t, x in v.items():
+            weight[t] += x
+            seen[t] += 1
+    return [t for t, _ in sorted(weight.items(), key=lambda kv: (-kv[1], kv[0])) if seen[t] >= need][:n]

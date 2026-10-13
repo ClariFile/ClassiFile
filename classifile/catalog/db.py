@@ -180,6 +180,16 @@ MIGRATIONS = [
         bundle_json TEXT NOT NULL      -- preprocessing, vectorizer, category mapping, decision settings
     );
     """,
+    # v9: automatic filing (CP4): why the app placed a document by itself, and a record of setting changes
+    """
+    ALTER TABLE memberships ADD COLUMN auto_json TEXT;  -- machine-assigned only: model version, level, documents
+    CREATE TABLE setting_changes (
+        id INTEGER PRIMARY KEY,
+        key TEXT NOT NULL,
+        value TEXT NOT NULL,
+        at TEXT NOT NULL
+    );
+    """,
 ]
 
 
@@ -256,6 +266,13 @@ class Catalog:
     def set_setting(self, key, value):
         self.run("INSERT INTO settings VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", key, value)
 
+    def change_setting(self, key, value):
+        """Set a setting whose changes are kept on record (when it changed, and to what)."""
+        with self.lock, self.db:
+            self.db.execute("INSERT INTO settings VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                            (key, value))
+            self.db.execute("INSERT INTO setting_changes (key, value, at) VALUES (?, ?, ?)", (key, value, now()))
+
     # -- documents ---------------------------------------------------------------------------
     def snapshot_by_hash(self, sha):
         return self.one("SELECT * FROM snapshots WHERE sha256 = ?", sha)
@@ -325,7 +342,7 @@ class Catalog:
             " JOIN snapshots s ON s.document_id = d.id WHERE d.id = ?", doc_id)
 
     _FILED = ("SELECT d.*, s.sha256, s.file_name, s.imported_at, s.source_path, c.id AS category_id,"
-              " c.name AS category, p.path AS copy_path,"
+              " c.name AS category, m.provenance, m.auto_json, p.path AS copy_path,"
               " p.status AS copy_status, p.updated_at AS filed_at FROM documents d"
               " JOIN snapshots s ON s.document_id = d.id"
               " JOIN memberships m ON m.document_id = d.id AND m.status = 'active'"
@@ -353,7 +370,8 @@ class Catalog:
         filed = self.all(self._FILED + "WHERE d.status = 'filed' ORDER BY s.file_name, d.id")
         ids = {d["id"] for d in filed}
         rest = [dict(d) | {"category_id": None, "category": None, "copy_path": None, "copy_status": None,
-                           "filed_at": None} for d in self.documents(None) if d["id"] not in ids]
+                           "filed_at": None, "provenance": None, "auto_json": None}
+                for d in self.documents(None) if d["id"] not in ids]
         return sorted([dict(d) for d in filed] + rest, key=lambda d: (d["file_name"].casefold(), d["id"]))
 
     def document_row(self, doc_id):
@@ -364,7 +382,7 @@ class Catalog:
         d = self.one("SELECT d.*, s.sha256, s.file_name, s.imported_at, s.source_path FROM documents d"
                      " JOIN snapshots s ON s.document_id = d.id WHERE d.id = ?", doc_id)
         return d and dict(d) | {"category_id": None, "category": None, "copy_path": None, "copy_status": None,
-                                "filed_at": None}
+                                "filed_at": None, "provenance": None, "auto_json": None}
 
     def waiting_documents(self):
         """Every document that is not filed, each with its stored analysis as JSON text (or None): one query."""
@@ -496,12 +514,14 @@ class Catalog:
         return self.one("SELECT * FROM memberships WHERE document_id = ? AND role = 'primary' AND status = 'active'",
                         doc_id)
 
-    def add_primary(self, doc_id, cat_id, provenance):
+    def add_primary(self, doc_id, cat_id, provenance, auto=None):
+        """auto: for a placement the app made by itself, what it was based on (kept with the placement)."""
         t = now()
         with self.lock, self.db:
             mid = self.db.execute(
-                "INSERT INTO memberships (document_id, category_id, role, provenance, status, created_at, updated_at)"
-                " VALUES (?, ?, 'primary', ?, 'active', ?, ?)", (doc_id, cat_id, provenance, t, t)).lastrowid
+                "INSERT INTO memberships (document_id, category_id, role, provenance, status, created_at, updated_at,"
+                " auto_json) VALUES (?, ?, 'primary', ?, 'active', ?, ?, ?)",
+                (doc_id, cat_id, provenance, t, t, json.dumps(auto) if auto else None)).lastrowid
             self.db.execute("INSERT INTO membership_events (membership_id, event, provenance, at) VALUES (?, ?, ?, ?)",
                             (mid, "created", provenance, t))
         return mid

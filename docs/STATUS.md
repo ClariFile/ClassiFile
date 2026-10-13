@@ -1,6 +1,6 @@
 # ClassiFile status
 
-2026-10-13 · decision record version 2.2
+2026-10-13 · decision record version 2.3
 
 ## Done
 
@@ -102,7 +102,23 @@
   has a generous limit (both could fail on a busy machine).
 - Not built from the record's CP3 list: selected-category mode and "Also belongs to" (proposed for CP4, see
   `docs/CP4_PROPOSAL.md`).
-- 249 automated tests.
+
+**CP4 Automatic mode (in progress, 2026-10-13; the owner's decisions are in the record, version 2.3)**
+- **Automatic filing, built.** A document that is read is filed without a question when its best category
+  leads the second by the level in use (Strict, the owner's choice) and that category already holds 3 documents
+  the owner confirmed. Otherwise it waits with the three best categories, as before. The copy is the normal
+  verified copy; the placement is recorded as machine-assigned with what it rested on, and never trains the
+  matcher. Waiting documents are looked at again after "Update matching" and after a change of level.
+- **Filed automatically** (sidebar view): what the app filed by itself, each with its reason and Move to….
+  A move is the owner's correction and is what the matcher learns from. In the document list such a document's
+  status reads "Filed automatically", not "Approved".
+- **Settings:** the level (Off, Very strict, Strict, Balanced, Lenient); every change is recorded in the catalog.
+  The Settings page now uses its full reading width.
+- **Grouping new subjects: tested on development data, not in the app yet** (the owner looks at the report
+  first). `tools.group_eval` holds each category out in turn and groups only the documents that then match no
+  existing category. Result below.
+- Not built yet: the grouping question in the app, selected-category mode, "Also belongs to".
+- 253 automated tests.
 
 ## Development results so far
 
@@ -131,6 +147,14 @@ These counts describe development data only. They are not accuracy estimates.
   - Cards use a lenient level (lead of 0.02). Of the 81 documents whose category exists, 66 would show three
     categories (64 with the owner's among them, 61 with it first) and 15 a suggested new name; of the 83 held
     out as new subjects, 39 would show a new name and 44 existing categories.
+- **Grouping new subjects (2026-10-13):** each of the 11 categories held out in turn (83 documents). 43 of the
+  documents then match no existing category; the other 40 are taken for an existing one and are never grouped.
+  - At an average similarity of 0.15: 30 of the 43 land in a group, with 2 documents of another category mixed
+    in. Of the 7 categories with at least two unmatched documents, 2 come back as one group, 4 are split into
+    several groups or leave documents alone, and 1 is mixed.
+  - At 0.20: 20 of the 43 land in a group and none is mixed; 1 category comes back as one group, 6 are split.
+  - The key words shared by a group read as its subject; the suggested names are lesson titles, so the owner
+    would usually type the folder name. The reports with the groups are local (`data\grouping_report_*.txt`).
 - **Validation, measured once (2026-10-13):** model version 1 (the 83 development documents) on the 23
   validation documents. The owner's category first for 21 and in the first three for all 23. Per label, first /
   in the first three / documents: 10/10/10, 2/4/4, 3/3/3, 3/3/3, 2/2/2 and 1/1/1. One label names no category;
@@ -227,16 +251,17 @@ These counts describe development data only. They are not accuracy estimates.
     20 of 34 files with a name once marked good (21), 17 names never judged. Development data; not accuracy.
   - What would settle the level: the user's own grouping of the development files (decision record G3), which
     does not exist yet. Filing them in the app with the categories the user wants would provide it.
-- **Automatic filing (CP4)** is proposed, not built: `docs/CP4_PROPOSAL.md`. The owner picks the strictness.
-- **Record changes to propose:** E2 and E4 results; the card rule (three existing categories, one click; new
-  names only when none is a good match); selected-category mode and "Also belongs to" from CP3 to CP4.
+- **Grouping new subjects:** waiting for the owner's look at the report, and their choice of similarity
+  (0.15 groups more and mixed 2 documents; 0.20 groups less and mixed none).
+- **Selected-category mode:** where the owner selects the categories is not designed yet.
 
 ## Next
 
-1. The owner's decisions on `docs/CP4_PROPOSAL.md` (strictness level, naming new subjects, record changes).
-2. Queued for after CP3, in the owner's order: interface phases 2 (the page preview) and 3 of
+1. Finish CP4 after the owner has seen the grouping report: the grouping question in the app,
+   selected-category mode, "Also belongs to"; then all tests, the audit and a push.
+2. Queued for after CP4, in the owner's order: interface phases 2 (the page preview) and 3 of
    `docs/UI_PROPOSAL.md`, with decisions 3 (card actions) and 4 (narrow windows). Known from the phase 1
    checks: at 1024×640 the decision page with details beside it scrolls sideways by 16 pixels, and the two
    lists draw no focus mark of their own (both phase 3).
-3. CP4 automatic mode on the owner's go-ahead, then CP5 quality gate and freeze. SummarEase is a separate
+3. CP5 quality gate and freeze (`data\final-eval` stays untouched until then). SummarEase is a separate
    project.

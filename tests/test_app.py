@@ -1018,6 +1018,7 @@ def test_cards_offer_the_best_matching_categories_once_matching_is_updated(app, 
     known = org.catalog.document(_add(org, src, "Networks", 7, file_it=False))["file_name"]
     _pdf(src / "unknown.pdf", "zebra giraffe antelope savanna migration herd", 1)   # none of the three subjects
     org.record(src / "unknown.pdf", *read_and_analyze(src / "unknown.pdf"))
+    org.set_auto_level("off")                                      # this test is about the cards: everything asks
 
     w, rec = _window(make_org)
     w.review()
@@ -1060,4 +1061,66 @@ def test_cards_offer_the_best_matching_categories_once_matching_is_updated(app, 
     w.matching_button.click()
     _pump(app, lambda: w.matching_button.isEnabled())
     assert w.toast.label.text() == "Matching is already up to date."
+    _close(w, rec)
+
+
+def test_a_clear_match_is_filed_automatically_and_listed_with_its_reason(app, make_org, tmp_path):
+    from classifile import matching
+    from classifile.app.main import AUTO, AUTO_LEVELS
+    from test_matching import SUBJECTS, _add, _pdf
+
+    assert {name for name, _ in AUTO_LEVELS} == set(matching.LEVELS) | {"off"}
+    org, src = make_org(), tmp_path / "src"
+    for n in range(3):
+        _add(org, src, "Algebra", n)
+        _add(org, src, "Networks", n)
+    for n in range(2):
+        _add(org, src, "Poetry", n)                                # too few confirmed documents to file into
+    org.update_matching()
+    for name, subject, n in (("clear.pdf", "Networks", 7), ("small.pdf", "Poetry", 6), ("later.pdf", "Algebra", 5)):
+        _pdf(src / name, SUBJECTS[subject], n)
+    _pdf(src / "torn.pdf", "matrix router vector packet eigenvalue switch", 0)   # two subjects at once
+
+    w, rec = _window(make_org, [src / "clear.pdf", src / "small.pdf", src / "torn.pdf"])
+    _pump(app, lambda: not w.inflight and not w.filing and not w.auto_running)
+    assert w.toast.label.text() == "Filed clear.pdf automatically in Networks" and w.toast.action.text() == "Show"
+    assert sorted(d["file_name"] for d in w.waiting()) == ["small.pdf", "torn.pdf"]   # these two ask the user
+    assert w.auto_count.text() == "1" and w.decide_count.text() == "2"
+    row = next(r for r in range(w.filter.rowCount()) if _cell(w, r, 0) == "clear.pdf")
+    assert _cell(w, row, 2) == "Filed automatically" and _cell(w, row, 1) == "Networks"   # not "Approved"
+
+    w.toast.action.click()                                         # Show: what the app filed by itself
+    assert w.view[0] == AUTO and w.stack.currentWidget() is w.auto_page
+    assert w.page_title.full == "Filed automatically · 1" and not w.toolbar.isVisible()
+    item = w.auto_page.items[0]
+    assert item.title.full == "clear.pdf"
+    assert item.reason.full == "Filed in Networks  ·  Similar to 3 documents in Networks"
+    w.review()
+    small = _item(w, "small.pdf")
+    assert small.matches[0] == ("Poetry", 2) and small.primary.text() == "File in Poetry"   # waits, with the three
+
+    w.show_view(AUTO)
+    w.auto_page.items[0].move.click()                              # one click to the picker: the user's correction
+    dialog = w.picker_dialog
+    assert dialog.windowTitle() == "Move 1 document to…"
+    assert _pick(dialog.picker, "alg")[2] == "Algebra"
+    dialog.confirm.click()
+    _pump(app, lambda: not w.moving)
+    assert w.auto_page.items == [] and w.auto_page.empty.isVisible() and w.auto_count.text() == ""
+    moved = w.org.catalog.document_row(_doc(w, "clear.pdf"))
+    assert (moved["category"], moved["provenance"]) == ("Algebra", "user-corrected")
+
+    w.show_view(SETTINGS)
+    assert w.auto_level.currentData() == "strict"                  # the level the owner chose
+    w.auto_level.setCurrentIndex(w.auto_level.findData("off"))
+    w.auto_level.activated.emit(w.auto_level.currentIndex())
+    w.import_paths([str(src / "later.pdf")])
+    _pump(app, lambda: not w.inflight and not w.filing and not w.auto_running)
+    assert "later.pdf" in [d["file_name"] for d in w.waiting()]    # switched off: everything waits
+    w.show_view(SETTINGS)
+    w.auto_level.setCurrentIndex(w.auto_level.findData("strict"))
+    w.auto_level.activated.emit(w.auto_level.currentIndex())       # back on: the waiting documents are looked at again
+    _pump(app, lambda: not w.filing and not w.auto_running)
+    assert "later.pdf" not in [d["file_name"] for d in w.waiting()] and w.auto_count.text() == "1"
+    assert [r["value"] for r in w.org.catalog.all("SELECT value FROM setting_changes ORDER BY id")] == ["off", "strict"]
     _close(w, rec)

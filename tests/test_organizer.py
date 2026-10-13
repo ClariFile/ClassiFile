@@ -75,7 +75,7 @@ def test_persistence_across_reopen(samples, make_org):
     org.startup()
     assert _snapshot(org) == before
     assert org.catalog.analysis(ids[SAMPLE["S1"]]) == analysis
-    assert org.catalog.schema_version == 8
+    assert org.catalog.schema_version == 9
     assert {d[2] for d in before[2]} == {"needs_decision"} and len(before[2]) == 5
 
 
@@ -174,7 +174,7 @@ def test_catalog_migrates_v1_pdf_rows(tmp_path, monkeypatch):
     old.close()
     monkeypatch.undo()
     cat = db.Catalog(path)
-    assert cat.schema_version == len(db.MIGRATIONS) == 8
+    assert cat.schema_version == len(db.MIGRATIONS) == 9
     e = cat.one("SELECT format, unit, unit_count, record_version FROM extractions")
     assert tuple(e) == ("pdf", "page", 1, 1)  # old rows keep their record version
     u = cat.one("SELECT unit_index, kind, text, text_area FROM extraction_units")

@@ -139,8 +139,9 @@ class Organizer:
             n += 1
         return self.catalog.add_category(name, name_key(name), folder)
 
-    def file(self, doc_id, cat_id):
-        """User-confirmed primary placement plus verified copy. Returns (outcome, path).
+    def file(self, doc_id, cat_id, provenance="user-confirmed", auto=None):
+        """Primary placement plus verified copy: the user's choice, unless file_automatically() says otherwise.
+        Returns (outcome, path).
         Nothing is recorded unless the copy succeeds: on failure the document stays waiting, with a plain reason."""
         doc = self.catalog.document(doc_id)
         current = self.catalog.active_primary(doc_id)
@@ -163,7 +164,7 @@ class Organizer:
             raise CopyError(problem)
         folder = root / self.catalog.category(cat_id)["folder_name"]
         folder_existed = folder.exists()
-        self.catalog.add_primary(doc_id, cat_id, "user-confirmed")
+        self.catalog.add_primary(doc_id, cat_id, provenance, auto)
         try:
             outcome, path = make_copy(self.catalog, doc_id, doc["sha256"], source, cat_id, root)
         except CopyError as e:
@@ -316,10 +317,52 @@ class Organizer:
         if not self.matcher():
             return []
         _, model = self.matcher()
-        if doc_id not in self._ranked:      # once per document and model: the stored text is read and scored
-            self._ranked[doc_id] = model.rank(self.catalog.texts(doc_id).get(doc_id, ""))
-        ranked = [(c, s) for c, s in self._ranked[doc_id] if c in live]
+        ranked = self._rank(doc_id, live)
         return [(c, model.bundle["documents"][c]) for c, _ in ranked[:3]] if model.good(ranked) else []
+
+    def _rank(self, doc_id, live):
+        """The existing categories ranked for a document by the model in use (there must be one)."""
+        if doc_id not in self._ranked:      # once per document and model: the stored text is read and scored
+            self._ranked[doc_id] = self.matcher()[1].rank(self.catalog.texts(doc_id).get(doc_id, ""))
+        return [(c, s) for c, s in self._ranked[doc_id] if c in live]
+
+    # -- automatic filing (decision record A0, B2) --------------------------------------------------------------
+    def auto_level(self):
+        """The level in use: a name in matching.LEVELS, or "off"."""
+        return self.catalog.get_setting("auto_level", matching.AUTO_DEFAULT)
+
+    def set_auto_level(self, name):
+        """Change the level; the change is kept on record."""
+        if name != "off" and name not in matching.LEVELS:
+            raise ValueError("unknown level")
+        if name != self.auto_level():
+            self.catalog.change_setting("auto_level", name)
+
+    def auto_choice(self, doc_id):
+        """Where a waiting document would be filed without a question: (category id, what that rests on), or None
+        when it waits for the user. It is filed only when its best category leads the second by the level in use,
+        and that category holds enough documents the user confirmed (placements the app made do not count)."""
+        level, doc = matching.LEVELS.get(self.auto_level()), self.catalog.document(doc_id)
+        if level is None or not self.matcher() or doc is None or doc["status"] != "needs_decision":
+            return None
+        row, model = self.matcher()
+        ranked = self._rank(doc_id, {c["id"] for c in self.catalog.categories()})
+        if not ranked or matching.lead(ranked) < level:
+            return None
+        best = ranked[0][0]
+        if list(self.catalog.explicit_labels().values()).count(best) < matching.AUTO_MIN_CONFIRMED:
+            return None
+        return best, {"version": row["version"], "level": level, "documents": model.bundle["documents"][best]}
+
+    def file_automatically(self, doc_id):
+        """File a waiting document by itself when its match is clear (auto_choice): the normal verified copy,
+        recorded as machine-assigned with what it rests on. Such a placement never trains the matcher (A7).
+        Returns the category id, or None when the document waits for the user. Raises CopyError like file()."""
+        choice = self.auto_choice(doc_id)
+        if choice is None:
+            return None
+        self.file(doc_id, choice[0], provenance="machine-assigned", auto=choice[1])
+        return choice[0]
 
     def matching_status(self):
         """{"version", "created_at", "documents", "categories", "since"} for the model in use (since: documents

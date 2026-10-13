@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 
 from classifile.analysis.candidates import name_key
 from classifile.app import app_icon, make_app
+from classifile.app.autofiled import AutoPage
 from classifile.app.decision import DecisionPage
 from classifile.app.details import DetailsPanel
 from classifile.app.models import DOC, SORTS, CategoryModel, DocumentFilter, DocumentModel, sorted_by_name
@@ -36,8 +37,11 @@ from classifile.catalog.db import Catalog
 from classifile.organizer import Organizer, is_cloud_synced, read_and_analyze
 from classifile.worker import WorkerPool
 
-ALL, DECIDE, RECENT, SETTINGS = "all", "decide", "recent", "settings"
-VIEW_TITLES = {ALL: "All documents", DECIDE: "Needs your decision", RECENT: "Recently added", SETTINGS: "Settings"}
+ALL, DECIDE, RECENT, SETTINGS, AUTO = "all", "decide", "recent", "settings", "auto"
+VIEW_TITLES = {ALL: "All documents", DECIDE: "Needs your decision", RECENT: "Recently added", SETTINGS: "Settings",
+               AUTO: "Filed automatically"}
+AUTO_LEVELS = (("off", "Off: always ask me"), ("very strict", "Very strict"), ("strict", "Strict"),
+               ("balanced", "Balanced"), ("lenient", "Lenient"))   # matching.LEVELS, as Settings words them
 RECENT_DAYS = 7
 READ_WORKERS = min(4, os.cpu_count() or 2)  # documents read (and OCR'd) at once, each in its own process
 WAITING = ("needs_decision", "pending", "failed")
@@ -79,6 +83,8 @@ class MainWindow(QWidget):
         self.read_results = []      # finished reads not recorded yet: taken one per turn of the event loop
         self.filing = {}            # doc_id -> category id, while its copy is being made
         self.batch, self.batch_name, self.new_category = [], "", None
+        self.auto_batch = []        # (doc_id, category id) the app has just filed by itself, until it says so
+        self.auto_running = 0       # automatic filings under way
         self.failure = None         # (doc ids, sentence): stays as a notice until those documents are resolved
         self.feedback = {}          # doc_id -> reason ("" = none given): the suggested names were set aside
         self.moving = 0             # moves and renames under way (they copy files, so they run off this thread)
@@ -247,9 +253,10 @@ class MainWindow(QWidget):
         self.table = self._table()
         self.empty_state = self._empty_state()
         self.decision = DecisionPage(self)
+        self.auto_page = AutoPage(self)
         self.settings_page = self._settings_page()
         self.no_match = self._no_match_page()
-        for page in (self.table, self.empty_state, self.decision, self.settings_page, self.no_match):
+        for page in (self.table, self.empty_state, self.decision, self.auto_page, self.settings_page, self.no_match):
             self.stack.addWidget(page)
         self.details = DetailsPanel(self)
         self.details.setMinimumWidth(DETAILS_MIN)
@@ -293,7 +300,7 @@ class MainWindow(QWidget):
         self.nav_group = QButtonGroup(self)
         self.nav_group.setExclusive(True)
         self.nav = {}
-        for key in (ALL, DECIDE, RECENT):
+        for key in (ALL, DECIDE, AUTO, RECENT):
             b = QPushButton(VIEW_TITLES[key])
             b.setObjectName("nav")
             b.setCheckable(True)
@@ -306,6 +313,12 @@ class MainWindow(QWidget):
         count_row = box(QHBoxLayout(self.nav[DECIDE]), (0, 0, GROUP, 0))
         count_row.addStretch(1)
         count_row.addWidget(self.decide_count)
+        self.auto_count = QLabel()                # how many documents the app filed by itself
+        self.auto_count.setObjectName("count")
+        self.auto_count.setAttribute(Qt.WA_TransparentForMouseEvents)
+        count_row = box(QHBoxLayout(self.nav[AUTO]), (0, 0, GROUP, 0))
+        count_row.addStretch(1)
+        count_row.addWidget(self.auto_count)
         header = QLabel("CATEGORIES")
         header.setObjectName("section")
         self.add_category = QPushButton("+")
@@ -346,7 +359,7 @@ class MainWindow(QWidget):
         self.nav[SETTINGS] = settings
         v = box(QVBoxLayout(side), (0, 0, 0, RELATED), 0)
         v.addLayout(top)
-        for key in (ALL, DECIDE, RECENT):
+        for key in (ALL, DECIDE, AUTO, RECENT):
             v.addWidget(self.nav[key])
         v.addLayout(cat_head)
         v.addWidget(self.cats_empty)
@@ -445,7 +458,9 @@ class MainWindow(QWidget):
         outer = QWidget()
         page = QWidget()
         page.setMaximumWidth(READING_MAX * 2 // 3)
-        box(QHBoxLayout(outer)).addWidget(page, 1, Qt.AlignLeft | Qt.AlignTop)
+        across = box(QHBoxLayout(outer))
+        across.addWidget(page, 100)             # up to its widest, at the left (an alignment would shrink it to
+        across.addStretch(1)                    # its buttons, and every sentence would wrap into a narrow column)
         out = QLabel("OUTPUT FOLDER")
         out.setObjectName("section")
         self.root_label = QLabel()
@@ -473,6 +488,19 @@ class MainWindow(QWidget):
         match_row = box(QHBoxLayout(), spacing=GROUP)
         match_row.addWidget(self.matching_label, 1)
         match_row.addWidget(self.matching_button, 0, Qt.AlignTop)
+        self.auto_level = QComboBox()             # the level of automatic filing; every change is recorded
+        self.auto_level.setView(QListView())
+        for name, words in AUTO_LEVELS:
+            self.auto_level.addItem(words, name)
+        self.auto_level.activated.connect(lambda *_: self.set_auto_level(self.auto_level.currentData()))
+        auto_text = QLabel("Automatic filing: a document is filed without a question when one category is "
+                           "clearly ahead of the others and already holds 3 documents you confirmed. "
+                           "Stricter levels ask you more often and make fewer mistakes.")
+        auto_text.setWordWrap(True)
+        auto_text.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        auto_row = box(QHBoxLayout(), spacing=GROUP)
+        auto_row.addWidget(auto_text, 1)
+        auto_row.addWidget(self.auto_level, 0, Qt.AlignTop)
         about = QLabel("ABOUT")
         about.setObjectName("section")
         about_text = QLabel("ClassiFile organizes copies of your documents into categories; original files stay "
@@ -487,6 +515,8 @@ class MainWindow(QWidget):
         v.addSpacing(SECTION)
         v.addWidget(matching)
         v.addLayout(match_row)
+        v.addSpacing(GROUP)
+        v.addLayout(auto_row)
         v.addSpacing(SECTION)
         v.addWidget(about)
         v.addWidget(about_text)
@@ -599,11 +629,15 @@ class MainWindow(QWidget):
             self.nav[key].setChecked(True)
         self._select_category()
         self._fill_list(self.org.catalog.all_documents())
+        filed_by_app = [r for r in self.doc_rows if r["provenance"] == "machine-assigned" and r["status"] == "filed"]
+        self.auto_count.setText(str(len(filed_by_app)) if filed_by_app else "")
+        self.auto_page.show_docs(filed_by_app)
         if select_docs is not None:
             self.select_docs(select_docs)
         if key == SETTINGS:
             self._show_root()
             self._show_matching()
+            self.auto_level.setCurrentIndex(self.auto_level.findData(self.org.auto_level()))
             self.close_toggle.blockSignals(True)
             self.close_toggle.setChecked(self.org.catalog.get_setting("close_notice") != "off")
             self.close_toggle.blockSignals(False)
@@ -632,10 +666,12 @@ class MainWindow(QWidget):
             total = len(self.waiting_docs)
             self.decision.set_query(q)
             shown = self.decision.shown_documents()
+        elif key == AUTO:
+            total = len(self.auto_page.items)
         elif key != SETTINGS:
             total, shown = self.filter.total(), self.filter.rowCount()
         self.page_title.setText(title + (f" · {total}" if total else ""))
-        searchable = key != SETTINGS and not empty and (key != DECIDE or bool(total))
+        searchable = key not in (SETTINGS, AUTO) and not empty and (key != DECIDE or bool(total))
         self.toolbar.setVisible(searchable)
         for w in (self.sort, self.details_toggle):
             w.setVisible(key != DECIDE)
@@ -650,6 +686,8 @@ class MainWindow(QWidget):
             page = self.no_match
         elif key == DECIDE:
             page = self.decision
+        elif key == AUTO:
+            page = self.auto_page
         else:
             page = self.empty_state if empty else self.table
         self.stack.setCurrentWidget(page)
@@ -689,8 +727,9 @@ class MainWindow(QWidget):
         still being read. Only rows that differ are touched."""
         if docs is not None:
             self.doc_rows = docs
-        rows = [dict(r) | {"key": r["id"], "date": short_date(r["imported_at"]),
-                           "shown_status": "filing" if r["id"] in self.filing else r["status"]}
+        shown = lambda r: ("filing" if r["id"] in self.filing else
+                           "auto" if r["status"] == "filed" and r["provenance"] == "machine-assigned" else r["status"])
+        rows = [dict(r) | {"key": r["id"], "date": short_date(r["imported_at"]), "shown_status": shown(r)}
                 for r in self.doc_rows]
         rows += [{"key": ("reading", p), "id": None, "file_name": Path(p).name, "status": st, "shown_status": st,
                   "category": None, "category_id": None, "imported_at": None, "date": "", "status_reason": None}
@@ -977,6 +1016,8 @@ class MainWindow(QWidget):
                 self.toast.show_message(f"{Path(path).name} couldn't be read ({note}).")
             elif note == "already imported":
                 self.toast.show_message(f"{Path(path).name} is already in ClassiFile.")
+            else:
+                self.file_automatically([doc_id])   # a clear match is filed without a question (A0)
         self.refresh(recheck=False)  # once per document; what the user is doing in the window stays
 
     # -- filing -----------------------------------------------------------------------------------------------
@@ -1050,6 +1091,43 @@ class MainWindow(QWidget):
             self.toast.show_message(f"Filed {what} in {cat_name}", "Show",
                                     lambda c=cat_id, d=ok: self._show_filed(c, d))
         self.batch = []
+        self.refresh()
+
+    # -- automatic filing (decision record A0, B2) ------------------------------------------------------------
+    def file_automatically(self, ids):
+        """File those of these waiting documents whose match is clear, off this thread. The others wait."""
+        for doc_id in ids:
+            choice = None if doc_id in self.filing else self.org.auto_choice(doc_id)
+            if choice:
+                self.filing[doc_id] = choice[0]
+                self.auto_running += 1
+                self.pool.submit(self._auto_job, doc_id)
+
+    def _auto_job(self, doc_id):
+        try:
+            out = self.org.file_automatically(doc_id)
+        except Exception as e:          # the document stays waiting, with the reason on its card
+            out = e
+        self.bridge.job_done.emit(lambda result, d=doc_id: self._auto_done(d, result), out)
+
+    def _auto_done(self, doc_id, cat_id):
+        self.filing.pop(doc_id, None)
+        self.auto_running -= 1
+        if cat_id and not isinstance(cat_id, Exception):
+            self.auto_batch.append((doc_id, cat_id))
+        if self.auto_batch and not self.auto_running:      # said once, when all of them are done
+            ids, cats = [d for d, _ in self.auto_batch], {c for _, c in self.auto_batch}
+            where = self.org.catalog.category(self.auto_batch[0][1])["name"] if len(cats) == 1 else None
+            what = self.org.catalog.document(ids[0])["file_name"] if len(ids) == 1 else f"{len(ids)} documents"
+            self.toast.show_message(f"Filed {what} automatically" + (f" in {where}" if where else ""), "Show",
+                                    lambda: self.show_view(AUTO))
+            self.auto_batch = []
+        self.refresh(recheck=False)
+
+    def set_auto_level(self, name):
+        """The level chosen in Settings: recorded, then the waiting documents are looked at again."""
+        self.org.set_auto_level(name)
+        self.file_automatically([d["id"] for d in self.waiting()])
         self.refresh()
 
     def _show_filed(self, cat_id, ids):
@@ -1205,6 +1283,7 @@ class MainWindow(QWidget):
                             + (f" On the {since}, it put your category first for {found['new']}; the previous "
                                f"version for {found['previous']}." if found and found["documents"] else ""))
             self.toast.show_message(text, ms=10000)
+            self.file_automatically([d["id"] for d in self.waiting()])   # with what it knows now
             self.refresh()
 
         self._background(self.org.update_matching, done)

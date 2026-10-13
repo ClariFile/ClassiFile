@@ -213,3 +213,76 @@ def test_match_eval_holds_families_out_and_counts_new_subjects():
     text = "\n".join(lines)
     assert "10 documents, 8 families, 3 categories" in text and "file everything" in text
     assert "%" not in text                                                 # counts, never percentages
+
+
+def test_automatic_filing_only_when_clear_and_never_as_the_users_label(make_org, tmp_path):
+    org, src = make_org(), tmp_path / "src"
+    for n in range(3):
+        _add(org, src, "Algebra", n)
+        _add(org, src, "Networks", n)
+    for n in range(2):
+        _add(org, src, "Poetry", n)                                    # only two confirmed documents
+    clear, small = _add(org, src, "Networks", 7, False), _add(org, src, "Poetry", 6, False)
+    _pdf(src / "torn.pdf", "matrix router vector packet eigenvalue switch", 0)    # two subjects at once
+    torn = org.record(src / "torn.pdf", *read_and_analyze(src / "torn.pdf"))[0]
+    cats = {c["name"]: c["id"] for c in org.catalog.categories()}
+    assert org.auto_level() == "strict" and org.file_automatically(clear) is None   # nothing learned yet
+    org.update_matching()
+
+    assert org.auto_choice(small) is None                              # its category holds too few confirmed ones
+    assert org.matches(small, set(cats.values()))[0][0] == cats["Poetry"]   # it waits, with the best three
+    assert org.auto_choice(torn) is None and org.file_automatically(torn) is None   # no clear best: it waits
+    assert org.file_automatically(clear) == cats["Networks"]
+    row = org.catalog.document_row(clear)
+    assert (row["status"], row["category"], row["provenance"]) == ("filed", "Networks", "machine-assigned")
+    assert json.loads(row["auto_json"]) == {"version": 1, "level": 0.10, "documents": 3}
+    assert (org.output_root / "Networks" / "networks-7.pdf").samefile(row["copy_path"])   # a verified copy as usual
+    assert clear not in org.catalog.explicit_labels()                  # not the user's label:
+    assert org.matching_status()["since"] == 0 and org.update_matching()["outcome"] == "up to date"   # never trains
+    assert org.file_automatically(clear) is None                       # filed already
+
+    org.move(clear, cats["Algebra"])                                   # the user's move is a label
+    assert org.catalog.explicit_labels()[clear] == cats["Algebra"]
+    assert org.catalog.document_row(clear)["provenance"] == "user-corrected"
+
+    org.set_auto_level("off")
+    again = _add(org, src, "Networks", 8, False)
+    assert org.auto_choice(again) is None                              # switched off: everything waits
+    org.set_auto_level("off")                                          # no change: nothing recorded
+    org.set_auto_level("lenient")
+    assert org.file_automatically(again) == cats["Networks"]
+    assert [(r["key"], r["value"]) for r in org.catalog.all("SELECT key, value FROM setting_changes ORDER BY id")] \
+        == [("auto_level", "off"), ("auto_level", "lenient")]          # every change is on record
+    with pytest.raises(ValueError):
+        org.set_auto_level("reckless")
+
+
+def test_grouping_unmatched_documents_and_their_shared_words():
+    texts = {f"{s}{n}": " ".join(words.split()[n:n + 6]) for s, words in SUBJECTS.items() for n in range(3)}
+    texts["alone"] = "zebra giraffe antelope savanna"
+    idf = matching.fit_idf([matching.terms(t) for t in texts.values()])
+    vectors = {d: matching.vector(matching.terms(t), idf) for d, t in texts.items()}
+    groups = matching.similar_groups(vectors, matching.GROUP_LEVEL)
+    assert sorted(map(tuple, groups)) == [tuple(f"{s}{n}" for n in range(3)) for s in sorted(SUBJECTS)]
+    assert "alone" not in sum(groups, [])                              # a group needs at least two documents
+    words = matching.shared_words([vectors[d] for d in ("Poetry0", "Poetry1", "Poetry2")])
+    assert words and set(words) <= set(SUBJECTS["Poetry"].split())     # what they have in common
+    assert matching.similar_groups(vectors, 1.1) == [] and matching.similar_groups({}, 0.1) == []
+
+
+def test_group_eval_says_whether_a_held_out_category_comes_back_as_one_group():
+    from tools import group_eval
+
+    assert group_eval.outcome([1, 2, 3], [[1, 2, 3], [8, 9]]) == ("kept together", [(3, 0)], 0)
+    assert group_eval.outcome([1, 2, 3], [[1, 2], [8, 9]]) == ("split apart", [(2, 0)], 1)
+    assert group_eval.outcome([1, 2, 3], [[1, 2, 9]]) == ("mixed", [(2, 1)], 1)
+    assert group_eval.outcome([1], [[1, 9]])[0] == "nothing to group"       # fewer than two unmatched documents
+    docs = [{"id": f"{s}{n}", "sha": f"{s}{n}", "file_name": f"{s} part {n}.pdf", "category": s, "names": [f"{s} {n}"],
+             "terms": matching.terms(" ".join(words.split()[n:n + 6]))}
+            for s, words in SUBJECTS.items() for n in range(3)]
+    rows = group_eval.evaluate(docs, list(range(len(docs))), matching.GROUP_LEVEL)
+    assert [(r["documents"], r["unmatched"], r["verdict"]) for r in rows] == [(3, 3, "kept together")] * 3
+    assert all(set(r["groups"][0]["words"]) <= set(SUBJECTS[r["category"]].split()) for r in rows)
+    lines = []
+    group_eval.report(docs, rows, matching.GROUP_LEVEL, lines.append)
+    assert "3 kept together" in "\n".join(lines) and "key words: " in "\n".join(lines)

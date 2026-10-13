@@ -171,6 +171,7 @@ STATUS = {  # an icon plus a word, never colour alone
     # ponytail: every filed document was filed by the user's own choice so far. When automatic filing arrives
     # (CP4), take this word from the membership's provenance: machine-assigned is not approved.
     "filed": ("Approved", GREEN, "check"),
+    "auto": ("Filed automatically", ICON_TEAL, "check"),    # machine-assigned: not the user's approval
     "needs_decision": ("Waiting", AMBER, "dot"),
     "queued": ("Reading", "#9CA3AF", "ring"),
     "reading": ("Reading", "#9CA3AF", "ring"),

@@ -1,7 +1,10 @@
 # CP4 proposal: automatic filing
 
-2026-10-13 · a proposal for the owner; nothing here is built. It follows decision record 2.2 (A0, A4, A5, B1, B2,
-Part E) and the CP3 results in `docs/STATUS.md`.
+2026-10-13 · a proposal for the owner, written before CP4 was built. **Decided since (record 2.3):** Strict;
+no automatic filing into a category with fewer than 3 confirmed documents; a "Filed automatically" view; the
+level kept in Settings with its changes recorded; grouping new subjects approved as a narrow exception, after a
+report on development data; selected-category mode and "Also belongs to" moved to CP4. What is built is in
+`docs/STATUS.md`.
 
 ## 1. What CP4 would do
 

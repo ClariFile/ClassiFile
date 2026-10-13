@@ -3,6 +3,11 @@
 FIRST_TEXT = {"page": "on the cover", "slide": "on the title slide", "block": "at the start"}
 
 
+def similar_reason(count, category):
+    """Why a category matches a document: the documents of it the matcher compared with. Never a score."""
+    return f"Similar to {count} document{'s' if count != 1 else ''} in {category}"
+
+
 def _join(parts):
     return parts[0] if len(parts) == 1 else ", ".join(parts[:-1]) + " and " + parts[-1]
 

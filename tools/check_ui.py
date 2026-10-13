@@ -226,7 +226,7 @@ def run(base):
               w.add_category, "the categories": w.cats}
     found += [f"Tab does not reach {name}" for name, target in wanted.items() if target not in seen]
     w.nav_group.checkedButton().setFocus()      # the views are one group: the arrow keys move between them
-    for _ in range(3):
+    for _ in range(len(w.nav) - 1):             # from the first view down to Settings, the last
         QTest.keyClick(QApplication.focusWidget(), Qt.Key_Down)
     if w.view[0] != SETTINGS:
         found.append(f"the arrow keys do not walk the views down to Settings (ended on {w.view[0]})")

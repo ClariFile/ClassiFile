@@ -6,7 +6,7 @@ from PySide6.QtWidgets import (
 )
 
 from classifile.analysis.candidates import name_key, top_names
-from classifile.app.reasons import reason_text
+from classifile.app.reasons import reason_text, similar_reason
 from classifile.app.widgets import (
     CHOICES_MAX, GROUP, PANEL, RELATED, CategoryPicker, ElidedLabel, box, format_icon, restyle,
 )
@@ -101,8 +101,7 @@ class DecisionItem(QFrame):
             if n:
                 button.clicked.connect(lambda _=False, name=name: self.c.file_docs(self.ids, name))
             rows.addWidget(button, n, 0)
-            rows.addWidget(ElidedLabel(f"Similar to {count} document{'s' if count != 1 else ''} in {name}",
-                                       "secondary"), n, 1)
+            rows.addWidget(ElidedLabel(similar_reason(count, name), "secondary"), n, 1)
             self.match_buttons.append(button)
         if not self.matches:
             self.match_rows.hide()

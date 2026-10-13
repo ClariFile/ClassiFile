@@ -31,31 +31,34 @@ from collections import Counter
 from operator import mul
 from pathlib import Path
 
+from classifile.analysis.candidates import top_names
 from classifile.catalog.db import Catalog, default_data_dir
-from classifile.matching import GOOD_MATCH, Centroids, dot, fit_idf, lead, terms, vector
+from classifile.matching import GOOD_MATCH, LEVELS, Centroids, dot, fit_idf, lead, terms, vector
 from tools.inventory import _name_key
 
 NEAR_TEXT = 0.9     # documents this similar count as one family (a version or a format twin)
 CHOSEN = "nearest centroid"     # the primary scorer (E2); its confidence is the best category's lead over the second
-# Levels of that lead proposed for automatic filing (CP4), fixed here on development data before validation was
-# measured. The user picks one (decision record, Part E).
-STRICTNESS = (("very strict", 0.15), ("strict", 0.10), ("balanced", 0.06), ("lenient", 0.03), ("file everything", 0.0))
+# The levels of that lead for automatic filing (classifile.matching.LEVELS: fixed on development data before
+# validation was measured), and filing everything for comparison.
+STRICTNESS = tuple(LEVELS.items()) + (("file everything", 0.0),)
 BANDS = ((1, 3, "1 to 3"), (4, 9, "4 to 9"), (10, 10 ** 9, "10 or more"))   # examples of the category
 
 
 def load(catalog_path):
-    """[{id, sha, file_name, category, terms}] for the documents whose category the owner chose."""
+    """[{id, sha, file_name, category, terms, names}] for the documents whose category the owner chose (names: the
+    category names suggested for the document, best first)."""
     with tempfile.TemporaryDirectory(prefix="classifile-eval-") as tmp:
         shutil.copyfile(catalog_path, Path(tmp) / "catalog.sqlite3")
         cat = Catalog(Path(tmp) / "catalog.sqlite3")
         try:
             labels, texts = cat.explicit_labels(), cat.texts()
-            names = {c["id"]: c["name"] for c in cat.categories()}
+            cats = {c["id"]: c["name"] for c in cat.categories()}
             files = {r["document_id"]: r for r in cat.all("SELECT document_id, sha256, file_name FROM snapshots")}
+            names = {d: [s["name"] for s in top_names((cat.analysis(d) or {}).get("suggestions", []))] for d in labels}
         finally:
             cat.close()
-    return [{"id": d, "sha": files[d]["sha256"], "file_name": files[d]["file_name"], "category": names[labels[d]],
-             "terms": terms(texts.get(d, ""))} for d in sorted(labels)]
+    return [{"id": d, "sha": files[d]["sha256"], "file_name": files[d]["file_name"], "category": cats[labels[d]],
+             "terms": terms(texts.get(d, "")), "names": names[d]} for d in sorted(labels)]
 
 
 def csv_families(paths):
