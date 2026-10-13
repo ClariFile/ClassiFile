@@ -71,6 +71,10 @@
   Measurements and the acceptance results are in section 9 of the proposal.
 - Status column: a filed document shows "Approved" with a green check (it used to be blank). Every filed
   document was filed by the owner's choice so far; automatic filing (CP4) will need its own word.
+- Decision page: each item uses the page's full width, with its buttons at the right and its number in the
+  list before its name. While details are open beside the page (or the item is too narrow for both) the buttons
+  sit under the suggestion. An item's Details button closes the details it opened, and stays pressed meanwhile.
+  Opening an item's choices scrolls the page so they are in view (they used to open below the window).
 - `tools.measure_ui` (timings on a made-up catalog) and `tools.check_ui` (the acceptance checks at four window
   sizes and three scalings).
 - `tools.apply_split`: moves a split's files into `data\development`, `data\validation` and `data\final-eval`,

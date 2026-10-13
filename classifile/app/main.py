@@ -778,6 +778,7 @@ class MainWindow(QWidget):
         """Wide windows: the panel sits beside the list. Narrower: it opens over the list. On the decision page it
         is always beside the items, so their buttons and the category field stay in reach."""
         page = self.stack.currentWidget()
+        self.decision.set_details(self.decide_doc)
         show = (self.details_open and page is self.table) or (self.decide_doc is not None and page is self.decision)
         wide = self.width() >= WIDE or page is self.decision
         was_hidden = self.details.isHidden()

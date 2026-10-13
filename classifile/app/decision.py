@@ -1,17 +1,18 @@
 """The "Needs your decision" page: one item per question, with one primary action each."""
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QCoreApplication, QEvent, Qt
 from PySide6.QtWidgets import (
-    QApplication, QButtonGroup, QFrame, QGridLayout, QHBoxLayout, QLabel, QMenu, QPushButton, QScrollArea, QToolButton,
-    QVBoxLayout, QWidget,
+    QApplication, QBoxLayout, QButtonGroup, QFrame, QGridLayout, QHBoxLayout, QLabel, QMenu, QPushButton, QScrollArea,
+    QToolButton, QVBoxLayout, QWidget,
 )
 
 from classifile.analysis.candidates import name_key, top_names
 from classifile.app.reasons import reason_text
 from classifile.app.widgets import (
-    CHOICES_MAX, GROUP, PANEL, READING_MAX, RELATED, CategoryPicker, ElidedLabel, box, format_icon, restyle,
+    CHOICES_MAX, GROUP, PANEL, RELATED, CategoryPicker, ElidedLabel, box, format_icon, restyle,
 )
 
 TOP = 3
+TEXT_MIN = 320  # a card's buttons sit at its right only while the name and the suggestion keep this much room
 # Why the suggested names were set aside: (button, hint, what the catalog records). Optional.
 REASONS = (("Too narrow", "A lesson or a section", "too narrow"), ("Too broad", "", "too broad"),
            ("Wrong topic", "", "wrong topic"), ("Not a real name", "A fragment, a person or a file name",
@@ -63,6 +64,8 @@ class DecisionItem(QFrame):
         self.title = ElidedLabel(f"{len(docs)} documents with the same suggestion" if self.group
                                  else first["file_name"])
         self.title.setStyleSheet("font-weight: 600;")
+        self.number = QLabel()                  # the item's place in the list, set by the page
+        self.number.setObjectName("secondary")
         self.head = box(QHBoxLayout())          # "more" comes first: the same place on every item
 
         self.line = QLabel()
@@ -92,8 +95,10 @@ class DecisionItem(QFrame):
         self.more_menu.setToolTip("More actions")
         self.more_menu.setPopupMode(QToolButton.InstantPopup)
         self.details = QPushButton("Details")
-        self.details.setToolTip("Show this document's pages beside this list")
-        self.details.clicked.connect(lambda: self.c.show_details(first["id"]))
+        self.details.setToolTip("Show or hide this document's pages beside this list")
+        self.details.setCheckable(True)         # pressed while this document's details are open
+        self.details.clicked.connect(
+            lambda on: self.c.show_details(first["id"]) if on else self.c.close_details())
         if self.group:
             self.details.hide()
         menu = QMenu(self)
@@ -101,24 +106,29 @@ class DecisionItem(QFrame):
             menu.addAction(f"Details: {d['file_name']}", lambda i=d["id"]: self.c.show_details(i))
         menu.addAction("Remove from ClassiFile", lambda: self.c.remove_docs(self.ids))
         self.more_menu.setMenu(menu)
-        for w in (self.more_menu, icon):
+        for w in (self.more_menu, self.number, icon):
             self.head.addWidget(w)
         self.head.addWidget(self.title, 1)
-        actions = box(QHBoxLayout())
-        actions.addWidget(self.primary)
+        self.actions = box(QHBoxLayout())
+        self.actions.addWidget(self.primary)
         for w in (self.choose, self.pending, self.remove, self.details):
-            actions.addWidget(w)
-        actions.addStretch(1)
+            self.actions.addWidget(w)
+        self.actions.addStretch(1)
 
         self.all_suggestions = top[:1] if self.group else first["suggestions"]
         self.one_click = False                  # the primary button files at once (else it opens the choices)
         self.expanded = self._expanded_area()
+        text = box(QVBoxLayout())
+        text.addLayout(self.head)
+        text.addWidget(self.line)
+        text.addWidget(self.names)
+        text.addStretch(1)
+        self.stacked = False                    # details are open beside the page: the buttons go underneath
+        self.body = box(QBoxLayout(QBoxLayout.LeftToRight), spacing=GROUP)  # description, then the controls
+        self.body.addLayout(text, 1)
+        self.body.addLayout(self.actions)
         v = box(QVBoxLayout(self), (0, PANEL, 0, PANEL))
-        v.addLayout(self.head)
-        v.addWidget(self.line)
-        v.addWidget(self.names)
-        v.addSpacing(RELATED)                   # description, then the controls
-        v.addLayout(actions)
+        v.addLayout(self.body)
         choices = box(QHBoxLayout(), (0, RELATED, 0, 0))
         choices.addWidget(self.expanded, 100)   # up to its widest, at the left
         choices.addStretch(1)
@@ -170,6 +180,25 @@ class DecisionItem(QFrame):
     def _only(self, *keep):
         for w in (self.primary, self.choose, self.pending, self.remove):
             w.setVisible(w in keep)
+
+    # -- where the buttons are ---------------------------------------------------------------------------------
+    def set_details(self, doc_id):
+        """doc_id: the document whose details are open beside the page (None: closed)."""
+        self.stacked = doc_id is not None
+        self.details.setChecked(doc_id == self.ids[0])
+        self._arrange()
+
+    def _arrange(self):
+        """The buttons at the right of the card, using its full width; under the description while details are
+        open beside the page, or when the card is too narrow for both."""
+        side = not self.stacked and self.width() - self.actions.sizeHint().width() >= TEXT_MIN
+        direction = QBoxLayout.LeftToRight if side else QBoxLayout.TopToBottom
+        if self.body.direction() != direction:
+            self.body.setDirection(direction)
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self._arrange()
 
     # -- the choices: one picker, the suggested names as "New: …" rows -------------------------------------------
     def _expanded_area(self):
@@ -236,6 +265,20 @@ class DecisionItem(QFrame):
     def _toggle_more(self):
         self.show_all = not self.show_all
         self._fill_choices()
+        self._reveal()
+
+    def _reveal(self):
+        """Scroll the page so the choices just opened are in view: the whole card when it fits, else from its
+        top. Nothing moves when it is in view already."""
+        area = self.parentWidget()
+        while area is not None and not isinstance(area, QScrollArea):
+            area = area.parentWidget()
+        if area is None:
+            return
+        QCoreApplication.sendPostedEvents(None, QEvent.LayoutRequest)  # the card has its new height now
+        top = self.mapTo(area.widget(), self.rect().topLeft()).y()
+        bar = area.verticalScrollBar()
+        bar.setValue(min(top, max(bar.value(), top + self.height() - area.viewport().height())))
 
     def _none_fit(self):
         """The suggested names are set aside: the user types the category they want."""
@@ -244,6 +287,7 @@ class DecisionItem(QFrame):
         self.picker.field.setPlaceholderText("Type the category you want")
         self._fill_choices()
         self.picker.field.setFocus()
+        self._reveal()
 
     def toggle_expanded(self):
         open_ = not self.expanded.isVisible()
@@ -254,6 +298,7 @@ class DecisionItem(QFrame):
         if open_:
             self._fill_choices()
             self.picker.field.setFocus()
+            self._reveal()
         elif inside:
             self.setFocus()                     # the field went away: the keyboard stays on this card
 
@@ -297,9 +342,8 @@ class DecisionPage(QWidget):
         self.c = controller
         self.title = QLabel()
         self.title.setObjectName("pageTitle")
-        self.items, self.query, self.version = [], "", None
-        self.holder = QWidget()
-        self.holder.setMaximumWidth(READING_MAX)    # readable on large screens; the scroll area keeps it left
+        self.items, self.query, self.version, self.details_doc = [], "", None, None
+        self.holder = QWidget()                     # as wide as the page: each card's buttons are at its right
         self.list = box(QVBoxLayout(self.holder), (0, 0, GROUP, 0), 0)  # room for the scroll bar
         self.list.addStretch(1)                     # always last; the cards go before it
         scroll = QScrollArea()
@@ -332,6 +376,7 @@ class DecisionPage(QWidget):
             else:
                 item = DecisionItem(members, self.c, categories)
                 item.state = state
+                item.set_details(self.details_doc)
             items.append(item)
         refocus = at is not None and self.items[at] in old.values()
         if refocus:
@@ -341,6 +386,7 @@ class DecisionPage(QWidget):
             gone.hide()
             gone.deleteLater()
         for n, item in enumerate(items):
+            item.number.setText(f"{n + 1}.")
             if self.list.itemAt(n).widget() is not item:
                 self.list.removeWidget(item)
                 self.list.insertWidget(n, item)
@@ -354,6 +400,14 @@ class DecisionPage(QWidget):
         if shown and (refocus or (enter and at is None)):
             target = items[min(at or 0, len(items) - 1)]
             (target if target in shown else shown[0]).setFocus()  # where the user was, not back at the top
+
+    def set_details(self, doc_id):
+        """The document whose details are open beside the page (None: closed). The cards put their buttons under
+        the description while they are, and that document's Details button stays pressed."""
+        if doc_id != self.details_doc:
+            self.details_doc = doc_id
+            for item in self.items:
+                item.set_details(doc_id)
 
     def _matches(self, item):
         return not self.query or self.query in item.search_text

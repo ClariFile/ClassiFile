@@ -526,6 +526,16 @@ def test_details_open_beside_the_decision_page(app, samples, make_org):
     w.resize(1920, 1000)                                           # test fonts are wide: room for both
     w.review()
     item = _item(w, SAMPLE["S4"])
+    _pump(app, lambda: item.width() > 1040 and item.details.geometry().right() >= item.width() - 2)
+    assert item.width() > 1040 and item.details.geometry().right() >= item.width() - 2  # full width, buttons right
+    assert item.primary.y() < item.line.geometry().bottom()        # beside the name and the suggestion
+    assert item.number.text() == "1." and not item.details.isChecked()
+    item.details.click()
+    _pump(app, lambda: item.primary.y() > item.line.geometry().bottom())   # under the suggestion now
+    assert item.details.isChecked()
+    item.details.click()                                           # Details again closes them
+    _pump(app, lambda: item.primary.y() < item.line.geometry().bottom())
+    assert not w.details.isVisible() and not item.details.isChecked() and w.decide_doc is None
     item.details.click()
     assert w.view[0] == DECIDE and w.stack.currentWidget() is w.decision   # no jump to the document list
     assert w.details.isVisible() and w.details.title.full == SAMPLE["S4"]
@@ -615,13 +625,22 @@ def test_the_decision_page_stays_where_it_is_after_filing(app, samples, make_org
     w.review()
     bar = w.decision.findChild(QScrollArea).verticalScrollBar()
     _pump(app, lambda: bar.maximum() > 0)
+    area = w.decision.findChild(QScrollArea)
+    last = w.decision.items[-1]                                    # its choices would open below the window:
+    bar.setValue(bar.maximum() // 2)
+    (last.choose if last.choose.isVisible() else last.primary).click()
+    below = last.expanded.mapTo(area.viewport(), last.expanded.rect().bottomLeft()).y()
+    assert last.expanded.isVisible() and 0 < below <= area.viewport().height()   # the page scrolls them into view
+    last.toggle_expanded()
+    bar.setValue(0)
     item = w.decision.items[1]
     item.choose.click()
     _pick(item.picker, "My Category", "Create category")
+    at = bar.value()
     item.confirm.click()                                           # the focused field goes away with its item
-    assert bar.value() == 0
+    assert bar.value() == at
     _pump(app, lambda: not w.filing)
-    assert bar.value() == 0 and bar.maximum() > 0                  # not dragged to the bottom
+    assert bar.value() == at and bar.maximum() > at                # not dragged to the bottom
     assert w.decision.items[1].hasFocus()                          # the next item took its place
     assert w.toast.isVisible() and w.toast.parent() is w           # the message slides in over the corner
     _pump(app, lambda: w.toast.slide.state() != w.toast.slide.State.Running)

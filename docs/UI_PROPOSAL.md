@@ -246,6 +246,9 @@ Run at the end of every phase that touches the window.
    deliver, or a performance limit is measured after optimization. Phase 4 can be a review point; it is not a
    mandatory wait. Before any migration is proposed, the limitation is shown and a small QML prototype is
    compared against the improved Widgets implementation.
+6. **Decision cards, full width (2026-10-13).** A card is as wide as the page: its number in the list, its name
+   and suggestion at the left, its buttons at the right. With details open beside the page the buttons go under
+   the suggestion. "Details" on a card opens and closes that document's details.
 
 ---
 
