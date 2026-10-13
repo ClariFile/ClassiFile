@@ -29,7 +29,7 @@ from classifile.app.decision import DecisionPage
 from classifile.app.details import DetailsPanel
 from classifile.app.models import DOC, SORTS, CategoryModel, DocumentFilter, DocumentModel, sorted_by_name
 from classifile.app.widgets import (
-    DETAILS_MAX, DETAILS_MIN, DETAILS_WIDTH, GROUP, READING_MAX, PAD, RELATED, SECTION, STYLE, SUPPORTED, box,
+    DETAILS_MAX, DETAILS_MIN, DETAILS_WIDTH, GROUP, PAD, RELATED, SECTION, STYLE, SUPPORTED, box,
     DropOverlay, ElidedLabel, Notices, PickerDialog, PreviewOverlay, Toast, wrappable,
 )
 from classifile.copies.engine import CopyError
@@ -466,11 +466,8 @@ class MainWindow(QWidget):
 
     def _settings_page(self):
         outer = QWidget()
-        page = QWidget()
-        page.setMaximumWidth(READING_MAX * 2 // 3)
-        across = box(QHBoxLayout(outer))
-        across.addWidget(page, 100)             # up to its widest, at the left (an alignment would shrink it to
-        across.addStretch(1)                    # its buttons, and every sentence would wrap into a narrow column)
+        page = QWidget()                        # as wide as the page, like the others: text left, controls right
+        box(QHBoxLayout(outer)).addWidget(page)
         out = QLabel("OUTPUT FOLDER")
         out.setObjectName("section")
         self.root_label = QLabel()

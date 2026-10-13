@@ -59,6 +59,7 @@ class AutoPage(QWidget):
                             "categories is filed without a question and listed here with the reason.")
         self.empty.setObjectName("secondary")
         self.empty.setAlignment(Qt.AlignCenter)
+        self.empty.setWordWrap(True)            # a long line here would set the least width of every page
         self.all = QCheckBox("Select all")
         self.all.clicked.connect(lambda on: [i.tick.setChecked(on) for i in self.items])
         self.right = QPushButton()                 # for the ticked documents, together

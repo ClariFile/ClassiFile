@@ -36,13 +36,14 @@ CONTROL = 36    # buttons, fields and icon buttons share one height
 DETAILS_WIDTH = 420     # details panel: at least this wide by default, up to DETAILS_MAX on large screens
 DETAILS_MIN = 360
 DETAILS_MAX = 560
-READING_MAX = 1040      # settings never stretch wider than this
 CHOICES_MAX = 680       # the "Choose another…" panel of a decision item
 PICKER_LIST_MAX = 280   # the category picker's list scrolls beyond this height
 PREVIEW_MAX = 560       # tallest details preview; the page is fitted to the panel width below this
 CHEVRON_DOWN = (ICON_DIR.parent / "ui" / "chevron-down.svg").as_posix()
 CHEVRON_RIGHT = (ICON_DIR.parent / "ui" / "chevron-right.svg").as_posix()
 PREVIEW_MIN = 200       # the details preview never shrinks below this; the panel scrolls instead
+PREVIEW_KEEP = 8        # drawn pages kept, so paging back draws nothing
+PREVIEW_SETTLE = 150    # ms after the last resize step before the page is drawn again at its new size
 
 
 def box(layout, margins=0, spacing=RELATED):
@@ -530,6 +531,11 @@ class Preview(QWidget):
         super().__init__()
         self.pdf, self.page, self.source = None, 0, None
         self.fit_width = fit_width
+        self.drawn, self.shown, self.draws = {}, None, 0   # page -> (width, picture); the one shown; drawings made
+        self.settle = QTimer(self)              # one drawing when the resizing has stopped
+        self.settle.setSingleShot(True)
+        self.settle.setInterval(PREVIEW_SETTLE)
+        self.settle.timeout.connect(lambda: self.show_page(self.page))
         self.image = QLabel()
         self.image.setAlignment(Qt.AlignCenter)
         self.image.setWordWrap(True)
@@ -575,6 +581,8 @@ class Preview(QWidget):
         if self.pdf:
             self.pdf.close()
         self.pdf = None
+        self.drawn = {}
+        self.settle.stop()
 
     def show_document(self, source, first_lines, note=""):
         """source: the file to preview (the filed copy, or the original). first_lines: for the card."""
@@ -615,7 +623,16 @@ class Preview(QWidget):
             return
         self.page = max(0, min(self.pdf.count - 1, index))
         width = max(200, self.scroll.viewport().width() - 8)
-        self._set(self.pdf.png(self.page, width))
+        kept = self.drawn.pop(self.page, None)
+        if kept is None or kept[0] != width:    # not drawn at this size yet
+            pix = QPixmap()
+            pix.loadFromData(self.pdf.png(self.page, width))
+            kept = (width, pix)
+            self.draws += 1
+        self.drawn[self.page] = kept            # the latest last; the oldest go
+        for old in list(self.drawn)[:-PREVIEW_KEEP]:
+            del self.drawn[old]
+        self._fit(kept[1])
         self.page_label.setText(f"Page {self.page + 1} of {self.pdf.count}")
         self.prev.show()
         self.next.show()
@@ -626,19 +643,28 @@ class Preview(QWidget):
     def _set(self, png):
         pix = QPixmap()
         pix.loadFromData(png)
+        self._fit(pix)
+
+    def _fit(self, pix, resizing=False):
+        """Show a drawn picture fitted to the room there is. resizing: a step of a resize, where the picture
+        already drawn is stretched or shrunk quickly; the real drawing follows when the resizing stops."""
+        self.shown = pix
         area = self.scroll.viewport().size()  # the whole page fits: no scrolling inside the preview
         width = max(40, area.width() - RELATED)
         height = PREVIEW_MAX if self.fit_width else max(40, area.height() - RELATED)
         fits = pix.width() <= width and pix.height() <= height
-        pix = pix if fits else pix.scaled(width, height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        if resizing or not fits:
+            pix = pix.scaled(width, height, Qt.KeepAspectRatio,
+                             Qt.FastTransformation if resizing else Qt.SmoothTransformation)
         self.image.setPixmap(pix)
         if self.fit_width:  # no empty bands above and below the page
             self.scroll.setFixedHeight(pix.height() + RELATED)
 
     def resizeEvent(self, e):
         super().resizeEvent(e)
-        if self.pdf:
-            self.show_page(self.page)
+        if self.pdf and self.shown is not None:
+            self._fit(self.shown, resizing=True)    # no drawing per step
+            self.settle.start()
 
     def showEvent(self, e):
         super().showEvent(e)

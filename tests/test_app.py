@@ -1256,3 +1256,44 @@ def test_looks_right_selected_categories_and_also_belongs_to_in_the_window(app, 
     w.auto_level.activated.emit(w.auto_level.currentIndex())
     assert w.mode_label.text() == "Automatic filing is off"
     _close(w, rec)
+
+
+def test_the_preview_draws_once_after_a_resize_and_keeps_recent_pages(app, make_org, tmp_path):
+    import pymupdf
+
+    (tmp_path / "src").mkdir()
+    path = tmp_path / "src" / "three pages.pdf"
+    d = pymupdf.open()
+    for n in range(3):
+        d.new_page().insert_text((72, 100), f"Made-up page {n + 1} about tides and harbours.", fontsize=14)
+    d.save(path)
+    d.close()
+    w, rec = _window(make_org, [path])
+    _pump(app, lambda: not w.inflight)
+    w.resize(1900, 800)                                            # wide: the list has room to give
+    w.select_docs([_doc(w, path.name)])
+    w.set_details_open(True)
+    p = w.details.preview
+    _pump(app, lambda: p.page_label.text() == "Page 1 of 3" and not p.settle.isActive()
+          and w.slide.state() != w.slide.State.Running)
+    assert w.auto_page.minimumSizeHint().width() < 400             # no page's wording sets the least width
+    drawn, widths = p.draws, set()
+    list_width, panel_width = w.content.sizes()
+    for step in range(1, 21):                                      # the divider dragged in 20 steps
+        w.content.setSizes([list_width - 6 * step, panel_width + 6 * step])
+        app.processEvents()
+        widths.add(p.width())
+    assert len(widths) > 10 and p.draws == drawn                   # the picture was only scaled: nothing drawn
+    assert p.settle.isActive()
+    _pump(app, lambda: not p.settle.isActive())
+    assert p.draws == drawn + 1                                    # drawn once, at the size it ended on
+    p.next.click()
+    assert p.page_label.text() == "Page 2 of 3" and p.draws == drawn + 2
+    p.prev.click()                                                 # a page already drawn at this size is kept
+    assert p.page_label.text() == "Page 1 of 3" and p.draws == drawn + 2
+    p.next.click()
+    assert p.draws == drawn + 2
+    w.show_view(SETTINGS)                                          # Settings: the whole page, controls at the right
+    _pump(app, lambda: w.settings_page.isVisible())
+    assert w.change_root.geometry().right() > w.settings_page.width() - 40
+    _close(w, rec)
