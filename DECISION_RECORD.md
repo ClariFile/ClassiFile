@@ -1,6 +1,6 @@
 # Decision Record — ClassiFile (Offline Document Organizer)
 
-Version 2.2 · 2026-10-13
+Version 2.3 · 2026-10-13
 
 **Names**
 - **ClariFile:** the suite.
@@ -168,6 +168,19 @@ Version 2.2 · 2026-10-13
   - No categories yet: the main action may create the suggested category and file ("Create & file").
   - The top suggestion matches an existing category: the main action files in it ("File in <name>").
   - Otherwise: the main action opens the category picker ("Choose category…"), with existing categories first and the suggested names offered as new categories. Creating a category always takes an explicit choice.
+- **[Decision] Cards offer existing categories first** (2.3).
+  - When existing categories are a good match for a document's content, its card shows the three best, ranked, each a one-click choice with a plain reason. Filing in an existing category takes one click.
+  - Suggested new names are shown only when no existing category is a good match (the abstention baseline, E4).
+  - Scores are never shown.
+- **[Decision] Automatic filing** (2.3; the operating point the user chose from development and validation results, Part E).
+  - Level: Strict. A document is filed without a question when its best category leads the second-best by at least 0.10 (E4). The level is a setting; every change of it is recorded.
+  - No automatic filing into a category until it holds at least 3 documents the user confirmed. Until then its documents wait, with the three best categories.
+  - Automatically filed documents are machine-assigned and never train the matcher. Only the user's confirmations and moves do (A7).
+  - A "Filed automatically" view lists what the app filed by itself, each with its reason and a one-click Move to….
+- **[Decision] Grouping new subjects** (2.3; a narrow exception to the clustering deferral in F).
+  - Only waiting documents that match no existing category are grouped. Nothing is ever merged into an existing category, and no folder is created by the app itself.
+  - A group has at least 2 documents. It is shown as one question: its documents, the shared key words as the reason, and the suggested names. The user names the folder once and can untick documents before confirming.
+  - It is tested on development data first (each of the user's categories held out in turn), and the user sees that report before it goes into the app.
 - **[Decision]** Effort is reported as four numbers:
   - pending documents;
   - distinct questions;
@@ -310,6 +323,13 @@ Each experiment lists its alternatives, data, measurements, what decides it, and
 - Measure: correct and incorrect assignments, abstentions, false-familiar outcomes, and behaviour with one to three examples per category.
 - Decides: the scorer with the best balance. The user picks the operating point (Part E).
 - Default: nearest centroid with a higher abstention level.
+- Result (development data, 2.3): the 83 filed documents (78 families, 10 categories), each family held out in turn, the vocabulary and every scorer fitted on the rest.
+  - The user's category first / in the first three, of the 81 documents whose category has other families: nearest centroid 65 / 77; kNN 69 / 79 (k = 1), 67 / 79 (k = 3), 66 / 79 (k = 5); logistic regression 36 / 64 (C = 1), 56 / 73 (C = 10), 58 / 75 (C = 100).
+  - With one to three examples of the category (7 documents): nearest centroid 3 first, kNN (k = 1) 4, logistic regression none.
+  - A growing catalog (a quarter, then half, of the other families training): nearest centroid 49 of 71 and 58 of 77 first; kNN (k = 1) 51 and 65; logistic regression (C = 100) 43 and 51.
+  - Selected: nearest centroid. kNN puts the right category first for a few more documents, but nearest centroid abstains much better (E4), and it is the default when the comparison is close.
+  - Validation, measured once on the 23 validation documents with the model trained on the 83: the user's category first for 21, in the first three for all 23.
+  - These counts describe development and validation data. They are not accuracy estimates.
 
 **E3 Representation weaknesses** (run only if E2 exposes them)
 - Alternatives: frozen vocabulary, refresh per validated version, hashing, small embeddings.
@@ -320,6 +340,12 @@ Each experiment lists its alternatives, data, measurements, what decides it, and
 - Alternatives: a global baseline, category-specific spread, document-type-aware comparison.
 - Measure: abstention by document type (e.g., labs vs lectures), incorrect assignments, false-familiar outcomes.
 - Default: global baseline.
+- Result (development data, 2.3): the global baseline is adopted, as one level on how far the best category leads the second-best. Set on the best score alone it was clearly worse.
+  - Documents filed right while at most 0 / 1 / 3 are filed wrong, of 83: nearest centroid 32 / 54 / 60 on the lead (18 / 25 / 29 on the best score); kNN (k = 1) 34 / 35 / 48; logistic regression (C = 100) 32 / 39 / 43.
+  - New subjects: with each whole category held out, all 83 documents are of a subject never seen. At those levels nearest centroid files 0 / 5 / 16 of them (false familiar).
+  - Cards use a lead of 0.02 as "a good match": of the 81 documents whose category exists, 66 show three categories (64 with the user's among them); of the 83 held out as new subjects, 39 show a suggested new name.
+  - Automatic filing levels, fixed before validation was read. Strict (lead of 0.10): on development 43 filed right, 1 wrong, 39 waiting, and 3 of the 83 new-subject documents filed; on validation 14 filed, none wrong, 9 waiting. The user chose Strict (B2).
+  - These counts describe development and validation data. No validation document is of a new subject. They are not accuracy estimates.
 
 **E5 Semantic name equivalence**
 - Data: true synonyms, related-but-distinct categories, broader/narrower pairs, identical names with different meanings, and the networking-course trap (Network Analysis vs Networking Fundamentals).
@@ -393,13 +419,18 @@ Partial checkpoints are not the completed v1. Evaluation runs alongside developm
 - Hidden internal summary record.
 - Extraction checks against the sample page labels (E8).
 
-**CP3 Matching and selected mode**
+**CP3 Matching**
 - Scorer comparison (E2) and abstention baseline (E4) on development data, producing the initial matcher.
-- Selected-category mode, with permissions through the queue.
-- "Belongs to" and "Also belongs to", primary replacement rules, and edited-copy protection.
-  - Brought forward in 2.0: "Belongs to" (as Move to…), with primary replacement and edited-copy protection (B5). "Also belongs to" stays here.
+- Cards offer the best-matching existing categories; model updates on request, versioned and checked (B2, B4).
+- "Belongs to", primary replacement rules, and edited-copy protection.
+  - Brought forward in 2.0: "Belongs to" (as Move to…), with primary replacement and edited-copy protection (B5).
+- Moved to CP4 in 2.3: selected-category mode and "Also belongs to".
 
 **CP4 Automatic mode and discovery**
+- Automatic filing at the level the user chose, with the "Filed automatically" view (B2).
+- Grouping new subjects, after the user has seen the development report (B2).
+- Selected-category mode, with permissions through the queue (from CP3).
+- "Also belongs to" (from CP3).
 - The documented policy (E1) drives the proposer.
 - Single-document creation, with duplicate and equivalence checks using the defaults above (E5–E7).
 - Re-evaluation of pending documents.
@@ -446,7 +477,7 @@ Partial checkpoints are not the completed v1. Evaluation runs alongside developm
 
 - Secondary summarizer implementation, beyond the boundary note.
 - LLMs.
-- Clustering.
+- Clustering, except the grouping of unmatched waiting documents (B2, since 2.3).
 - Trained own-name classifier.
 - Separate packages.
 - Additional representations, unless E2 or E3 justify them.
@@ -483,3 +514,4 @@ Partial checkpoints are not the completed v1. Evaluation runs alongside developm
 - **2.0 (2026-10-12):** regrouping and naming, after the first filing of the development files gave one category per document. B5: Move to… (primary replacement, recorded as user-corrected), Rename category and Delete category (empty ones only), with the question about emptied categories; no merge and no aliases. D/CP3: "Belongs to" brought forward as Move to…; F: rename and delete of empty categories no longer deferred. B2: no one-click category creation once categories exist. B1: file names never suggest a category and count only as weak support for what the content says. A11: SummarEase summaries come from the content, never the file name. Authorized by the user.
 - **2.1 (2026-10-12):** E1: result on development data recorded. No name-based policy reproduces the user's regrouped library (all 80 kept-together pairs fragmented; the shared-name upper bound keeps 8 and over-merges 4), because the folders are subject names that usually are not written in the documents. CP3 (matching to existing categories by content) comes first; CP4 needs a plan for naming new subjects. No rule changed. Authorized by the user.
 - **2.2 (2026-10-13):** A0: the goal, stated by the user. ClassiFile is an automatic categorizer and choosing by hand is the fallback; it decides from the document's content, files automatically when the match is clear, asks only when it is unsure, and suggests new names only when no existing category fits. No other entry changed. Authorized by the user.
+- **2.3 (2026-10-13):** B2: cards offer the three best-matching existing categories as one-click choices, and suggested new names only when no category is a good match. C: E2 result (nearest centroid selected) and E4 result (one global level on the best category's lead) recorded, with the validation measurement. B2 and Part E: the user chose Strict for automatic filing, with no automatic filing into a category that holds fewer than 3 confirmed documents, a "Filed automatically" view, and the level kept as a setting whose changes are recorded. B2 and F: grouping of waiting documents that match no existing category, approved as a narrow exception to the clustering deferral, shown to the user on development data first. D: selected-category mode and "Also belongs to" move from CP3 to CP4. `data\final-eval` stays untouched until CP5. Authorized by the user.
