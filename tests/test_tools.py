@@ -239,3 +239,30 @@ def test_apply_split_moves_everything_or_nothing(tmp_path):
     assert sum(len(list(f.iterdir())) for f in folders.values()) == 3
     with pytest.raises(ValueError, match="not in the previous split"):
         apply_split.apply(again, None, folders, {})
+
+
+def test_file_labels_files_only_waiting_development_rows(make_org, tmp_path):
+    from classifile.organizer import read_and_analyze
+    from tools.file_labels import file_labels
+    from tools.measure_ui import make_pdf
+
+    org, src, rows = make_org(), tmp_path / "src", []
+    src.mkdir()
+    for n, (label, split_name) in enumerate((("Algebra", "development"), ("Algebra", "development"),
+                                             ("Optics", "development"), ("Optics", "validation"),
+                                             ("Optics", "final_evaluation"))):
+        make_pdf(src / f"doc{n}.pdf", f"Made-up title {n}")
+        doc, _ = org.record(src / f"doc{n}.pdf", *read_and_analyze(src / f"doc{n}.pdf"))
+        rows.append({"sha256": org.catalog.document(doc)["sha256"], "primary_label": label, "split": split_name,
+                     "id": doc})
+    elsewhere = org.create_category("Elsewhere")
+    org.file(rows[1]["id"], elsewhere)                              # the owner filed this one already
+    rows.append({"sha256": "0" * 64, "primary_label": "Algebra", "split": "development"})   # never imported
+    done = file_labels(org, rows)
+    assert done == {"filed": 2, "categories created": 2, "already filed (left as it is)": 1, "not in the catalog": 1}
+    placed = {r["id"]: org.catalog.document_row(r["id"]) for r in rows[:5]}
+    assert [placed[r["id"]]["category"] for r in rows[:5]] == ["Algebra", "Elsewhere", "Optics", None, None]
+    assert all(org.catalog.active_primary(r["id"])["provenance"] == "user-confirmed" for r in rows[:3])
+    copy = placed[rows[0]["id"]]["copy_path"]                       # a verified copy, like any filing
+    assert (org.output_root / "Algebra" / "doc0.pdf").samefile(copy)
+    assert file_labels(org, rows) == {"already filed (left as it is)": 3, "not in the catalog": 1}   # nothing twice

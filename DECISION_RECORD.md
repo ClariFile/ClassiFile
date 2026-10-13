@@ -1,6 +1,6 @@
 # Decision Record — ClassiFile (Offline Document Organizer)
 
-Version 2.1 · 2026-10-12
+Version 2.2 · 2026-10-13
 
 **Names**
 - **ClariFile:** the suite.
@@ -41,6 +41,13 @@ Version 2.1 · 2026-10-12
 ---
 
 ## A. Confirmed requirements
+
+**A0 [Requirement] Goal**
+- ClassiFile is an automatic categorizer. Choosing by hand is the fallback, not the main workflow.
+- The app decides from the document's content.
+- It files automatically when the match is clear, and asks the user only when it is unsure.
+- It suggests new names only when no existing category fits.
+- How clear is clear enough is the operating point the user chooses (Part E).
 
 **A1 [Requirement] Platform**
 - Offline processing.
@@ -475,3 +482,4 @@ Partial checkpoints are not the completed v1. Evaluation runs alongside developm
 - **1.9 (2026-10-08):** neutral wording before the first push: the sample with conflicting identities (B1) is described instead of named by its course code. No requirement or decision changed. File names, course codes, people, institutions and titles from the user's documents stay out of tracked files; tests refer to development files by neutral IDs through a local map in `data\`. Authorized by the user.
 - **2.0 (2026-10-12):** regrouping and naming, after the first filing of the development files gave one category per document. B5: Move to… (primary replacement, recorded as user-corrected), Rename category and Delete category (empty ones only), with the question about emptied categories; no merge and no aliases. D/CP3: "Belongs to" brought forward as Move to…; F: rename and delete of empty categories no longer deferred. B2: no one-click category creation once categories exist. B1: file names never suggest a category and count only as weak support for what the content says. A11: SummarEase summaries come from the content, never the file name. Authorized by the user.
 - **2.1 (2026-10-12):** E1: result on development data recorded. No name-based policy reproduces the user's regrouped library (all 80 kept-together pairs fragmented; the shared-name upper bound keeps 8 and over-merges 4), because the folders are subject names that usually are not written in the documents. CP3 (matching to existing categories by content) comes first; CP4 needs a plan for naming new subjects. No rule changed. Authorized by the user.
+- **2.2 (2026-10-13):** A0: the goal, stated by the user. ClassiFile is an automatic categorizer and choosing by hand is the fallback; it decides from the document's content, files automatically when the match is clear, asks only when it is unsure, and suggests new names only when no existing category fits. No other entry changed. Authorized by the user.
