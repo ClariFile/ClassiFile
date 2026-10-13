@@ -74,6 +74,7 @@ Run from the project folder (Windows, Python 3.11+; the venv uses 3.12).
 - Matching (CP3). The model is updated only on request: Settings, "Update matching" (versioned; the previous version is kept if the new one does worse).
   - E2 and E4 on development data: `.venv\Scripts\python -m tools.match_eval [--families <csv>...] [--growth] [--json FILE]` (reads a copy of the catalog; prints category names: keep the output local)
   - Validation, measured once: `.venv\Scripts\python -m tools.match_validation data\validation --labels data\splits_incoming_2.csv` (refuses a second run; `--report data\validation_matching.json` prints the saved result)
+  - Accuracy round, one change to the representation at a time: `.venv\Scripts\python -m tools.accuracy_round [--families <csv>...] [--only <variant>...] [--out FILE]`; one variant on validation, once: `... --validation data\validation --labels data\splits_incoming_2.csv --variant "<name>" --out FILE` (changes nothing in the app; prints category names and words from documents: keep the output local)
   - Grouping new subjects on development data: `.venv\Scripts\python -m tools.group_eval [--families <csv>...] [--level X] [--compare X...] [--out FILE]` (prints category names and words from documents: keep the output local)
   - File waiting development documents from the owner's labels: `.venv\Scripts\python -m tools.file_labels data\splits_incoming_2.csv` (development rows only; close the app first)
 - Interface timings on a made-up catalog: `.venv\Scripts\python -m tools.measure_ui [--json FILE]`

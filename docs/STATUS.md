@@ -159,6 +159,15 @@
 - `tools.check_ui`: all checks pass at 100%, 125% and 150%, including the two palettes and the button names.
 - 260 automated tests.
 
+**Accuracy round (2026-10-13; a report, nothing changed in the app)**
+- `tools.accuracy_round` measures changes to the representation with the E2 test, one at a time: extra weight
+  for titles, headings and the first page; character n-grams; word pairs; less weight for OCR text and template
+  lines; very common words left out. None clearly beats the matcher in use. One combination is a little better
+  on development data and met the rule set for validation by one document. The numbers that move most are the
+  documents per folder. Report: `docs/ACCURACY_ROUND.md`. The owner decides whether to adopt anything.
+- The record (2.5) now says that ClassiFile never creates a folder by itself; the discovery replay is not needed.
+- 261 automated tests.
+
 ## Development results so far
 
 These counts describe development data only. They are not accuracy estimates.
@@ -297,7 +306,8 @@ These counts describe development data only. They are not accuracy estimates.
 
 ## Next
 
-1. The owner tries CP4 and the new interface in the app.
+1. The owner's decision on `docs/ACCURACY_ROUND.md` (adopt the combination, the key-word reason, or neither).
+   The owner tries CP4 and the new interface in the app.
 2. Interface phases 4 (motion, Reduce motion) and 5 (retry for unreadable documents, "Find category…", the
    written states) of `docs/UI_PROPOSAL.md`, on the owner's go-ahead.
 3. CP5 quality gate and freeze (`data\final-eval` stays untouched until then). SummarEase is a separate

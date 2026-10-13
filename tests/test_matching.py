@@ -324,3 +324,43 @@ def test_looks_right_selected_categories_and_new_subject_groups(make_org, tmp_pa
     assert org.new_subject_groups([zoo]) == []                         # a group needs two documents
     assert org.catalog.categories() == [c for c in org.catalog.categories() if c["name"] != "Poetry"]   # none made
     assert all(org.catalog.document(d)["status"] == "needs_decision" for d in poems)   # a question, nothing filed
+
+
+def test_accuracy_round_variants_change_one_thing_and_are_measured_the_same_way():
+    from tools import accuracy_round as ar
+
+    units = [{"kind": "page", "title": None, "text": "Tides and Harbours\nCourse 12 page 1\nthe moon pulls the sea",
+              "notes": None, "ocr_text": "harbour chart"},
+             {"kind": "heading", "title": "Spring tides", "text": "Course 12 page 2\nspring tides are higher",
+              "notes": "say this slowly", "ocr_text": None}]
+    p = ar.parts(units, ["Tides and Harbours"], [{"line": "course ## page #", "pages": [1, 2]}])
+    assert p["template"].splitlines() == ["Course 12 page 1", "Course 12 page 2"]   # repeated lines, numbers apart
+    assert "Course" not in p["body"] and "say this slowly" in p["body"]
+    assert p["ocr"] == "harbour chart" and "Tides and Harbours" in p["head"] and "Spring tides" in p["head"]
+    doc = {"parts": p}
+    plain, _ = ar.counts(doc, {})
+    assert plain == ar.words("\n".join(p[k] for k in ("body", "template", "ocr")))   # as the matcher in use counts
+    assert ar.counts(doc, {"head": 3.0})[0]["harbours"] == plain["harbours"] + 2      # the head counts three times
+    assert "course" not in ar.counts(doc, {"template": 0.0})[0]
+    assert ar.counts(doc, {"ocr": 0.5})[0]["chart"] == 0.5
+    assert ar.counts(doc, {"bigrams": True})[0]["spring tides"] == 1                  # pairs of neighbouring words
+    pieces = ar.counts(doc, {"chars": 0.3})[1]
+    assert pieces["<tid"] == plain["tides"] and pieces["harbo"] == plain["harbours"] + plain["harbour"]
+    idf = matching.fit_idf([plain])
+    assert ar.weigh(plain, idf) == matching.vector(plain, idf)             # whole counts: the same vector
+    assert all(x > 0 for x in ar.weigh(ar.counts(doc, {"ocr": 0.25})[0], idf).values())   # a fraction never turns negative
+
+    docs = [{"id": f"{s}{n}", "sha": f"{s}{n}", "file_name": f"{s} {n}.pdf", "category": s,
+             "parts": {"body": " ".join(text.split()[n:n + 6]), "head": text.split()[n], "ocr": "", "template": ""}}
+            for s, text in SUBJECTS.items() for n in range(3)]
+    fam = list(range(len(docs)))
+    for name in ("in use", "head x2", "bigrams", "chars 0.3", "no template"):
+        rows, unseen = ar.measure(docs, fam, ar.VARIANTS[name])
+        first, three, known, right, wrong, familiar, best = ar.summary(rows, unseen)
+        assert (first, three, known) == (9, 9, 9) and wrong == 0, name   # made-up subjects are easy for every variant
+        assert all(r["examples"] == 0 for r in unseen)
+    assert ar.confusions(rows) == [] and set(ar.per_category(rows, unseen)) == set(SUBJECTS)
+    assert set(ar.key_words(rows[0])) <= set(SUBJECTS[rows[0]["category"]].split())
+    lines = []
+    ar.report(docs, fam, ["in use", "head x2"], lines.append)
+    assert "%" not in "\n".join(lines) and "Categories with fewer than 5 documents" in "\n".join(lines)
