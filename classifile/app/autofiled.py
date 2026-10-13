@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
 )
 
 from classifile.app.reasons import similar_reason
-from classifile.app.widgets import GROUP, PANEL, ElidedLabel, box, format_icon
+from classifile.app.widgets import FILE_ICON, GROUP, PANEL, ElidedLabel, box, format_icon
 
 
 class AutoItem(QFrame):
@@ -18,10 +18,10 @@ class AutoItem(QFrame):
         self.doc_id = doc["id"]
         self.tick = QCheckBox()
         self.tick.setToolTip("Tick several documents to confirm them together")
+        self.tick.setAccessibleName(f"Select {doc['file_name']}")
         icon = QLabel()
-        icon.setPixmap(format_icon(doc["file_name"]).pixmap(20, 20))
-        self.title = ElidedLabel(doc["file_name"])
-        self.title.setStyleSheet("font-weight: 600;")
+        icon.setPixmap(format_icon(doc["file_name"]).pixmap(FILE_ICON, FILE_ICON))
+        self.title = ElidedLabel(doc["file_name"], "strong")
         head = box(QHBoxLayout())
         head.addWidget(self.tick)
         head.addWidget(icon)

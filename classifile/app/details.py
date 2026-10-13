@@ -23,10 +23,11 @@ class DetailsPanel(QFrame):
         self.doc_id = None
         self.shown = None       # set by the window: what it last asked for, so an unchanged document isn't redrawn
         self.title = ElidedLabel()
-        self.title.setStyleSheet("font-size: 16px; font-weight: 600;")
+        self.title.setObjectName("heading")
         close = QPushButton("✕")
         close.setObjectName("icon")
         close.setToolTip("Close details (Space)")
+        close.setAccessibleName("Close details")
         close.clicked.connect(self.c.close_details)
         head = box(QHBoxLayout())
         head.addWidget(self.title, 1)

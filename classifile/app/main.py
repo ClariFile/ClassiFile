@@ -17,7 +17,7 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import QDesktopServices, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
-    QAbstractItemView, QButtonGroup, QCheckBox, QComboBox, QFileDialog, QFrame, QHBoxLayout,
+    QAbstractItemView, QApplication, QButtonGroup, QCheckBox, QComboBox, QFileDialog, QFrame, QHBoxLayout,
     QHeaderView, QInputDialog, QLabel, QLineEdit, QMenu, QMessageBox, QPushButton, QSizePolicy, QSplitter,
     QListView, QScrollArea, QStackedWidget, QStyleFactory, QTreeView, QVBoxLayout, QWidget,
 )
@@ -29,7 +29,9 @@ from classifile.app.decision import DecisionPage
 from classifile.app.details import DetailsPanel
 from classifile.app.models import DOC, SORTS, CategoryModel, DocumentFilter, DocumentModel, sorted_by_name
 from classifile.app.widgets import (
-    DETAILS_MAX, DETAILS_MIN, DETAILS_WIDTH, GROUP, PAD, RELATED, SECTION, STYLE, SUPPORTED, box,
+    CHECKLIST_MAX, DATE_COLUMN_MIN, DETAILS_MAX, DETAILS_MIN, DETAILS_WIDTH, FILE_ICON, GROUP, MIN_WINDOW,
+    MOTION_STANDARD, NARROW, PAD, RELATED, SEARCH_MAX, SECTION, SIDEBAR_WIDTH, STYLE, SUPPORTED, TOAST, TOAST_LONG,
+    WIDE, WINDOW, box,
     DropOverlay, ElidedLabel, Notices, PickerDialog, PreviewOverlay, Toast, wrappable,
 )
 from classifile.copies.engine import CopyError
@@ -45,11 +47,8 @@ AUTO_LEVELS = (("off", "Off: always ask me"), ("very strict", "Very strict"), ("
 RECENT_DAYS = 7
 READ_WORKERS = min(4, os.cpu_count() or 2)  # documents read (and OCR'd) at once, each in its own process
 WAITING = ("needs_decision", "pending", "failed")
-SIDEBAR_WIDTH = 240
-WIDE = 1280          # from here the details panel sits beside the list; narrower, it opens over the list
-NARROW = 1024        # below this the sidebar collapses to a menu button
-DATE_COLUMN_MIN = 760   # the list itself, not the window: narrower (the details panel beside it), no date column
-MIN_WINDOW = (900, 560)
+APPEARANCES = (("system", "Follow Windows", Qt.ColorScheme.Unknown), ("light", "Light", Qt.ColorScheme.Light),
+               ("dark", "Dark", Qt.ColorScheme.Dark))
 SEARCH_HINTS = {ALL: "Search all documents…", RECENT: "Search recently added…", DECIDE: "Search these documents…"}
 
 
@@ -106,9 +105,10 @@ class MainWindow(QWidget):
         self.bridge.job_done.connect(lambda done, result: done(result))
         self.list_style = QStyleFactory.create("Fusion")  # one selection bar (Windows 11 adds a second)
         self.setStyleSheet(STYLE)
+        self.set_appearance(self.org.catalog.get_setting("appearance", "system"))
         self.setAcceptDrops(True)
         self.setMinimumSize(*MIN_WINDOW)
-        self.resize(1280, 760)
+        self.resize(*WINDOW)
         self._build()
         self.org.startup()
         self.refresh()
@@ -209,6 +209,7 @@ class MainWindow(QWidget):
         self.menu_button = QPushButton("☰")
         self.menu_button.setObjectName("icon")
         self.menu_button.setToolTip("Show the sidebar")
+        self.menu_button.setAccessibleName("Show the sidebar")
         self.menu_button.clicked.connect(lambda: self.sidebar.setVisible(not self.sidebar.isVisible()))
         self.page_title = ElidedLabel(object_name="pageTitle")
         self.processing = QLabel()
@@ -235,6 +236,7 @@ class MainWindow(QWidget):
         self.notices = Notices()
         self.search = QLineEdit()             # one field per page, always here; it filters what is loaded
         self.search.setClearButtonEnabled(True)
+        self.search.setAccessibleName("Search")
         self.search.textChanged.connect(lambda *_: self._search_changed())
         self.search.installEventFilter(self)  # Esc clears it first
         QShortcut(QKeySequence.Find, self, activated=self.focus_search)
@@ -243,6 +245,7 @@ class MainWindow(QWidget):
         self.sort = QComboBox()
         self.sort.setView(QListView())           # the opened list takes the shared style
         self.sort.addItems(SORTS)
+        self.sort.setAccessibleName("Sort the list")
         self.sort.currentIndexChanged.connect(lambda *_: self.filter.show(order=self.sort.currentText()))
         self.details_toggle = QPushButton("Details")
         self.details_toggle.setToolTip("Show the selected document's pages and details beside the list (Space)")
@@ -250,7 +253,7 @@ class MainWindow(QWidget):
         self.details_toggle.toggled.connect(self.set_details_open)
         self.toolbar = QWidget()
         tools = box(QHBoxLayout(self.toolbar))
-        self.search.setMaximumWidth(480)
+        self.search.setMaximumWidth(SEARCH_MAX)
         tools.addWidget(self.search, 1)
         tools.addWidget(self.result_count)
         tools.addStretch(0)
@@ -272,7 +275,7 @@ class MainWindow(QWidget):
         self.details.setMinimumWidth(DETAILS_MIN)
         self.details.hide()
         self.slide = QPropertyAnimation(self.details, b"pos", self)   # the panel enters from the right edge
-        self.slide.setDuration(180)
+        self.slide.setDuration(MOTION_STANDARD)
         self.slide.setEasingCurve(QEasingCurve.OutCubic)
         self.slide.finished.connect(self._settle_details)
         self.content = QSplitter(Qt.Horizontal)
@@ -301,7 +304,7 @@ class MainWindow(QWidget):
         side.setObjectName("sidebar")
         side.setFixedWidth(SIDEBAR_WIDTH)
         brand_icon = QLabel()
-        brand_icon.setPixmap(app_icon().pixmap(20, 20))
+        brand_icon.setPixmap(app_icon().pixmap(FILE_ICON, FILE_ICON))
         brand = QLabel("ClassiFile")
         brand.setObjectName("brand")
         top = box(QHBoxLayout(), (GROUP, PAD, GROUP, GROUP))
@@ -334,6 +337,7 @@ class MainWindow(QWidget):
         self.add_category = QPushButton("+")
         self.add_category.setObjectName("icon")
         self.add_category.setToolTip("Create a category")
+        self.add_category.setAccessibleName("Create a category")
         self.add_category.clicked.connect(self.new_category_clicked)
         cat_head = box(QHBoxLayout(), (GROUP, SECTION, RELATED, RELATED))
         cat_head.addWidget(header, 1)
@@ -431,7 +435,7 @@ class MainWindow(QWidget):
     def _empty_state(self):
         page = QWidget()
         title = QLabel("Bring some order to your documents.")
-        title.setStyleSheet("font-size: 22px; font-weight: 600;")
+        title.setObjectName("pageTitle")
         lines = [QLabel("Drop files here or choose documents to get started."), QLabel(f"{SUPPORTED}."),
                  QLabel("Original files stay unchanged. ClassiFile organizes copies.")]
         self.empty_add = QPushButton("Add documents")
@@ -478,6 +482,17 @@ class MainWindow(QWidget):
         row = box(QHBoxLayout(), spacing=GROUP)
         row.addWidget(self.root_label, 1)
         row.addWidget(self.change_root)
+        look = QLabel("APPEARANCE")
+        look.setObjectName("section")
+        self.appearance = QComboBox()             # light, dark, or what Windows is set to
+        self.appearance.setView(QListView())
+        self.appearance.setAccessibleName("Appearance")
+        for name, words, _ in APPEARANCES:
+            self.appearance.addItem(words, name)
+        self.appearance.activated.connect(lambda *_: self.set_appearance(self.appearance.currentData(), save=True))
+        look_row = box(QHBoxLayout(), spacing=GROUP)
+        look_row.addWidget(QLabel("Light or dark"), 1)
+        look_row.addWidget(self.appearance)
         behaviour = QLabel("WHEN CLOSING")
         behaviour.setObjectName("section")
         self.close_toggle = QCheckBox("Ask before closing when documents are waiting")
@@ -499,6 +514,7 @@ class MainWindow(QWidget):
         self.auto_level.setView(QListView())
         for name, words in AUTO_LEVELS:
             self.auto_level.addItem(words, name)
+        self.auto_level.setAccessibleName("Automatic filing level")
         self.auto_level.activated.connect(lambda *_: self.set_auto_level(self.auto_level.currentData()))
         auto_text = QLabel("Automatic filing: a document is filed without a question when one category is "
                            "clearly ahead of the others and already holds 3 documents you confirmed. "
@@ -512,6 +528,7 @@ class MainWindow(QWidget):
         self.auto_scope.setView(QListView())
         self.auto_scope.addItem("All categories", "all")
         self.auto_scope.addItem("Only the ones I tick", "selected")
+        self.auto_scope.setAccessibleName("File automatically into")
         self.auto_scope.activated.connect(lambda *_: self.set_auto_scope())
         scope_text = QLabel("File automatically into:")
         scope_row = box(QHBoxLayout(), spacing=GROUP)
@@ -520,7 +537,7 @@ class MainWindow(QWidget):
         self.auto_ticks = QScrollArea()           # one tick per category; shown in selected-category mode
         self.auto_ticks.setWidgetResizable(True)
         self.auto_ticks.setFrameShape(QFrame.NoFrame)
-        self.auto_ticks.setMaximumHeight(220)
+        self.auto_ticks.setMaximumHeight(CHECKLIST_MAX)
         self.scope_boxes = []
         about = QLabel("ABOUT")
         about.setObjectName("section")
@@ -533,6 +550,9 @@ class MainWindow(QWidget):
         v.addSpacing(SECTION)
         v.addWidget(behaviour)
         v.addWidget(self.close_toggle)
+        v.addSpacing(SECTION)
+        v.addWidget(look)
+        v.addLayout(look_row)
         v.addSpacing(SECTION)
         v.addWidget(matching)
         v.addLayout(match_row)
@@ -665,6 +685,8 @@ class MainWindow(QWidget):
             self._show_root()
             self._show_matching()
             self.auto_level.setCurrentIndex(self.auto_level.findData(self.org.auto_level()))
+            self.appearance.setCurrentIndex(self.appearance.findData(
+                self.org.catalog.get_setting("appearance", "system")))
             self._show_scope(cats)
             self.close_toggle.blockSignals(True)
             self.close_toggle.setChecked(self.org.catalog.get_setting("close_notice") != "off")
@@ -1004,7 +1026,7 @@ class MainWindow(QWidget):
                 self.read_total += 1
                 self.pool.submit(self._read_job, p)
         if refused:
-            self.toast.show_message("Not added: " + "; ".join(refused), ms=8000)
+            self.toast.show_message("Not added: " + "; ".join(refused), ms=TOAST_LONG)
         if self.view[0] in (SETTINGS, "category"):
             self._clear_search()
             self.view = (ALL, None)
@@ -1156,6 +1178,13 @@ class MainWindow(QWidget):
             self.auto_batch = []
         self.refresh(recheck=False)
 
+    def set_appearance(self, name, save=False):
+        """Light, dark, or as Windows is set. Colours come from the palette, so nothing else changes."""
+        scheme = next((s for n, _, s in APPEARANCES if n == name), Qt.ColorScheme.Unknown)
+        QApplication.styleHints().setColorScheme(scheme)
+        if save:
+            self.org.catalog.set_setting("appearance", name)
+
     def recheck_waiting(self):
         """Look at the waiting documents again: the level, the selection or the model changed, or the user
         confirmed documents and a category may now hold the three it takes to be filed into."""
@@ -1253,7 +1282,7 @@ class MainWindow(QWidget):
                     if added else "")
             if problems:
                 text += f" {len(problems)} not added. {problems[0]}"
-            self.toast.show_message(text.strip(), ms=10000 if problems else 5000)
+            self.toast.show_message(text.strip(), ms=TOAST_LONG if problems else TOAST)
             self.refresh()
 
         self._background(job, done)
@@ -1411,7 +1440,7 @@ class MainWindow(QWidget):
                             f"{result['categories']} categories."
                             + (f" On the {since}, it put your category first for {found['new']}; the previous "
                                f"version for {found['previous']}." if found and found["documents"] else ""))
-            self.toast.show_message(text, ms=10000)
+            self.toast.show_message(text, ms=TOAST_LONG)
             self.recheck_waiting()              # with what it knows now
             self.refresh()
 
@@ -1471,7 +1500,7 @@ class MainWindow(QWidget):
                          else f" {edited} copies were changed after filing: they stay in their old folders, flagged.")
             if problems:
                 text += f" {len(problems)} couldn't be moved. {problems[0]}"
-            self.toast.show_message(text, ms=10000 if edited or problems else 5000)
+            self.toast.show_message(text, ms=TOAST_LONG if edited or problems else TOAST)
             self.recheck_waiting()
             self.refresh(select_docs=[])
             counts = self.org.catalog.category_counts()
@@ -1497,7 +1526,7 @@ class MainWindow(QWidget):
             self.toast.show_message(
                 f"Deleted. Other files remain in {wrappable(kept[0])}"
                 + (f" and {len(kept) - 1} more folder{'s' if len(kept) > 2 else ''}" if len(kept) > 1 else "")
-                + ", so " + ("it was" if len(kept) == 1 else "they were") + " left in place.", ms=10000)
+                + ", so " + ("it was" if len(kept) == 1 else "they were") + " left in place.", ms=TOAST_LONG)
         elif deleted and not quiet:
             self.toast.show_message("Deleted the category." if deleted == 1 else f"Deleted {deleted} categories.")
         self.refresh()
@@ -1513,10 +1542,10 @@ class MainWindow(QWidget):
             if isinstance(result, Exception):
                 self.toast.show_message(str(result) if isinstance(result, ValueError) else
                                         f"Something went wrong while renaming ({type(result).__name__}). Try again.",
-                                        ms=10000)
+                                        ms=TOAST_LONG)
             elif result:
                 self.toast.show_message(f"Renamed to {name}. Other files remain in {wrappable(result[0])}, so that "
-                                        "folder was left in place.", ms=10000)
+                                        "folder was left in place.", ms=TOAST_LONG)
             else:
                 self.toast.show_message(f"Renamed to {name}.")
             self.refresh()

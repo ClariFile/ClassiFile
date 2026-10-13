@@ -1,7 +1,7 @@
 # ClassiFile interface: proposal for the next pass
 
-2026-10-12 · the proposal as written before any change. Phase 1 has since been built: section 9 says what was
-done and measured. Phases 2 to 5 are not started.
+2026-10-12 · the proposal as written before any change. Phases 1, 2 and 3 have since been built: section 9 says
+what phase 1 did and measured, and `docs/STATUS.md` what phases 2 and 3 did. Phases 4 and 5 are not started.
 
 **The short version.** The app is slow and forgetful in one specific way: whenever anything changes, it throws
 away the whole window's contents and builds them again. That, not the toolkit, is what makes it feel rough.

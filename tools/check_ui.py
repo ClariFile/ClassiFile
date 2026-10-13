@@ -49,7 +49,7 @@ def run(base):
     from PySide6.QtCore import QPoint, Qt
     from PySide6.QtGui import QFont, QFontDatabase, QKeySequence
     from PySide6.QtTest import QTest
-    from PySide6.QtWidgets import QAbstractButton, QAbstractScrollArea, QApplication, QScrollArea
+    from PySide6.QtWidgets import QAbstractButton, QAbstractScrollArea, QApplication, QLineEdit, QScrollArea
 
     from classifile.app import decision, make_app
     from classifile.app.main import ALL, DECIDE, DOC, SETTINGS, MainWindow
@@ -96,6 +96,9 @@ def run(base):
             text = b.text().replace("&&", "&")
             if b.width() < b.fontMetrics().horizontalAdvance(text):
                 found.append(f"button narrower than its text: {text!r}")
+            own = not isinstance(b.parentWidget(), QLineEdit)       # a field's clear button is Qt's
+            if own and not any(c.isalpha() for c in text) and not b.accessibleName():
+                found.append(f"a button a screen reader cannot name: {text!r}")
             parent, scrolled = b.parentWidget(), False
             while parent is not None:           # a parent clips what sticks out of it
                 at = b.mapTo(parent, QPoint(0, 0))
@@ -277,8 +280,8 @@ def run(base):
                     None if menu_keys != {"documents", "category"} else [],
                     "" if menu_keys == {"documents", "category"} else
                     "the menu key cannot be pressed off-screen; try Shift+F10 on a row by hand"))
-    results.append(("Keyboard: focus is always visible", None, "a script cannot see it; and the two lists draw no "
-                    "focus mark of their own (style sheet: outline none), which phase 3 has to settle"))
+    results.append(("Keyboard: focus is always visible", None, "a script cannot see it; since phase 3 a focused "
+                    "list has a teal border, like the buttons and fields"))
 
     # -- a card in use while 20 documents are imported -------------------------------------------------------------
     w.show_view(DECIDE)
@@ -315,7 +318,21 @@ def run(base):
         found.append(f"the page scrolled from {at} to {area.value()}")
     results.append((f"Typing in a card while {IMPORTS} documents import: text, panel, cursor and scroll stay", found, ""))
     results.append(("Reduce motion: every change is instant", None, "not built yet (phase 4)"))
-    results.append(("Light theme", None, "not checked: off-screen drawing cannot read the system theme (phase 3)"))
+    # -- light and dark: the same layout checks with each palette ---------------------------------------------------
+    from tools.render_window import dark_palette
+    found, light = [], app.palette()
+    w.resize(1536, 864)
+    for name, palette in (("dark", dark_palette()), ("light", light)):
+        app.setPalette(palette)
+        for view in (ALL, DECIDE, SETTINGS):
+            w.show_view(view)
+            pump(timeout=0.25)
+            found += [f"{name}, {view}: {problem}" for problem in layout_problems()]
+        ink, paper = (app.palette().windowText().color().lightness(), app.palette().window().color().lightness())
+        if abs(ink - paper) < 120:
+            found.append(f"{name}: the text does not stand out from its background")
+    results.append(("Light and dark palettes at 1536x864: nothing clipped, every button named, text stands out",
+                    found, "the palettes are set by hand: off-screen drawing cannot follow the system theme"))
     w.close()
     w.org.catalog.close()
     return results

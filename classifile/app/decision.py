@@ -10,12 +10,11 @@ from PySide6.QtWidgets import (
 from classifile.analysis.candidates import name_key, top_names
 from classifile.app.reasons import reason_text, similar_reason
 from classifile.app.widgets import (
-    CHOICES_MAX, GROUP, PANEL, RELATED, CategoryPicker, ElidedLabel, box, format_icon, restyle,
+    CHOICES_MAX, FILE_ICON, GROUP, MATCH_MIN, NAME_FIELD_MAX, PANEL, RELATED, TEXT_MIN, CategoryPicker, ElidedLabel,
+    box, format_icon, restyle,
 )
 
 TOP = 3
-TEXT_MIN = 320  # a card's buttons sit at its right only while the name and the suggestion keep this much room
-MATCH_MIN = 520  # the same for a card that offers matching categories: their buttons and reasons need more
 # Why the suggested names were set aside: (button, hint, what the catalog records). Optional.
 REASONS = (("Too narrow", "A lesson or a section", "too narrow"), ("Too broad", "", "too broad"),
            ("Wrong topic", "", "wrong topic"), ("Not a real name", "A fragment, a person or a file name",
@@ -73,10 +72,9 @@ class DecisionItem(QFrame):
             self.best = self.matches[0][0]
 
         icon = QLabel()
-        icon.setPixmap(format_icon(first["file_name"]).pixmap(20, 20))
+        icon.setPixmap(format_icon(first["file_name"]).pixmap(FILE_ICON, FILE_ICON))
         self.title = ElidedLabel(f"{len(docs)} documents with the same suggestion" if self.group
-                                 else first["file_name"])
-        self.title.setStyleSheet("font-weight: 600;")
+                                 else first["file_name"], "strong")
         self.number = QLabel()                  # the item's place in the list, set by the page
         self.number.setObjectName("secondary")
         self.head = box(QHBoxLayout())          # "more" comes first: the same place on every item
@@ -114,14 +112,13 @@ class DecisionItem(QFrame):
             self.match_rows.hide()
         self.choose = QPushButton("Choose another…")
         self.choose.clicked.connect(self.toggle_expanded)
-        self.pending = QPushButton("Leave pending")
-        self.pending.clicked.connect(lambda: self.c.leave_pending(self.ids))
         self.remove = QPushButton("Remove from ClassiFile")
         self.remove.clicked.connect(lambda: self.c.remove_docs(self.ids))
         self.more_menu = QToolButton()
         self.more_menu.setObjectName("more")
         self.more_menu.setText("⋯")
         self.more_menu.setToolTip("More actions")
+        self.more_menu.setAccessibleName("More actions")
         self.more_menu.setPopupMode(QToolButton.InstantPopup)
         self.details = QPushButton("Details")
         self.details.setToolTip("Show or hide this document's pages beside this list")
@@ -133,6 +130,8 @@ class DecisionItem(QFrame):
         menu = QMenu(self)
         for d in docs if self.group else ():    # a group: each member's pages
             menu.addAction(f"Details: {d['file_name']}", lambda i=d["id"]: self.c.show_details(i))
+        # A card keeps one main action, "Choose another…" and "Details"; the rest is here (the owner's decision 3).
+        self.pending = menu.addAction("Leave pending", lambda: self.c.leave_pending(self.ids))
         menu.addAction("Remove from ClassiFile", lambda: self.c.remove_docs(self.ids))
         self.more_menu.setMenu(menu)
         for w in (self.more_menu, self.number, icon):
@@ -141,7 +140,7 @@ class DecisionItem(QFrame):
         self.actions = box(QHBoxLayout())
         if not self.matches:
             self.actions.addWidget(self.primary)
-        for w in (self.choose, self.pending, self.remove, self.details):
+        for w in (self.choose, self.remove, self.details):
             self.actions.addWidget(w)
         self.actions.addStretch(1)
 
@@ -387,9 +386,19 @@ class SubjectItem(QFrame):
         words = docs[0]["subject"][1]
         self.number = QLabel()
         self.number.setObjectName("secondary")
-        self.title = ElidedLabel(f"{len(docs)} documents look like one new subject")
-        self.title.setStyleSheet("font-weight: 600;")
+        self.title = ElidedLabel(f"{len(docs)} documents look like one new subject", "strong")
+        self.more_menu = QToolButton()
+        self.more_menu.setObjectName("more")
+        self.more_menu.setText("⋯")
+        self.more_menu.setToolTip("More actions")
+        self.more_menu.setAccessibleName("More actions")
+        self.more_menu.setPopupMode(QToolButton.InstantPopup)
+        menu = QMenu(self)
+        self.pending = menu.addAction("Leave pending", lambda: self.c.leave_pending(self.ids))
+        menu.addAction("Remove from ClassiFile", lambda: self.c.remove_docs(self.ids))
+        self.more_menu.setMenu(menu)
         head = box(QHBoxLayout())
+        head.addWidget(self.more_menu)
         head.addWidget(self.number)
         head.addWidget(self.title, 1)
         self.line = QLabel("Shared key words: " + ", ".join(words) if words
@@ -402,9 +411,11 @@ class SubjectItem(QFrame):
             tick = QCheckBox()
             tick.setChecked(True)
             tick.setToolTip("Untick to leave this document out")
+            tick.setAccessibleName(f"Include {d['file_name']}")
             tick.toggled.connect(self._update)
             link = QPushButton("Details")
             link.setObjectName("link")
+            link.setAccessibleName(f"Details of {d['file_name']}")
             link.clicked.connect(lambda _=False, i=d["id"]: self.c.show_details(i))
             rows.addWidget(tick, n, 0)
             rows.addWidget(ElidedLabel(d["file_name"]), n, 1)
@@ -412,16 +423,15 @@ class SubjectItem(QFrame):
             self.ticks[d["id"]], self.detail_links[d["id"]] = tick, link
         self.field = QLineEdit()                # empty: subject names are usually not written in the documents
         self.field.setPlaceholderText("Type a name for the new category")
-        self.field.setMaximumWidth(CHOICES_MAX // 2)
+        self.field.setMaximumWidth(NAME_FIELD_MAX)
         self.field.textChanged.connect(self._update)
         self.field.returnPressed.connect(self.confirm_action)
         self.confirm = QPushButton()
         self.confirm.setObjectName("primary")
         self.confirm.clicked.connect(self.confirm_action)
-        self.pending = QPushButton("Leave pending")
-        self.pending.clicked.connect(lambda: self.c.leave_pending(self.ids))
+        self.field.setAccessibleName("Name of the new category")
         name_row = box(QHBoxLayout())
-        for w in (self.field, self.confirm, self.pending):
+        for w in (self.field, self.confirm):
             name_row.addWidget(w)
         name_row.addStretch(1)
         names = Counter(s["name"] for d in docs for s in top_names(d["suggestions"], 1))

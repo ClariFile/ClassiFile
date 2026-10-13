@@ -13,37 +13,12 @@ from PySide6.QtWidgets import (
 from classifile.analysis.candidates import name_key
 from classifile.app import ICON_DIR
 from classifile.app.preview import PdfPages, thumbnail_png
+from classifile.app.tokens import *  # noqa: F401,F403  every size, colour and duration; also passed on to importers
 from classifile.reader import READERS
 
-ICON_TEAL = "#0D9488"     # selection bar, selection tint, focus ring
-PRIMARY = "#0F766E"       # primary buttons (white text)
-PRIMARY_HOVER = "#115E59"
-AMBER = "#D97706"         # waiting
-RED = "#DC2626"           # errors
-GREEN = "#16A34A"         # approved: filed in a category the user chose
-VIOLET = "#6C47FF"        # reserved for SummarEase; unused until it exists
 SUPPORTED = ", ".join(e[1:].upper() for e in READERS)
-TYPE_COLOR = {".pdf": "#8E6A6A", ".pptx": "#93785A", ".docx": "#5E7392", ".odt": "#5F8570"}  # muted
-
-# One spacing system, in logical pixels (Qt scales them with the display). Layouts and the style use only these.
-PAD = 24        # main content padding
-SECTION = 24    # between major sections (a heading and what follows it)
-PANEL = 20      # inside panels
-GROUP = 16      # between separate groups of controls
-RELATED = 8     # between related controls; label to field; icon to label
-ROW = 44        # document rows
-CONTROL = 36    # buttons, fields and icon buttons share one height
-DETAILS_WIDTH = 420     # details panel: at least this wide by default, up to DETAILS_MAX on large screens
-DETAILS_MIN = 360
-DETAILS_MAX = 560
-CHOICES_MAX = 680       # the "Choose another…" panel of a decision item
-PICKER_LIST_MAX = 280   # the category picker's list scrolls beyond this height
-PREVIEW_MAX = 560       # tallest details preview; the page is fitted to the panel width below this
 CHEVRON_DOWN = (ICON_DIR.parent / "ui" / "chevron-down.svg").as_posix()
 CHEVRON_RIGHT = (ICON_DIR.parent / "ui" / "chevron-right.svg").as_posix()
-PREVIEW_MIN = 200       # the details preview never shrinks below this; the panel scrolls instead
-PREVIEW_KEEP = 8        # drawn pages kept, so paging back draws nothing
-PREVIEW_SETTLE = 150    # ms after the last resize step before the page is drawn again at its new size
 
 
 def box(layout, margins=0, spacing=RELATED):
@@ -54,85 +29,101 @@ def box(layout, margins=0, spacing=RELATED):
     return layout
 
 STYLE = f"""
-QWidget {{ font-family: "Segoe UI"; font-size: 14px; }}
-QLabel#pageTitle {{ font-size: 22px; font-weight: 600; }}
-QLabel#secondary, QLabel#processing {{ font-size: 13px; color: palette(placeholder-text); }}
-QLabel#section {{ font-size: 12px; font-weight: 600; color: palette(placeholder-text); letter-spacing: 1px; }}
-QLabel#brand {{ font-size: 16px; font-weight: 600; }}
-QPushButton {{ border: 1px solid rgba(127, 127, 127, 110); border-radius: 6px; background: transparent;
-               padding: {RELATED - 1}px {GROUP - 1}px; min-height: 20px; max-height: 20px; }}
-QPushButton:hover, QToolButton#more:hover {{ background: rgba(127, 127, 127, 40); }}
-QPushButton:checked {{ background: rgba(13, 148, 136, 46); border-color: {ICON_TEAL}; }}
+QWidget {{ font-family: "{FONT}"; font-size: {TEXT_BODY}px; }}
+QLabel#pageTitle, QLabel#hero {{ font-size: {TEXT_TITLE}px; font-weight: {WEIGHT_STRONG}; }}
+QLabel#heading {{ font-size: {TEXT_HEADING}px; font-weight: {WEIGHT_STRONG}; }}
+QLabel#lead {{ font-size: {TEXT_HEADING}px; }}
+QLabel#strong {{ font-weight: {WEIGHT_STRONG}; }}
+QLabel#secondary, QLabel#processing {{ font-size: {TEXT_SECONDARY}px; color: palette(placeholder-text); }}
+QLabel#section {{ font-size: {TEXT_CAPTION}px; font-weight: {WEIGHT_STRONG}; color: palette(placeholder-text);
+                 letter-spacing: {SPACED}px; }}
+QLabel#brand {{ font-size: {TEXT_HEADING}px; font-weight: {WEIGHT_STRONG}; }}
+QPushButton {{ border: {HAIR}px solid {BORDER}; border-radius: {RADIUS_CONTROL}px; background: transparent;
+               padding: {RELATED - HAIR}px {GROUP - HAIR}px; min-height: {CONTROL_TEXT}px;
+               max-height: {CONTROL_TEXT}px; }}
+QPushButton:hover, QToolButton#more:hover {{ background: {ROW_LINE}; }}
+QPushButton:checked {{ background: {TEAL_TINT}; border-color: {TEAL}; }}
 QPushButton:disabled {{ color: palette(placeholder-text); }}
-QPushButton#primary {{ background: {PRIMARY}; color: white; border-color: {PRIMARY}; font-weight: 600; }}
+QPushButton#primary {{ background: {PRIMARY}; color: {WHITE}; border-color: {PRIMARY};
+                       font-weight: {WEIGHT_STRONG}; }}
 QPushButton#primary:hover {{ background: {PRIMARY_HOVER}; border-color: {PRIMARY_HOVER}; }}
 QPushButton#primary:disabled {{ background: palette(mid); color: palette(window); border-color: palette(mid); }}
 QToolButton::menu-indicator {{ image: none; width: 0; }}
 QPushButton#link, QToolButton#link {{ border-color: transparent; color: palette(text);
-                                      text-decoration: underline; padding: {RELATED - 1}px {RELATED - 1}px; }}
-QToolButton#disclosure {{ background: transparent; border: 1px solid transparent; border-radius: 6px;
-                          font-weight: 600; padding: {RELATED - 1}px 0; }}
-QToolButton#more {{ border: 1px solid rgba(127, 127, 127, 110); border-radius: 6px; font-size: 20px;
-                    font-weight: 700; padding: 0; min-width: {CONTROL - 2}px; max-width: {CONTROL - 2}px;
-                    min-height: {CONTROL - 2}px; max-height: {CONTROL - 2}px; }}
-QPushButton#icon {{ border-color: transparent; padding: {RELATED - 1}px 0; min-width: {CONTROL - 2}px;
-                    max-width: {CONTROL - 2}px; }}
+                                      text-decoration: underline; padding: {RELATED - HAIR}px {RELATED - HAIR}px; }}
+QToolButton#disclosure {{ background: transparent; border: {HAIR}px solid transparent;
+                          border-radius: {RADIUS_CONTROL}px; font-weight: {WEIGHT_STRONG};
+                          padding: {RELATED - HAIR}px 0; }}
+QToolButton#more {{ border: {HAIR}px solid {BORDER}; border-radius: {RADIUS_CONTROL}px;
+                    font-size: {TEXT_HEADING}px; font-weight: {WEIGHT_STRONG}; padding: 0;
+                    min-width: {CONTROL - 2 * HAIR}px; max-width: {CONTROL - 2 * HAIR}px;
+                    min-height: {CONTROL - 2 * HAIR}px; max-height: {CONTROL - 2 * HAIR}px; }}
+QPushButton#icon {{ border-color: transparent; padding: {RELATED - HAIR}px 0; min-width: {CONTROL - 2 * HAIR}px;
+                    max-width: {CONTROL - 2 * HAIR}px; }}
 /* Focus changes only the border colour: every control keeps its size. */
 QPushButton:focus, QPushButton#link:focus, QPushButton#icon:focus, QToolButton#more:focus,
-QToolButton#disclosure:focus, QLineEdit:focus, QComboBox:focus {{ outline: none; border-color: {ICON_TEAL}; }}
+QToolButton#disclosure:focus, QLineEdit:focus, QComboBox:focus {{ outline: none; border-color: {TEAL}; }}
 QPushButton#primary:focus {{ border-color: palette(text); }}
-QPushButton#nav {{ text-align: left; border: none; background: transparent; padding: 10px {GROUP - 3}px;
-                   border-left: 3px solid transparent; border-radius: 0; max-height: none; }}
-QLabel#count {{ font-size: 13px; color: palette(placeholder-text); }}
-QPushButton#nav:checked {{ background: rgba(13, 148, 136, 40); border-left: 3px solid {ICON_TEAL}; }}
-QPushButton#nav:hover {{ background: rgba(127, 127, 127, 30); }}
-QTreeView, QListWidget {{ border: none; background: transparent; outline: none; }}
-QTreeView::item {{ min-height: {ROW - 2}px; border-bottom: 1px solid rgba(127, 127, 127, 40);
+QPushButton#nav {{ text-align: left; border: none; background: transparent;
+                   padding: {NAV_PAD}px {GROUP - BAR}px; border-left: {BAR}px solid transparent; border-radius: 0;
+                   max-height: none; }}
+QLabel#count {{ font-size: {TEXT_SECONDARY}px; color: palette(placeholder-text); }}
+QPushButton#nav:checked {{ background: {TEAL_NAV}; border-left: {BAR}px solid {TEAL}; }}
+QPushButton#nav:hover {{ background: {HOVER}; }}
+QPushButton#nav:focus {{ background: {HOVER}; }}
+/* The lists keep a border of one colour or none, so focus is seen and nothing moves. */
+QTreeView, QListWidget {{ border: {HAIR}px solid transparent; border-radius: {RADIUS_ROW}px;
+                          background: transparent; outline: none; }}
+QTreeView:focus, QListWidget:focus {{ border-color: {TEAL}; }}
+QTreeView::item {{ min-height: {ROW - 2 * HAIR}px; border-bottom: {HAIR}px solid {ROW_LINE};
                      padding-left: {RELATED}px; }}
-QTreeView#categories::item {{ min-height: 32px; border-bottom: none; border-left: 3px solid transparent;
-                              padding-left: {GROUP - 6}px; padding-right: {GROUP - 4}px; }}
-QListWidget::item {{ padding: 6px {RELATED}px; border-radius: 4px; }}
-QListWidget::item:hover {{ background: rgba(127, 127, 127, 30); }}
-QFrame#choices {{ border: 1px solid rgba(127, 127, 127, 60); border-radius: 8px; background: rgba(127, 127, 127, 18); }}
-QTreeView::item:selected, QListWidget::item:selected {{ background: rgba(13, 148, 136, 46);
-    color: palette(text); }}
+QTreeView#categories::item {{ min-height: {CATEGORY_ROW}px; border-bottom: none;
+                              border-left: {BAR}px solid transparent; padding-left: {NAV_PAD}px;
+                              padding-right: {GROUP - TIGHT}px; }}
+QListWidget::item {{ padding: {RELATED - 2 * HAIR}px {RELATED}px; border-radius: {RADIUS_ROW}px; }}
+QListWidget::item:hover {{ background: {HOVER}; }}
+QFrame#choices {{ border: {HAIR}px solid {HAIRLINE}; border-radius: {RADIUS_PANEL}px; background: {PANEL_TINT}; }}
+QTreeView::item:selected, QListWidget::item:selected {{ background: {TEAL_TINT}; color: palette(text); }}
 QListWidget::item:selected, QTreeView#categories::item:selected:first, QTreeView::item:selected:first {{
-    border-left: 3px solid {ICON_TEAL}; }}
+    border-left: {BAR}px solid {TEAL}; }}
 QTreeView::branch:selected {{ background: transparent; }}
-QHeaderView::section {{ background: transparent; border: none; border-bottom: 1px solid rgba(127, 127, 127, 60);
-                        padding: {RELATED}px {RELATED}px; font-size: 12px; font-weight: 600;
-                        color: palette(placeholder-text); }}
-QLineEdit, QComboBox {{ border: 1px solid rgba(127, 127, 127, 90); border-radius: 6px; padding: 7px {RELATED}px;
-                        min-height: 20px; background: palette(base); }}
-QComboBox {{ padding-left: 12px; padding-right: {CONTROL}px; }}
+QHeaderView::section {{ background: transparent; border: none; border-bottom: {HAIR}px solid {HAIRLINE};
+                        padding: {RELATED}px {RELATED}px; font-size: {TEXT_CAPTION}px;
+                        font-weight: {WEIGHT_STRONG}; color: palette(placeholder-text); }}
+QLineEdit, QComboBox {{ border: {HAIR}px solid {FIELD_BORDER}; border-radius: {RADIUS_CONTROL}px;
+                        padding: {RELATED - HAIR}px {RELATED}px; min-height: {CONTROL_TEXT}px;
+                        background: palette(base); }}
+QComboBox {{ padding-left: {GROUP - TIGHT}px; padding-right: {CONTROL}px; }}
 QComboBox::drop-down {{ subcontrol-origin: padding; subcontrol-position: center right; width: {CONTROL - RELATED}px;
                         border: none; }}
-QComboBox::down-arrow {{ image: url({CHEVRON_DOWN}); width: 16px; height: 16px; }}
-QComboBox QAbstractItemView {{ background: palette(base); color: palette(text); border: 1px solid rgba(127, 127, 127, 90);
-                               border-radius: 6px; padding: 4px; outline: none;
-                               selection-background-color: rgba(13, 148, 136, 46); selection-color: palette(text); }}
-QComboBox QAbstractItemView::item {{ min-height: 32px; padding: 0 {RELATED}px; border-radius: 4px; }}
-QLineEdit[filled="true"] {{ border: 1px solid {ICON_TEAL}; font-weight: 600; }}
-QFrame#notice {{ border-radius: 6px; background: rgba(127, 127, 127, 28); }}
-QFrame#notice QLabel {{ font-size: 15px; }}
-QFrame#toast {{ border-radius: 6px; background: palette(text); }}
-QFrame#toast QLabel {{ color: palette(window); font-size: 14px; }}
-QFrame#toast QPushButton {{ color: palette(window); border: 1px solid palette(window); background: transparent; }}
-QFrame#bulk {{ border-radius: 6px; background: rgba(13, 148, 136, 30); }}
-QFrame#decision {{ border-bottom: 1px solid rgba(127, 127, 127, 60); }}
-QFrame#details {{ border-left: 1px solid rgba(127, 127, 127, 60); background: palette(window); }}
-QFrame#sidebar {{ border-right: 1px solid rgba(127, 127, 127, 60); }}
-QLabel#card {{ background: palette(base); border-radius: 6px; padding: {GROUP}px; }}
+QComboBox::down-arrow {{ image: url({CHEVRON_DOWN}); width: {ICON}px; height: {ICON}px; }}
+QComboBox QAbstractItemView {{ background: palette(base); color: palette(text);
+                               border: {HAIR}px solid {FIELD_BORDER}; border-radius: {RADIUS_CONTROL}px;
+                               padding: {TIGHT}px; outline: none; selection-background-color: {TEAL_TINT};
+                               selection-color: palette(text); }}
+QComboBox QAbstractItemView::item {{ min-height: {CATEGORY_ROW}px; padding: 0 {RELATED}px;
+                                     border-radius: {RADIUS_ROW}px; }}
+QLineEdit[filled="true"] {{ border: {HAIR}px solid {TEAL}; font-weight: {WEIGHT_STRONG}; }}
+QFrame#notice {{ border-radius: {RADIUS_CONTROL}px; background: {TINT}; }}
+QFrame#toast {{ border-radius: {RADIUS_CONTROL}px; background: palette(text); }}
+QFrame#toast QLabel {{ color: palette(window); }}
+QFrame#toast QPushButton {{ color: palette(window); border: {HAIR}px solid palette(window);
+                            background: transparent; }}
+QFrame#bulk {{ border-radius: {RADIUS_CONTROL}px; background: {TEAL_BAR}; }}
+QFrame#decision {{ border-bottom: {HAIR}px solid {HAIRLINE}; }}
+QFrame#details {{ border-left: {HAIR}px solid {HAIRLINE}; background: palette(window); }}
+QFrame#sidebar {{ border-right: {HAIR}px solid {HAIRLINE}; }}
+QLabel#card {{ background: palette(base); border-radius: {RADIUS_CONTROL}px; padding: {GROUP}px; }}
 QLabel#warning {{ color: {AMBER}; }}
 QLabel#error {{ color: {RED}; }}
-QLabel#tagNew, QLabel#tagExisting {{ border-radius: 10px; padding: 1px {RELATED}px; font-size: 12px;
-                                     min-height: 18px; max-height: 18px; }}
-QLabel#tagNew {{ color: {AMBER}; border: 1px solid {AMBER}; }}
-QLabel#tagExisting {{ color: {ICON_TEAL}; border: 1px solid {ICON_TEAL}; }}
-QFrame#dropOverlay {{ background: #111827; border: 3px dashed {ICON_TEAL}; border-radius: 12px; }}
-QFrame#dropOverlay QLabel {{ color: white; }}
-QFrame#previewOverlay {{ background: #111827; }}
-QFrame#previewOverlay QLabel {{ color: white; }}
+QLabel#tagNew, QLabel#tagExisting {{ border-radius: {RADIUS_TAG}px; padding: {HAIR}px {RELATED}px;
+                                     font-size: {TEXT_CAPTION}px; min-height: {TAG}px; max-height: {TAG}px; }}
+QLabel#tagNew {{ color: {AMBER}; border: {HAIR}px solid {AMBER}; }}
+QLabel#tagExisting {{ color: {TEAL}; border: {HAIR}px solid {TEAL}; }}
+QFrame#dropOverlay {{ background: {OVERLAY}; border: {BAR}px dashed {TEAL}; border-radius: {RADIUS_PANEL}px; }}
+QFrame#dropOverlay QLabel {{ color: {WHITE}; }}
+QFrame#previewOverlay {{ background: {OVERLAY}; }}
+QFrame#previewOverlay QLabel {{ color: {WHITE}; }}
 """
 
 
@@ -157,7 +148,7 @@ def format_icon(file_name):
         pix.fill(Qt.transparent)
         p = QPainter(pix)
         p.setRenderHint(QPainter.Antialiasing)
-        colour = QColor(TYPE_COLOR.get(ext, "#6B7280"))
+        colour = QColor(TYPE_COLOR.get(ext, UNKNOWN_TYPE))
         p.setPen(QPen(colour, 1.4))
         p.setBrush(QColor(colour.red(), colour.green(), colour.blue(), 50))
         p.drawPolygon([QPointF(3, 1.5), QPointF(10, 1.5), QPointF(13.5, 5), QPointF(13.5, 14.5), QPointF(3, 14.5)])
@@ -172,11 +163,11 @@ STATUS = {  # an icon plus a word, never colour alone
     # ponytail: every filed document was filed by the user's own choice so far. When automatic filing arrives
     # (CP4), take this word from the membership's provenance: machine-assigned is not approved.
     "filed": ("Approved", GREEN, "check"),
-    "auto": ("Filed automatically", ICON_TEAL, "check"),    # machine-assigned: not the user's approval
+    "auto": ("Filed automatically", TEAL, "check"),    # machine-assigned: not the user's approval
     "needs_decision": ("Waiting", AMBER, "dot"),
-    "queued": ("Reading", "#9CA3AF", "ring"),
-    "reading": ("Reading", "#9CA3AF", "ring"),
-    "filing": ("Filing", "#9CA3AF", "ring"),
+    "queued": ("Reading", MUTED, "ring"),
+    "reading": ("Reading", MUTED, "ring"),
+    "filing": ("Filing", MUTED, "ring"),
     "failed": ("Failed", RED, "alert"),
     "pending": ("Failed", RED, "alert"),
 }
@@ -185,7 +176,7 @@ STATUS = {  # an icon plus a word, never colour alone
 def status_icon(status):
     key = ("status", status)
     if key not in _ICONS:
-        _, colour, shape = STATUS.get(status, ("", "#9CA3AF", "ring"))
+        _, colour, shape = STATUS.get(status, ("", MUTED, "ring"))
         pix = QPixmap(16, 16)
         pix.fill(Qt.transparent)
         p = QPainter(pix)
@@ -205,7 +196,7 @@ def status_icon(status):
             p.setPen(Qt.NoPen)
             p.setBrush(c)
             p.drawPolygon([QPointF(8, 2), QPointF(14.5, 14), QPointF(1.5, 14)])
-            p.setPen(QPen(QColor("white"), 1.6))
+            p.setPen(QPen(QColor(WHITE), 1.6))
             p.drawLine(QPointF(8, 6.5), QPointF(8, 10))
             p.drawPoint(QPointF(8, 12.2))
         p.end()
@@ -288,7 +279,7 @@ class Notices(QWidget):
             frame.setObjectName("notice")
             h = box(QHBoxLayout(frame), (GROUP, RELATED, RELATED, RELATED), GROUP)
             icon = QLabel()
-            icon.setPixmap(status_icon("failed" if kind == "error" else "needs_decision").pixmap(20, 20))
+            icon.setPixmap(status_icon("failed" if kind == "error" else "needs_decision").pixmap(FILE_ICON, FILE_ICON))
             label = QLabel(text)
             label.setWordWrap(True)
             label.setObjectName("error" if kind == "error" else "")
@@ -327,11 +318,11 @@ class Toast(QFrame):
         self._callback = None
         self.action.clicked.connect(lambda: self._callback and self._callback())
         self.slide = QPropertyAnimation(self, b"pos", self)
-        self.slide.setDuration(200)
+        self.slide.setDuration(MOTION_PANEL)
         self.slide.setEasingCurve(QEasingCurve.OutCubic)
         self.hide()
 
-    def show_message(self, text, action=None, callback=None, ms=5000):
+    def show_message(self, text, action=None, callback=None, ms=TOAST):
         self.label.setText(text)
         self._callback = callback
         self.action.setText(action or "")
@@ -372,7 +363,7 @@ class CategoryPicker(QWidget):
         self.list = QListWidget()               # as tall as its rows up to a limit, then it scrolls
         self.list.setSizeAdjustPolicy(QListWidget.AdjustToContents)
         self.list.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.list.setMinimumWidth(200)          # a long name ends in "…" (hover shows it) and never widens the page
+        self.list.setMinimumWidth(PICKER_LIST_MIN)          # a long name ends in "…" (hover shows it) and never widens the page
         self.list.setMaximumHeight(PICKER_LIST_MAX)
         self.list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.list.currentRowChanged.connect(lambda *_: self.changed.emit())
@@ -452,10 +443,10 @@ class PickerDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle(title)
         self.setModal(True)
-        self.setMinimumWidth(440)
+        self.setMinimumWidth(DIALOG_MIN)
         self.verb, self.on_choice = verb, on_choice
         heading = QLabel(title)
-        heading.setStyleSheet("font-size: 16px; font-weight: 600;")
+        heading.setObjectName("heading")
         self.picker = CategoryPicker()
         self.confirm = QPushButton(verb)
         self.confirm.setObjectName("primary")
@@ -498,11 +489,10 @@ class DropOverlay(QFrame):
         self.setObjectName("dropOverlay")
         self.setAttribute(Qt.WA_TransparentForMouseEvents)
         self.title = QLabel("Drop files here to import")
-        self.title.setStyleSheet("font-size: 32px; font-weight: 600;")
+        self.title.setObjectName("hero")
         self.formats = QLabel(f"Supported: {SUPPORTED}")
-        self.formats.setStyleSheet("font-size: 16px;")
+        self.formats.setObjectName("lead")
         self.skipped = QLabel()
-        self.skipped.setStyleSheet("font-size: 15px;")
         self.skipped.setWordWrap(True)
         v = QVBoxLayout(self)
         v.addStretch(1)
@@ -548,10 +538,12 @@ class Preview(QWidget):
         self.prev = QPushButton("‹")
         self.prev.setObjectName("icon")
         self.prev.setToolTip("Previous page")
+        self.prev.setAccessibleName("Previous page")
         self.prev.clicked.connect(lambda: self.show_page(self.page - 1))
         self.next = QPushButton("›")
         self.next.setObjectName("icon")
         self.next.setToolTip("Next page")
+        self.next.setAccessibleName("Next page")
         self.next.clicked.connect(lambda: self.show_page(self.page + 1))
         self.page_label = QLabel()
         self.page_label.setObjectName("secondary")
@@ -678,8 +670,7 @@ class PreviewOverlay(QFrame):
     def __init__(self, parent):
         super().__init__(parent)
         self.setObjectName("previewOverlay")
-        self.title = ElidedLabel()
-        self.title.setStyleSheet("font-size: 16px; font-weight: 600;")
+        self.title = ElidedLabel(object_name="heading")
         close = QPushButton("Close (Esc)")
         close.clicked.connect(self.hide)
         head = QHBoxLayout()

@@ -133,7 +133,31 @@
   made is undone at the next start.
 - Not built: removing an "also belongs to" again; single-document automatic creation and the discovery replay
   (E10) from the record's CP4 list.
-- 257 automated tests.
+
+**Interface phases 2 and 3 (2026-10-13, after CP4, in the owner's order)**
+- Settings uses the whole page, like the other pages: text at the left, controls at the right.
+- **Phase 2, the page preview:** while the panel is resized the picture already drawn is scaled; the page is
+  drawn once when the resizing stops, and the last 8 drawn pages are kept, so paging back draws nothing. A
+  20-step resize draws the page once (tested).
+- **Phase 3, tokens:** `classifile/app/tokens.py` names every colour, text size, radius, spacing, layout width
+  and duration once; the style sheet and the widgets use those names. A test fails when a colour, a pixel size,
+  an inline style or a duration appears in another interface module. Text sizes are 12, 13, 14, 16 and 22
+  (15, 20 and 32 are gone); radii are 4, 6, 8 and 10 (12 is gone). The coordinates inside the two small
+  drawn icons stay with their drawing code.
+- **Phase 3, appearance:** Settings, "Light or dark": Follow Windows (default), Light, Dark. Colours come from
+  the palette, so nothing else changes. Switching was checked on the real display; off-screen checks set a
+  light and a dark palette by hand.
+- **Phase 3, accessibility:** every button without words (☰, +, ⋯, ✕, ‹, ›) and every unlabelled tick, field
+  and dropdown has a name a screen reader can say; the acceptance checks fail on a button that has none. A
+  focused list shows the same teal border as a focused button or field.
+- **Decision 3 (card actions):** "Leave pending" is in the ⋯ menu with "Remove from ClassiFile". A card keeps
+  its main action (or the three matching categories), "Choose another…" and "Details".
+- **Decision 4 (narrow windows):** details stay beside the cards and the cards put their buttons under the
+  text. The sideways scrolling at 1024×640 with details open is gone.
+- Found on the way: the empty "Filed automatically" message was one unwrapped line that set the least width of
+  every page and squeezed the details panel; it wraps now.
+- `tools.check_ui`: all checks pass at 100%, 125% and 150%, including the two palettes and the button names.
+- 260 automated tests.
 
 ## Development results so far
 
@@ -273,10 +297,8 @@ These counts describe development data only. They are not accuracy estimates.
 
 ## Next
 
-1. The owner tries CP4 in the app (the "how to try it" list in the hand-over report).
-2. Queued for after CP4, in the owner's order: interface phases 2 (the page preview) and 3 of
-   `docs/UI_PROPOSAL.md`, with decisions 3 (card actions) and 4 (narrow windows). Known from the phase 1
-   checks: at 1024×640 the decision page with details beside it scrolls sideways by 16 pixels, and the two
-   lists draw no focus mark of their own (both phase 3).
+1. The owner tries CP4 and the new interface in the app.
+2. Interface phases 4 (motion, Reduce motion) and 5 (retry for unreadable documents, "Find category…", the
+   written states) of `docs/UI_PROPOSAL.md`, on the owner's go-ahead.
 3. CP5 quality gate and freeze (`data\final-eval` stays untouched until then). SummarEase is a separate
    project.

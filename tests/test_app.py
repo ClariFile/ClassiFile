@@ -1297,3 +1297,87 @@ def test_the_preview_draws_once_after_a_resize_and_keeps_recent_pages(app, make_
     _pump(app, lambda: w.settings_page.isVisible())
     assert w.change_root.geometry().right() > w.settings_page.width() - 40
     _close(w, rec)
+
+
+def test_sizes_colours_and_durations_are_named_once_in_the_token_module():
+    import re
+    from pathlib import Path
+
+    import classifile.app as package
+    from classifile.app import tokens
+
+    literal = re.compile(r"#[0-9A-Fa-f]{6}\b|rgba?\(|\b\d+px\b|setStyleSheet\((?!STYLE\))|setDuration\(\d|ms=\d")
+    for path in sorted(Path(package.__file__).parent.glob("*.py")):
+        if path.name in ("tokens.py", "smoke.py"):                  # the tokens themselves; the CP0 smoke window
+            continue
+        for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            assert not literal.search(line), f"{path.name}:{n} holds a size, colour or duration of its own"
+    assert {tokens.TEXT_CAPTION, tokens.TEXT_SECONDARY, tokens.TEXT_BODY, tokens.TEXT_HEADING, tokens.TEXT_TITLE} \
+        == {12, 13, 14, 16, 22}                                     # five text sizes, no others
+    assert {tokens.RADIUS_ROW, tokens.RADIUS_CONTROL, tokens.RADIUS_PANEL, tokens.RADIUS_TAG} == {4, 6, 8, 10}
+
+
+def test_every_button_has_a_name_light_and_dark_and_leave_pending_is_in_the_menu(app, make_org, tmp_path):
+    from PySide6.QtWidgets import QAbstractButton
+    from classifile.app.main import AUTO
+    from classifile.organizer import read_and_analyze
+    from test_matching import SUBJECTS, _add, _pdf
+
+    org, src = make_org(), tmp_path / "src"
+    for n in range(3):
+        _add(org, src, "Algebra", n)
+        _add(org, src, "Networks", n)
+    org.update_matching()
+    org.file_automatically(_add(org, src, "Networks", 7, False))
+    org.set_auto_level("off")
+    _add(org, src, "Algebra", 8, False)
+    for n in range(2):
+        _pdf(src / f"poem-{n}.pdf", SUBJECTS["Poetry"], n)
+        org.record(src / f"poem-{n}.pdf", *read_and_analyze(src / f"poem-{n}.pdf"))
+
+    w, rec = _window(make_org)
+
+    def unnamed():
+        return [b.text() or type(b).__name__ for b in w.findChildren(QAbstractButton)
+                if b.isVisible() and not any(c.isalpha() for c in b.text()) and not b.accessibleName()]
+
+    for view in (ALL, DECIDE, AUTO, SETTINGS):                      # a screen reader never reads a bare symbol
+        w.show_view(view)
+        if view == ALL:
+            w.select_docs([_doc(w, "networks-7.pdf")])
+            w.set_details_open(True)
+        assert unnamed() == [], view
+    assert w.search.accessibleName() == "Search" and w.sort.accessibleName() == "Sort the list"
+
+    w.review()
+    card = _item(w, "algebra-8.pdf")
+    assert [b.text() for b in card.findChildren(QAbstractButton) if b.isVisible() and b.text() != "⋯"] == \
+        ["File in Algebra", "File in Networks", "Choose another…", "Details"]   # the rest is under "more"
+    assert [a.text() for a in card.more_menu.menu().actions()] == ["Leave pending", "Remove from ClassiFile"]
+    card.pending.trigger()
+    assert w.toast.label.text() == "Left pending. It stays here until you decide."
+    assert w.decision.items[-1].title.full == "algebra-8.pdf"       # moved to the end, still waiting
+    group = w.decision.items[0]
+    assert group.group and [a.text() for a in group.more_menu.menu().actions()] == \
+        ["Leave pending", "Remove from ClassiFile"]
+
+    w.show_view(SETTINGS)
+    assert w.appearance.currentData() == "system"
+    asked = []
+    hints = type(app.styleHints())
+    real, hints.setColorScheme = hints.setColorScheme, lambda self, scheme: asked.append(scheme)
+    try:                                                            # off-screen there is no scheme to switch:
+        for name in ("dark", "light"):                              # what the window asks Qt for is what is checked
+            w.appearance.setCurrentIndex(w.appearance.findData(name))
+            w.appearance.activated.emit(w.appearance.currentIndex())
+    finally:
+        hints.setColorScheme = real
+    assert asked == [Qt.ColorScheme.Dark, Qt.ColorScheme.Light]
+    assert w.org.catalog.get_setting("appearance") == "light"
+    _close(w, rec)
+    again, rec = _window(make_org)                                  # remembered at the next start
+    again.show_view(SETTINGS)
+    assert again.appearance.currentData() == "light"
+    again.appearance.setCurrentIndex(again.appearance.findData("system"))
+    again.appearance.activated.emit(again.appearance.currentIndex())
+    _close(again, rec)
