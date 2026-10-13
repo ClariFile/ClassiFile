@@ -23,9 +23,10 @@ def _pump(app, until, timeout=5):
 
 def test_jobs_run_in_background_and_cancel(app, tmp_path):
     w = SmokeWindow(job_seconds=0.3)
-    t0 = time.monotonic()
     w.add_paths([str(tmp_path / "a.pdf"), str(tmp_path / "b.pdf")])
-    assert time.monotonic() - t0 < 0.2  # add_paths does not block on the jobs
+    # add_paths does not run the jobs itself: their status changes arrive through the event loop, so none has
+    # arrived yet. (Not a time limit: a busy machine or a garbage collection can make any call slow.)
+    assert w.statuses == ["queued", "queued"]
     assert str(tmp_path / "a.pdf") in w.list.item(0).text()
     _pump(app, lambda: w.statuses == ["done", "done"])
     assert w.statuses == ["done", "done"]
@@ -52,11 +53,23 @@ def test_ctrl_c_closes_windows_and_quits(app, tmp_path):
         w = SmokeWindow(job_seconds=30)
         w.show()
         w.add_paths([str(tmp_path / "a.pdf")])
-        QTimer.singleShot(200, lambda: signal.raise_signal(signal.SIGINT))
-        QTimer.singleShot(5000, app.quit)  # safety net so a failure can't hang the suite
+
+        def interrupt():
+            if w.statuses[0] == "running":  # Ctrl+C once the job is under way, however long its start took
+                poll.stop()
+                signal.raise_signal(signal.SIGINT)
+
+        poll, safety = QTimer(), QTimer()
+        poll.timeout.connect(interrupt)
+        poll.start(20)
+        safety.setSingleShot(True)
+        safety.timeout.connect(app.quit)  # so a failure can't hang the suite
+        safety.start(20000)
         app.exec()
         assert not w.isVisible()
         _pump(app, lambda: w.statuses[0] == "cancelled")  # closeEvent cancelled the running job
         assert w.statuses[0] == "cancelled"
     finally:
+        poll.stop()
+        safety.stop()                       # never left to fire during a later test
         signal.signal(signal.SIGINT, original)

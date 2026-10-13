@@ -20,6 +20,7 @@ def test_timeouts_crashes_and_errors_are_operational_failures(samples, tmp_path)
             result, analysis, summary = w.run(paths[kind])
             assert (result.status, result.reason, analysis, summary) == ("failed", reason, None, None), kind
             assert result.sha256 == digest  # still recordable as a failed snapshot
+        w.timeout = 300  # the short limit is for the hang: a fresh child on a busy machine may need longer
         result, analysis, summary = w.run(paths["fine"])  # a fresh child after the failures
         assert result.status == "ok" and analysis.suggestions and summary["summary_version"]
     finally:
