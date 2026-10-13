@@ -38,6 +38,8 @@ class Organizer:
         self.catalog = catalog
         self._matcher = False       # False: not loaded yet; None: no usable model; else (version row, Matcher)
         self._ranked = {}           # doc_id -> its categories ranked by the model in use
+        self._counts = {}           # doc_id -> matching.terms() of its stored text
+        self._groups = (None, [])   # the last new_subject_groups() question and its answer
 
     @property
     def output_root(self):
@@ -91,6 +93,12 @@ class Organizer:
                 self.catalog.remove_primary(d["id"])
                 self.catalog.set_document_status(d["id"], "needs_decision",
                                                  "The last filing didn't finish. Choose a category again.")
+        # An "also belongs to" that stopped before its copy was made is undone: no membership without a copy.
+        for m in self.catalog.all(
+                "SELECT m.document_id, m.category_id FROM memberships m WHERE m.role = 'secondary' AND m.status ="
+                " 'active' AND NOT EXISTS (SELECT 1 FROM copies c WHERE c.document_id = m.document_id AND"
+                " c.category_id = m.category_id AND c.status NOT IN ('failed', 'planned'))"):
+            self.catalog.remove_secondary(m["document_id"], m["category_id"])
         # Categories left behind by a filing that failed or stopped: a failed copy attempt and no documents.
         for row in self.catalog.all("SELECT DISTINCT category_id FROM copies WHERE status = 'failed'"):
             self.catalog.discard_unused_category(row["category_id"])
@@ -224,16 +232,44 @@ class Organizer:
                 if _crash_at == "after-copy":
                     raise _Crash
                 self.catalog.replace_primary(doc_id, cat_id, "user-corrected")
+                self.catalog.remove_secondary(doc_id, cat_id)   # it also belonged there: now it is its own
                 if _crash_at == "after-switch":
                     raise _Crash
+            keep = {cat_id} | {c for c, _ in self.catalog.secondary_categories(doc_id)}
             for c in self.catalog.document_copies(doc_id):
-                if c["category_id"] != cat_id:
+                if c["category_id"] not in keep:        # the copies of "also belongs to" stay where they are
                     _retire_old_copy(self.catalog, c)
         except CopyError:
             self.catalog.end_move(doc_id)
             raise
         self.catalog.end_move(doc_id)
         return "edited" if edited() > before else "moved"
+
+    def also(self, doc_id, cat_id):
+        """ "Also belongs to" (A6, B5): a secondary membership with its own verified copy, made from the verified
+        primary copy or from the original. The primary category does not change. Returns the copy's path."""
+        doc, primary = self.catalog.document(doc_id), self.catalog.active_primary(doc_id)
+        if doc is None or doc["status"] != "filed" or not primary:
+            raise ValueError("Only filed documents can also belong to another category.")
+        if cat_id == primary["category_id"] or cat_id in dict(self.catalog.secondary_categories(doc_id)):
+            raise ValueError("This document is already in that category.")
+        root = self.output_root
+        if root is None or not root.is_dir():
+            raise CopyError(f"The output folder {root} can't be found. Choose it again with Change…")
+        source = self._verified_copy(doc, primary["category_id"]) or Path(doc["source_path"])
+        if not source.is_file():
+            raise CopyError("Neither the filed copy nor the original file can be found, so no second copy was made.")
+        self.catalog.add_secondary(doc_id, cat_id)
+        try:
+            return make_copy(self.catalog, doc_id, doc["sha256"], source, cat_id, root)[1]
+        except CopyError:
+            self.catalog.remove_secondary(doc_id, cat_id)   # never half-done: no membership without a copy
+            raise
+
+    def confirm(self, doc_ids):
+        """ "Looks right": the user confirms placements the app made by itself, so they become training examples.
+        Returns how many were confirmed."""
+        return sum(self.catalog.confirm_primary(d) for d in doc_ids)
 
     def _renaming(self):
         return json.loads(self.catalog.get_setting("renaming", "[]"))
@@ -323,8 +359,26 @@ class Organizer:
     def _rank(self, doc_id, live):
         """The existing categories ranked for a document by the model in use (there must be one)."""
         if doc_id not in self._ranked:      # once per document and model: the stored text is read and scored
-            self._ranked[doc_id] = self.matcher()[1].rank(self.catalog.texts(doc_id).get(doc_id, ""))
+            self._ranked[doc_id] = self.matcher()[1].rank_counts(self._terms(doc_id))
         return [(c, s) for c, s in self._ranked[doc_id] if c in live]
+
+    def _terms(self, doc_id):
+        if doc_id not in self._counts:
+            self._counts[doc_id] = matching.terms(self.catalog.texts(doc_id).get(doc_id, ""))
+        return self._counts[doc_id]
+
+    def new_subject_groups(self, doc_ids):
+        """Groups among waiting documents that match no existing category (B2): [(document ids, the key words
+        they share)], each of at least two documents. Nothing is filed or created here: a group is a question."""
+        if len(doc_ids) < 2 or not self.matcher():
+            return []
+        row, model = self.matcher()
+        asked = (row["version"], tuple(sorted(doc_ids)))
+        if asked != self._groups[0]:        # the same documents and model: the same groups, not worked out again
+            vectors = matching.group_vectors({d: self._terms(d) for d in doc_ids}, model.bundle)
+            self._groups = (asked, [(g, matching.shared_words([vectors[d] for d in g]))
+                                    for g in matching.similar_groups(vectors, matching.GROUP_LEVEL)])
+        return self._groups[1]
 
     # -- automatic filing (decision record A0, B2) --------------------------------------------------------------
     def auto_level(self):
@@ -338,6 +392,23 @@ class Organizer:
         if name != self.auto_level():
             self.catalog.change_setting("auto_level", name)
 
+    def auto_scope(self):
+        """Selected-category mode (A5): the ids of the categories the user ticked, the only ones filed into
+        automatically; None when every category may be."""
+        if self.catalog.get_setting("auto_scope", "all") != "selected":
+            return None
+        live = {c["id"] for c in self.catalog.categories()}
+        return set(json.loads(self.catalog.get_setting("auto_selected", "[]"))) & live
+
+    def set_auto_scope(self, selected):
+        """selected: the ticked category ids, or None for all categories. Changes are kept on record."""
+        mode = "all" if selected is None else "selected"
+        if mode != self.catalog.get_setting("auto_scope", "all"):
+            self.catalog.change_setting("auto_scope", mode)
+        ticked = json.dumps(sorted(selected or ()))
+        if selected is not None and ticked != self.catalog.get_setting("auto_selected", "[]"):
+            self.catalog.change_setting("auto_selected", ticked)
+
     def auto_choice(self, doc_id):
         """Where a waiting document would be filed without a question: (category id, what that rests on), or None
         when it waits for the user. It is filed only when its best category leads the second by the level in use,
@@ -349,7 +420,9 @@ class Organizer:
         ranked = self._rank(doc_id, {c["id"] for c in self.catalog.categories()})
         if not ranked or matching.lead(ranked) < level:
             return None
-        best = ranked[0][0]
+        best, scope = ranked[0][0], self.auto_scope()
+        if scope is not None and best not in scope:     # best among all categories, never among the ticked only:
+            return None                                 # a selection cannot manufacture confidence (B1)
         if list(self.catalog.explicit_labels().values()).count(best) < matching.AUTO_MIN_CONFIRMED:
             return None
         return best, {"version": row["version"], "level": level, "documents": model.bundle["documents"][best]}

@@ -41,7 +41,6 @@ def build(base):
             org.file(doc, cats[n])
     for n in range(IMPORTS):
         make_pdf(base / "more" / f"Extra {n:02d}.pdf", title(300 + n))
-    org.update_matching()                       # the cards offer matching categories, long names included
     org.catalog.close()
 
 

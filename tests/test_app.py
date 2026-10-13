@@ -339,7 +339,7 @@ def test_bulk_bar_context_menu_keyboard_and_search(app, samples, make_org):
     w.select_docs([filed])
     assert not w.bulk.isVisible()
     actions = [a.text() for a in w.context_menu([filed]).actions()]
-    assert actions == ["Open", "Show in folder", "Details", "Move to…"]  # filed documents can't be removed here
+    assert actions == ["Open", "Show in folder", "Details", "Also belongs to…", "Move to…"]  # never removed here
     waiting = _doc(w, SAMPLE["S4"])
     actions = [a.text() for a in w.context_menu([waiting]).actions()]
     assert actions == ["Details", "Remove from ClassiFile"]
@@ -1123,4 +1123,136 @@ def test_a_clear_match_is_filed_automatically_and_listed_with_its_reason(app, ma
     _pump(app, lambda: not w.filing and not w.auto_running)
     assert "later.pdf" not in [d["file_name"] for d in w.waiting()] and w.auto_count.text() == "1"
     assert [r["value"] for r in w.org.catalog.all("SELECT value FROM setting_changes ORDER BY id")] == ["off", "strict"]
+    _close(w, rec)
+
+
+def test_a_new_subject_is_one_question_and_the_third_confirmed_document_unlocks_filing(app, make_org, tmp_path):
+    from classifile.app.decision import SubjectItem
+    from test_matching import SUBJECTS, _add, _pdf
+
+    org, src = make_org(), tmp_path / "src"
+    for n in range(3):
+        _add(org, src, "Algebra", n)
+        _add(org, src, "Networks", n)
+    org.update_matching()
+    for n in range(6):
+        _pdf(src / f"poem-{n}.pdf", SUBJECTS["Poetry"], n)
+    _pdf(src / "zoo.pdf", "zebra giraffe antelope savanna migration herd", 1)
+
+    w, rec = _window(make_org, [src / f"poem-{n}.pdf" for n in range(3)] + [src / "zoo.pdf"])
+    _pump(app, lambda: not w.inflight and not w.auto_running)
+    w.review()
+    group = next(i for i in w.decision.items if isinstance(i, SubjectItem))
+    assert len(w.decision.items) == 2 and group.title.full == "3 documents look like one new subject"
+    assert group.line.text().startswith("Shared key words: ")       # the reason comes first
+    assert set(group.line.text().split(": ")[1].split(", ")) <= set(SUBJECTS["Poetry"].split())
+    assert group.field.text() == "" and not group.confirm.isEnabled()   # the user names it: nothing is pre-filled
+    assert group.name_links and w.org.catalog.category_by_key("poetry") is None   # nothing was created
+    group.name_links[0].click()                                     # a suggested name is only an offer
+    assert group.field.text() == group.name_links[0].toolTip() and group.confirm.isEnabled()
+    first, second, third = (_doc(w, f"poem-{n}.pdf") for n in range(3))
+    group.detail_links[third].click()                               # each document's pages, on request
+    assert w.details.isVisible() and w.details.title.full == "poem-2.pdf"
+    w.close_details()
+    group.ticks[third].setChecked(False)                            # left out before confirming
+    group.field.setText("Poetry")
+    assert group.confirm.text() == "Create && file 2 documents"
+    assert group.confirm.toolTip() == "Create category 'Poetry' and file 2 documents"
+    QTest.keyClick(group.field, Qt.Key_Return)
+    _pump(app, lambda: not w.filing)
+    poetry = w.org.catalog.category_by_key("poetry")
+    assert sorted(d["id"] for d in w.org.catalog.documents(poetry["id"])) == sorted([first, second])
+    assert w.org.catalog.explicit_labels()[first] == poetry["id"]   # filed by the user: a label
+    assert sorted(d["file_name"] for d in w.waiting()) == ["poem-2.pdf", "zoo.pdf"]   # the unticked one still waits
+    assert not any(isinstance(i, SubjectItem) for i in w.decision.items)   # two unlike documents: no group
+
+    w.show_view(SETTINGS)
+    w.matching_button.click()                                       # the model learns the new category
+    _pump(app, lambda: w.matching_button.isEnabled() and not w.filing and not w.auto_running)
+    assert "poem-2.pdf" in [d["file_name"] for d in w.waiting()]    # Poetry holds 2 confirmed documents: it waits
+    w.import_paths([str(src / "poem-3.pdf")])
+    _pump(app, lambda: not w.inflight and not w.filing and not w.auto_running)
+    w.review()
+    assert _item(w, "poem-2.pdf").matches[0][0] == "Poetry" and _item(w, "poem-3.pdf").matches[0][0] == "Poetry"
+    _item(w, "poem-2.pdf").primary.click()                          # the third confirmed document...
+    _pump(app, lambda: not w.filing and not w.auto_running and "poem-3.pdf" not in
+          [d["file_name"] for d in w.waiting()])
+    row = w.org.catalog.document_row(_doc(w, "poem-3.pdf"))         # ...and the other one is filed without a question
+    assert (row["category"], row["provenance"]) == ("Poetry", "machine-assigned")
+    assert [d["file_name"] for d in w.waiting()] == ["zoo.pdf"]
+    _close(w, rec)
+
+
+def test_looks_right_selected_categories_and_also_belongs_to_in_the_window(app, make_org, tmp_path):
+    from classifile.app.main import AUTO
+    from test_matching import SUBJECTS, _add, _pdf
+
+    org, src = make_org(), tmp_path / "src"
+    for n in range(3):
+        _add(org, src, "Algebra", n)
+        _add(org, src, "Networks", n)
+    org.update_matching()
+    for name, subject, n in (("a1.pdf", "Algebra", 5), ("a2.pdf", "Algebra", 6), ("n1.pdf", "Networks", 7),
+                             ("n2.pdf", "Networks", 8)):
+        _pdf(src / name, SUBJECTS[subject], n)
+
+    w, rec = _window(make_org)
+    assert w.mode_label.text() == "Filing into all categories" and w.mode_link.text() == "Change"
+    w.mode_link.click()                                             # the link leads to where it is set
+    assert w.view[0] == SETTINGS and w.auto_scope.currentData() == "all" and not w.auto_ticks.isVisible()
+    w.auto_scope.setCurrentIndex(w.auto_scope.findData("selected"))
+    w.auto_scope.activated.emit(w.auto_scope.currentIndex())
+    assert w.auto_ticks.isVisible() and [b.text() for b in w.scope_boxes] == ["Algebra", "Networks"]
+    assert w.mode_label.text() == "Filing into 0 selected categories"
+    w.scope_boxes[0].click()                                        # only Algebra
+    assert w.mode_label.text() == "Filing into 1 selected category"
+    w.import_paths([str(src / "a1.pdf"), str(src / "n1.pdf")])
+    _pump(app, lambda: not w.inflight and not w.filing and not w.auto_running)
+    assert [d["file_name"] for d in w.waiting()] == ["n1.pdf"]      # Networks is not ticked: it asks
+    w.show_view(SETTINGS)
+    w.auto_scope.setCurrentIndex(w.auto_scope.findData("all"))
+    w.auto_scope.activated.emit(w.auto_scope.currentIndex())        # all again: the waiting one is looked at again
+    _pump(app, lambda: not w.filing and not w.auto_running)
+    assert w.waiting() == [] and w.mode_label.text() == "Filing into all categories"
+
+    w.import_paths([str(src / "a2.pdf"), str(src / "n2.pdf")])
+    _pump(app, lambda: not w.inflight and not w.filing and not w.auto_running)
+    w.show_view(AUTO)
+    page = w.auto_page
+    assert len(page.items) == 4 and page.bar.isVisible() and not page.right.isEnabled()
+    one = next(i for i in page.items if i.title.full == "a1.pdf")
+    one.right.click()                                               # "Looks right" for one document
+    assert w.toast.label.text().startswith("Confirmed 1 document.") and len(page.items) == 3
+    assert w.org.catalog.document_row(_doc(w, "a1.pdf"))["provenance"] == "user-confirmed"
+    for item in page.items[:2]:
+        item.tick.setChecked(True)
+    assert page.right.text() == "Looks right (2)" and page.right.isEnabled()
+    page.all.click()                                                # or all of them at once
+    assert page.right.text() == "Looks right (3)"
+    page.right.click()
+    assert page.items == [] and w.auto_count.text() == "" and w.toast.label.text().startswith("Confirmed 3 documents.")
+    assert len(w.org.catalog.explicit_labels()) == 10               # they are training examples now
+    w.show_view(ALL)
+    assert _cell(w, next(r for r in range(w.filter.rowCount()) if _cell(w, r, 0) == "n2.pdf"), 2) == "Approved"
+
+    doc = _doc(w, "n2.pdf")
+    menu = w.context_menu([doc])
+    next(a for a in menu.actions() if a.text() == "Also belongs to…").trigger()
+    dialog = w.picker_dialog
+    assert dialog.windowTitle() == "1 document also belongs to…" and dialog.confirm.text() == "Add"
+    assert _pick(dialog.picker, "alg")[2] == "Algebra"
+    dialog.confirm.click()
+    _pump(app, lambda: not w.moving)
+    assert w.toast.label.text() == "1 document also in Algebra."
+    assert (w.org.output_root / "Algebra" / "n2.pdf").exists() and (w.org.output_root / "Networks" / "n2.pdf").exists()
+    assert _cats(w) == {"Algebra": "6", "Networks": "5"}             # counted in both
+    _click_category(w, "Algebra")
+    assert "n2.pdf" in [_cell(w, r, 0) for r in range(w.filter.rowCount())]   # listed where it also belongs
+    w.select_docs([doc])
+    w.set_details_open(True)
+    assert "Category: Networks" in w.details.facts.text() and "Also in: Algebra" in w.details.facts.text()
+    w.show_view(SETTINGS)
+    w.auto_level.setCurrentIndex(w.auto_level.findData("off"))
+    w.auto_level.activated.emit(w.auto_level.currentIndex())
+    assert w.mode_label.text() == "Automatic filing is off"
     _close(w, rec)

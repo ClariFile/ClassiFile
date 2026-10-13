@@ -1,8 +1,10 @@
 """The "Needs your decision" page: one item per question, with one primary action each."""
 from PySide6.QtCore import QCoreApplication, QEvent, Qt
+from collections import Counter
+
 from PySide6.QtWidgets import (
-    QApplication, QBoxLayout, QButtonGroup, QFrame, QGridLayout, QHBoxLayout, QLabel, QMenu, QPushButton, QScrollArea,
-    QToolButton, QVBoxLayout, QWidget,
+    QApplication, QBoxLayout, QButtonGroup, QCheckBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QMenu,
+    QPushButton, QScrollArea, QToolButton, QVBoxLayout, QWidget,
 )
 
 from classifile.analysis.candidates import name_key, top_names
@@ -28,7 +30,9 @@ def group_items(docs):
     items, groups = [], {}
     for d in docs:
         top = top_names(d["suggestions"], 1)
-        if d["status"] == "needs_decision" and not d["missing"] and top and not d.get("matches"):
+        if d.get("subject"):                    # no category matches it, and it resembles others: one question
+            groups.setdefault(("subject", d["subject"][0]), []).append(d)
+        elif d["status"] == "needs_decision" and not d["missing"] and top and not d.get("matches"):
             groups.setdefault(name_key(top[0]["name"]), []).append(d)
         else:
             items.append([d])
@@ -41,6 +45,9 @@ def group_items(docs):
 def card_state(members, categories):
     """Everything a card shows. While this is unchanged, the card is kept exactly as it is."""
     first = members[0]
+    if first.get("subject"):
+        return ("subject", [(d["id"], d["file_name"]) for d in members], first["subject"][1],
+                [top_names(d["suggestions"], 1) for d in members])
     top = top_names(first["suggestions"], 1) if first["status"] == "needs_decision" else []
     existing = categories.get(name_key(top[0]["name"])) if top else None
     return ([(d["id"], d["file_name"]) for d in members], first["status"], first["status_reason"], first["missing"],
@@ -365,6 +372,113 @@ class DecisionItem(QFrame):
             super().keyPressEvent(e)
 
 
+class SubjectItem(QFrame):
+    """One question for several waiting documents that match no existing category and resemble one another
+    (decision record B2). The user names the new category once and can untick documents first. Nothing is created
+    or filed until then, and nothing here ever goes into an existing category unless the user types its name."""
+    group, matches = True, ()
+
+    def __init__(self, docs, controller):
+        super().__init__()
+        self.setObjectName("decision")
+        self.setFocusPolicy(Qt.StrongFocus)
+        self.docs, self.c = docs, controller
+        self.ids = [d["id"] for d in docs]
+        words = docs[0]["subject"][1]
+        self.number = QLabel()
+        self.number.setObjectName("secondary")
+        self.title = ElidedLabel(f"{len(docs)} documents look like one new subject")
+        self.title.setStyleSheet("font-weight: 600;")
+        head = box(QHBoxLayout())
+        head.addWidget(self.number)
+        head.addWidget(self.title, 1)
+        self.line = QLabel("Shared key words: " + ", ".join(words) if words
+                           else "These documents use many of the same words.")
+        self.line.setWordWrap(True)
+        rows = box(QGridLayout())
+        rows.setColumnStretch(1, 1)
+        self.ticks, self.detail_links = {}, {}
+        for n, d in enumerate(docs):            # each document: a tick, its file name, and its pages on request
+            tick = QCheckBox()
+            tick.setChecked(True)
+            tick.setToolTip("Untick to leave this document out")
+            tick.toggled.connect(self._update)
+            link = QPushButton("Details")
+            link.setObjectName("link")
+            link.clicked.connect(lambda _=False, i=d["id"]: self.c.show_details(i))
+            rows.addWidget(tick, n, 0)
+            rows.addWidget(ElidedLabel(d["file_name"]), n, 1)
+            rows.addWidget(link, n, 2)
+            self.ticks[d["id"]], self.detail_links[d["id"]] = tick, link
+        self.field = QLineEdit()                # empty: subject names are usually not written in the documents
+        self.field.setPlaceholderText("Type a name for the new category")
+        self.field.setMaximumWidth(CHOICES_MAX // 2)
+        self.field.textChanged.connect(self._update)
+        self.field.returnPressed.connect(self.confirm_action)
+        self.confirm = QPushButton()
+        self.confirm.setObjectName("primary")
+        self.confirm.clicked.connect(self.confirm_action)
+        self.pending = QPushButton("Leave pending")
+        self.pending.clicked.connect(lambda: self.c.leave_pending(self.ids))
+        name_row = box(QHBoxLayout())
+        for w in (self.field, self.confirm, self.pending):
+            name_row.addWidget(w)
+        name_row.addStretch(1)
+        names = Counter(s["name"] for d in docs for s in top_names(d["suggestions"], 1))
+        self.name_links = []
+        suggested = box(QHBoxLayout())
+        hint = QLabel("Suggested names, if one fits:")
+        hint.setObjectName("secondary")
+        suggested.addWidget(hint)
+        for name, _ in names.most_common(TOP):  # optional: a click only fills the field
+            b = QPushButton(name if len(name) <= 32 else name[:31] + "…")
+            b.setObjectName("link")
+            b.setToolTip(name)
+            b.clicked.connect(lambda _=False, name=name: self.field.setText(name))
+            suggested.addWidget(b)
+            self.name_links.append(b)
+        suggested.addStretch(1)
+        v = box(QVBoxLayout(self), (0, PANEL, 0, PANEL))
+        v.addLayout(head)
+        v.addWidget(self.line)
+        v.addLayout(rows)
+        v.addSpacing(RELATED)
+        v.addLayout(name_row)
+        if self.name_links:
+            v.addLayout(suggested)
+        self.search_text = " ".join([d["file_name"] for d in docs] + list(words)).casefold()
+        self._update()
+
+    def ticked(self):
+        return [i for i, tick in self.ticks.items() if tick.isChecked()]
+
+    def _update(self):
+        n, name = len(self.ticked()), " ".join(self.field.text().split())
+        existing = self.c.existing_category(name)
+        self.confirm.setEnabled(bool(n and name))   # nothing is created until the user has typed the name
+        what = f"{n} document{'s' if n != 1 else ''}"
+        self.confirm.setText(f"File {what} in it" if existing else f"Create && file {what}")
+        self.confirm.setToolTip("" if not (n and name) else f"File {what} in '{existing['name']}'" if existing
+                                else f"Create category '{name}' and file {what}")
+
+    def confirm_action(self):
+        name = " ".join(self.field.text().split())
+        if name and self.ticked():
+            self.c.file_docs(self.ticked(), name)   # only the ticked documents; the others keep waiting
+
+    def set_details(self, doc_id):
+        pass                                    # one column already: nothing moves when details open
+
+    def refresh_choices(self):
+        self._update()                          # a category of the typed name may exist now
+
+    def keyPressEvent(self, e):
+        if e.key() in (Qt.Key_Return, Qt.Key_Enter):
+            self.field.setFocus()
+        else:
+            super().keyPressEvent(e)
+
+
 class DecisionPage(QWidget):
     def __init__(self, controller):
         super().__init__()
@@ -403,7 +517,8 @@ class DecisionPage(QWidget):
                 del old[tuple(item.ids)]
                 kept.append(item)
             else:
-                item = DecisionItem(members, self.c, categories)
+                item = (SubjectItem(members, self.c) if members[0].get("subject")
+                        else DecisionItem(members, self.c, categories))
                 item.state = state
                 item.set_details(self.details_doc)
             items.append(item)

@@ -286,3 +286,41 @@ def test_group_eval_says_whether_a_held_out_category_comes_back_as_one_group():
     lines = []
     group_eval.report(docs, rows, matching.GROUP_LEVEL, lines.append)
     assert "3 kept together" in "\n".join(lines) and "key words: " in "\n".join(lines)
+
+
+def test_looks_right_selected_categories_and_new_subject_groups(make_org, tmp_path):
+    org, src = make_org(), tmp_path / "src"
+    for n in range(3):
+        _add(org, src, "Algebra", n)
+        _add(org, src, "Networks", n)
+    org.update_matching()
+    cats = {c["name"]: c["id"] for c in org.catalog.categories()}
+
+    org.set_auto_scope({cats["Algebra"]})                              # selected-category mode: only Algebra
+    assert org.auto_scope() == {cats["Algebra"]}
+    net, alg = _add(org, src, "Networks", 7, False), _add(org, src, "Algebra", 8, False)
+    assert org.auto_choice(net) is None                                # its best category is not a ticked one
+    assert org.matches(net, set(cats.values()))[0][0] == cats["Networks"]   # still compared with every category
+    assert org.file_automatically(alg) == cats["Algebra"]
+    org.set_auto_scope(None)
+    assert org.auto_scope() is None and org.file_automatically(net) == cats["Networks"]
+    assert [r["value"] for r in org.catalog.all("SELECT value FROM setting_changes WHERE key = 'auto_scope'"
+                                                " ORDER BY id")] == ["selected", "all"]
+
+    assert alg not in org.catalog.explicit_labels()
+    assert org.confirm([alg, net]) == 2 and org.confirm([alg]) == 0   # "Looks right": the user's confirmation
+    assert org.catalog.document_row(alg)["provenance"] == "user-confirmed"
+    assert org.catalog.explicit_labels()[alg] == cats["Algebra"] and org.matching_status()["since"] == 2
+    events = [r[0] for r in org.catalog.all("SELECT event FROM membership_events e JOIN memberships m ON"
+                                            " m.id = e.membership_id WHERE m.document_id = ? ORDER BY e.id", alg)]
+    assert events == ["created", "confirmed"]
+
+    poems = [_add(org, src, "Poetry", n, False) for n in range(3)]     # a subject no category matches
+    _pdf(src / "zoo.pdf", "zebra giraffe antelope savanna migration herd", 1)
+    zoo = org.record(src / "zoo.pdf", *read_and_analyze(src / "zoo.pdf"))[0]
+    assert all(org.matches(d, set(cats.values())) == [] for d in poems + [zoo])
+    (ids, words), = org.new_subject_groups(poems + [zoo])
+    assert sorted(ids) == sorted(poems) and words and set(words) <= set(SUBJECTS["Poetry"].split())
+    assert org.new_subject_groups([zoo]) == []                         # a group needs two documents
+    assert org.catalog.categories() == [c for c in org.catalog.categories() if c["name"] != "Poetry"]   # none made
+    assert all(org.catalog.document(d)["status"] == "needs_decision" for d in poems)   # a question, nothing filed

@@ -19,7 +19,7 @@ from PySide6.QtGui import QDesktopServices, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView, QButtonGroup, QCheckBox, QComboBox, QFileDialog, QFrame, QHBoxLayout,
     QHeaderView, QInputDialog, QLabel, QLineEdit, QMenu, QMessageBox, QPushButton, QSizePolicy, QSplitter,
-    QListView, QStackedWidget, QStyleFactory, QTreeView, QVBoxLayout, QWidget,
+    QListView, QScrollArea, QStackedWidget, QStyleFactory, QTreeView, QVBoxLayout, QWidget,
 )
 
 from classifile.analysis.candidates import name_key
@@ -219,6 +219,16 @@ class MainWindow(QWidget):
         head = box(QHBoxLayout(), spacing=GROUP)
         head.addWidget(self.menu_button)
         head.addWidget(self.page_title, 1)
+        self.mode_label = QLabel()                # the automatic-filing mode in use, always in view
+        self.mode_label.setObjectName("secondary")
+        self.mode_link = QPushButton("Change")
+        self.mode_link.setObjectName("link")
+        self.mode_link.setToolTip("Automatic filing is set in Settings")
+        self.mode_link.clicked.connect(lambda: self.show_view(SETTINGS))
+        mode = box(QHBoxLayout(), spacing=0)
+        mode.addWidget(self.mode_label)
+        mode.addWidget(self.mode_link)
+        head.addLayout(mode)
         head.addWidget(self.processing)
         head.addWidget(self.add_button)
 
@@ -501,6 +511,20 @@ class MainWindow(QWidget):
         auto_row = box(QHBoxLayout(), spacing=GROUP)
         auto_row.addWidget(auto_text, 1)
         auto_row.addWidget(self.auto_level, 0, Qt.AlignTop)
+        self.auto_scope = QComboBox()             # selected-category mode (decision record A5)
+        self.auto_scope.setView(QListView())
+        self.auto_scope.addItem("All categories", "all")
+        self.auto_scope.addItem("Only the ones I tick", "selected")
+        self.auto_scope.activated.connect(lambda *_: self.set_auto_scope())
+        scope_text = QLabel("File automatically into:")
+        scope_row = box(QHBoxLayout(), spacing=GROUP)
+        scope_row.addWidget(scope_text, 1)
+        scope_row.addWidget(self.auto_scope)
+        self.auto_ticks = QScrollArea()           # one tick per category; shown in selected-category mode
+        self.auto_ticks.setWidgetResizable(True)
+        self.auto_ticks.setFrameShape(QFrame.NoFrame)
+        self.auto_ticks.setMaximumHeight(220)
+        self.scope_boxes = []
         about = QLabel("ABOUT")
         about.setObjectName("section")
         about_text = QLabel("ClassiFile organizes copies of your documents into categories; original files stay "
@@ -517,6 +541,8 @@ class MainWindow(QWidget):
         v.addLayout(match_row)
         v.addSpacing(GROUP)
         v.addLayout(auto_row)
+        v.addLayout(scope_row)
+        v.addWidget(self.auto_ticks)
         v.addSpacing(SECTION)
         v.addWidget(about)
         v.addWidget(about_text)
@@ -579,6 +605,10 @@ class MainWindow(QWidget):
                              "unit": analysis.get("unit", "page"), "matches": matches,
                              "abstained": ready and matching and not matches})
         self.missing = {d["id"]: d["missing"] for d in docs}
+        by_id = {d["id"]: d for d in docs}
+        for ids, words in self.org.new_subject_groups([d["id"] for d in docs if d["abstained"]]):
+            for i in ids:                       # the documents no category matches that resemble one another
+                by_id[i]["subject"] = (ids[0], tuple(words))
         return sorted(docs, key=lambda d: d["id"] in self.deferred)
 
     def document_row(self, doc_id):
@@ -638,6 +668,7 @@ class MainWindow(QWidget):
             self._show_root()
             self._show_matching()
             self.auto_level.setCurrentIndex(self.auto_level.findData(self.org.auto_level()))
+            self._show_scope(cats)
             self.close_toggle.blockSignals(True)
             self.close_toggle.setChecked(self.org.catalog.get_setting("close_notice") != "off")
             self.close_toggle.blockSignals(False)
@@ -645,6 +676,8 @@ class MainWindow(QWidget):
             self.decision.show_items(waiting, {c["name_key"]: c for c in cats},
                                      [(r["key"], r["name"], r["count"]) for r in self.cat_model.rows],
                                      enter=self.entered != DECIDE)
+        if key == SETTINGS or self.entered is None:
+            self._show_mode()                   # it changes only in Settings: not asked for at every refresh
         self.entered = key
         self._show_page()
         self._show_processing()
@@ -1091,6 +1124,8 @@ class MainWindow(QWidget):
             self.toast.show_message(f"Filed {what} in {cat_name}", "Show",
                                     lambda c=cat_id, d=ok: self._show_filed(c, d))
         self.batch = []
+        if ok:
+            self.recheck_waiting()
         self.refresh()
 
     # -- automatic filing (decision record A0, B2) ------------------------------------------------------------
@@ -1124,11 +1159,107 @@ class MainWindow(QWidget):
             self.auto_batch = []
         self.refresh(recheck=False)
 
+    def recheck_waiting(self):
+        """Look at the waiting documents again: the level, the selection or the model changed, or the user
+        confirmed documents and a category may now hold the three it takes to be filed into."""
+        self.file_automatically([d["id"] for d in self.waiting()])
+
     def set_auto_level(self, name):
         """The level chosen in Settings: recorded, then the waiting documents are looked at again."""
         self.org.set_auto_level(name)
-        self.file_automatically([d["id"] for d in self.waiting()])
+        self._show_mode()
+        self.recheck_waiting()
         self.refresh()
+
+    def set_auto_scope(self):
+        """ "All categories" or "Only the ones I tick", as Settings shows them now: recorded, then re-checked."""
+        ticked = {b.property("category") for b in self.scope_boxes if b.isChecked()}
+        self.org.set_auto_scope(ticked if self.auto_scope.currentData() == "selected" else None)
+        self._show_mode()
+        self.recheck_waiting()
+        self.refresh()
+
+    def _show_scope(self, cats):
+        scope = self.org.auto_scope()
+        self.auto_scope.setCurrentIndex(0 if scope is None else 1)
+        self.auto_ticks.setVisible(scope is not None)
+        shown = [(c["id"], c["name"], bool(scope) and c["id"] in scope) for c in cats]
+        if shown == [(b.property("category"), b.text().replace("&&", "&"), b.isChecked()) for b in self.scope_boxes]:
+            return                              # as it is: a tick in use is not rebuilt under the mouse
+        holder = QWidget()
+        column = box(QVBoxLayout(holder), (GROUP, 0, 0, 0))
+        self.scope_boxes = []
+        for cat_id, name, on in shown:
+            b = QCheckBox(name.replace("&", "&&"))
+            b.setProperty("category", cat_id)
+            b.setChecked(on)                    # before it is connected: filling is not the user ticking
+            b.toggled.connect(lambda *_: self.set_auto_scope())
+            column.addWidget(b)
+            self.scope_boxes.append(b)
+        column.addStretch(1)
+        self.auto_ticks.setWidget(holder)
+
+    def _show_mode(self):
+        """The line at the top of the window: what automatic filing does now."""
+        scope = self.org.auto_scope()
+        if self.org.auto_level() == "off":
+            text = "Automatic filing is off"
+        elif scope is None:
+            text = "Filing into all categories"
+        else:
+            text = f"Filing into {len(scope)} selected categor{'y' if len(scope) == 1 else 'ies'}"
+        self.mode_label.setText(text)
+
+    def looks_right(self, ids):
+        """The user confirms what the app filed by itself: these documents become training examples."""
+        n = self.org.confirm(ids)
+        if n:
+            self.toast.show_message(f"Confirmed {n} document{'s' if n != 1 else ''}. ClassiFile learns from "
+                                    f"{'them' if n != 1 else 'it'} at the next Update matching.")
+            self.recheck_waiting()
+        self.refresh()
+
+    def also_docs(self, ids):
+        ids = [i for i in ids if (self.org.catalog.document(i) or {"status": ""})["status"] == "filed"]
+        if ids:
+            what = "1 document" if len(ids) == 1 else f"{len(ids)} documents"
+            self.pick_category(f"{what} also belong{'s' if len(ids) == 1 else ''} to…", "Add",
+                               lambda kind, cat_id, name: self._also(ids, cat_id, name))
+
+    def _also(self, ids, cat_id, name):
+        """A second verified copy in another category; the documents' own category stays."""
+        created = cat_id is None
+        try:
+            cat_id = cat_id or self.org.create_category(name)
+        except ValueError as e:
+            self.toast.show_message(str(e).capitalize())
+            return
+
+        def job():
+            added, problems = 0, []
+            for i in ids:
+                try:
+                    self.org.also(i, cat_id)
+                    added += 1
+                except (CopyError, ValueError) as e:
+                    problems.append(str(e))
+            return added, problems
+
+        def done(result):
+            self.moving -= 1
+            added, problems = result if not isinstance(result, Exception) else (0, [
+                f"Something went wrong while copying ({type(result).__name__}). Try again."])
+            if created and not added:
+                self.org.discard_unused_category(cat_id)
+            cat = self.org.catalog.category(cat_id)
+            text = (f"{added} document{'s' if added != 1 else ''} also in {cat['name'] if cat else name}."
+                    if added else "")
+            if problems:
+                text += f" {len(problems)} not added. {problems[0]}"
+            self.toast.show_message(text.strip(), ms=10000 if problems else 5000)
+            self.refresh()
+
+        self._background(job, done)
 
     def _show_filed(self, cat_id, ids):
         if self.org.catalog.category(cat_id):
@@ -1223,6 +1354,7 @@ class MainWindow(QWidget):
         if single and docs[0]["status"] == "needs_decision" and self.org.original_missing(single):
             menu.addAction("Locate file…", lambda: self.locate_doc(single))
         if any(d["status"] == "filed" for d in docs):
+            menu.addAction("Also belongs to…", lambda: self.also_docs(ids))
             menu.addAction("Move to…", lambda: self.move_docs(ids))
         if any(d["status"] in WAITING for d in docs):
             menu.addAction("Remove from ClassiFile", lambda: self.remove_docs(ids))
@@ -1283,7 +1415,7 @@ class MainWindow(QWidget):
                             + (f" On the {since}, it put your category first for {found['new']}; the previous "
                                f"version for {found['previous']}." if found and found["documents"] else ""))
             self.toast.show_message(text, ms=10000)
-            self.file_automatically([d["id"] for d in self.waiting()])   # with what it knows now
+            self.recheck_waiting()              # with what it knows now
             self.refresh()
 
         self._background(self.org.update_matching, done)
@@ -1343,6 +1475,7 @@ class MainWindow(QWidget):
             if problems:
                 text += f" {len(problems)} couldn't be moved. {problems[0]}"
             self.toast.show_message(text, ms=10000 if edited or problems else 5000)
+            self.recheck_waiting()
             self.refresh(select_docs=[])
             counts = self.org.catalog.category_counts()
             empty = [c for c in sources if not counts.get(c)]
@@ -1362,6 +1495,7 @@ class MainWindow(QWidget):
             deleted += 1
             if folder:
                 kept.append(folder)
+        self._show_mode()                       # a ticked category may be gone
         if kept:
             self.toast.show_message(
                 f"Deleted. Other files remain in {wrappable(kept[0])}"

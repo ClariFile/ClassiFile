@@ -111,7 +111,8 @@ class DocumentFilter(QSortFilterProxyModel):
 
     def in_view(self, r):
         if self.view == CATEGORY:
-            return r["id"] is not None and r.get("category_id") == self.category
+            return r["id"] is not None and (r.get("category_id") == self.category
+                                            or self.category in r.get("also", ()))
         if self.view == RECENT:
             return r["id"] is None or (r["imported_at"] or "") >= self.since
         return True

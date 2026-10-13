@@ -104,7 +104,11 @@ class Matcher:
 
     def rank(self, text):
         """[(category id, similarity)], best first. Empty when the text has no word the model knows."""
-        x = vector(terms(text), self.bundle["idf"])
+        return self.rank_counts(terms(text))
+
+    def rank_counts(self, counts):
+        """rank() for a document whose terms() are at hand."""
+        x = vector(counts, self.bundle["idf"])
         return sorted(self.model.scores(x).items(), key=lambda kv: (-kv[1], kv[0])) if x else []
 
     def good(self, ranked):
@@ -135,6 +139,17 @@ def check(texts, labels, previous):
 def record_text(record):
     """A freshly read document's full text, put together as the catalog stores it (Catalog.texts)."""
     return "\n".join(t for u in record.units for t in (u.text, u.notes, u.ocr_text) if t)
+
+
+def group_vectors(counts, bundle):
+    """Waiting documents ({id: terms()}) as vectors for grouping. Word weights come from the model's documents and
+    these documents together, so a word the model never saw (a new subject's own vocabulary) counts, and counts
+    for much."""
+    n, known = sum(bundle["documents"].values()), bundle["idf"]
+    df = Counter(t for c in counts.values() for t in c)
+    seen = lambda t: (1 + n) / math.exp(known[t] - 1) - 1 if t in known else 0     # fit_idf(), turned round
+    idf = {t: math.log((1 + n + len(counts)) / (1 + df[t] + seen(t))) + 1 for t in df}
+    return {d: vector(c, idf) for d, c in counts.items()}
 
 
 def similar_groups(vectors, level):

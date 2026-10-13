@@ -1,6 +1,6 @@
 # ClassiFile status
 
-2026-10-13 · decision record version 2.3
+2026-10-13 · decision record version 2.4
 
 ## Done
 
@@ -103,22 +103,37 @@
 - Not built from the record's CP3 list: selected-category mode and "Also belongs to" (proposed for CP4, see
   `docs/CP4_PROPOSAL.md`).
 
-**CP4 Automatic mode (in progress, 2026-10-13; the owner's decisions are in the record, version 2.3)**
+**CP4 Automatic mode (2026-10-13; the owner's decisions are in the record, versions 2.3 and 2.4)**
 - **Automatic filing, built.** A document that is read is filed without a question when its best category
   leads the second by the level in use (Strict, the owner's choice) and that category already holds 3 documents
   the owner confirmed. Otherwise it waits with the three best categories, as before. The copy is the normal
   verified copy; the placement is recorded as machine-assigned with what it rested on, and never trains the
-  matcher. Waiting documents are looked at again after "Update matching" and after a change of level.
-- **Filed automatically** (sidebar view): what the app filed by itself, each with its reason and Move to….
-  A move is the owner's correction and is what the matcher learns from. In the document list such a document's
-  status reads "Filed automatically", not "Approved".
-- **Settings:** the level (Off, Very strict, Strict, Balanced, Lenient); every change is recorded in the catalog.
-  The Settings page now uses its full reading width.
-- **Grouping new subjects: tested on development data, not in the app yet** (the owner looks at the report
-  first). `tools.group_eval` holds each category out in turn and groups only the documents that then match no
-  existing category. Result below.
-- Not built yet: the grouping question in the app, selected-category mode, "Also belongs to".
-- 253 automated tests.
+  matcher. Waiting documents are looked at again after "Update matching", after a change of level or of the
+  selected categories, and whenever the owner files, moves or confirms a document (a category may then hold the
+  3 confirmed documents it takes).
+- **Filed automatically** (sidebar view): what the app filed by itself, each with its reason, "Looks right" and
+  Move to…. "Looks right", for one document or for all the ticked ones, records the owner's confirmation: the
+  documents become training examples. A move is the correction. In the document list such a document's status
+  reads "Filed automatically" until it is confirmed or moved, then "Approved".
+- **Settings:** the level (Off, Very strict, Strict, Balanced, Lenient) and where to file ("All categories" or
+  "Only the ones I tick", with a tick per category); every change is recorded in the catalog. The mode in use
+  is always shown at the top of the window, with a link to Settings. The Settings page uses its full reading
+  width.
+- **Selected-category mode:** a document is filed automatically only when its best category among all
+  categories is a ticked one; a selection never raises a document's confidence (B1). Creating a category always
+  takes the owner's explicit choice.
+- **Grouping new subjects:** waiting documents that match no existing category and resemble one another
+  (average similarity of at least 0.15, the owner's choice after the development report) are one question:
+  the shared key words first, each document's file name with a tick and a Details link, an empty name field,
+  and the suggested names as optional choices. Nothing is created or filed until the owner types the name;
+  unticked documents keep waiting. `tools.group_eval` is the development test; its result is below.
+- **Also belongs to…** (right-click a filed document): a second verified copy in another category. The
+  document's own category, and what the matcher learns from, do not change; it is listed and counted in both.
+  Moving the document leaves the second copy where it is. An "also belongs to" that stopped before its copy was
+  made is undone at the next start.
+- Not built: removing an "also belongs to" again; single-document automatic creation and the discovery replay
+  (E10) from the record's CP4 list.
+- 257 automated tests.
 
 ## Development results so far
 
@@ -251,14 +266,14 @@ These counts describe development data only. They are not accuracy estimates.
     20 of 34 files with a name once marked good (21), 17 names never judged. Development data; not accuracy.
   - What would settle the level: the user's own grouping of the development files (decision record G3), which
     does not exist yet. Filing them in the app with the categories the user wants would provide it.
-- **Grouping new subjects:** waiting for the owner's look at the report, and their choice of similarity
-  (0.15 groups more and mixed 2 documents; 0.20 groups less and mixed none).
-- **Selected-category mode:** where the owner selects the categories is not designed yet.
+- **From the record's CP4 list, not built:** automatic creation of a category from a single document (the owner
+  ruled that the app never creates a folder by itself) and the discovery replay (E10). The record still lists
+  both; a change of the record is the owner's.
+- **"Also belongs to" cannot be undone in the app yet** (there is no "remove from this category").
 
 ## Next
 
-1. Finish CP4 after the owner has seen the grouping report: the grouping question in the app,
-   selected-category mode, "Also belongs to"; then all tests, the audit and a push.
+1. The owner tries CP4 in the app (the "how to try it" list in the hand-over report).
 2. Queued for after CP4, in the owner's order: interface phases 2 (the page preview) and 3 of
    `docs/UI_PROPOSAL.md`, with decisions 3 (card actions) and 4 (narrow windows). Known from the phase 1
    checks: at 1024×640 the decision page with details beside it scrolls sideways by 16 pixels, and the two

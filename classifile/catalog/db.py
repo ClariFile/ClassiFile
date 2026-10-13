@@ -342,7 +342,9 @@ class Catalog:
             " JOIN snapshots s ON s.document_id = d.id WHERE d.id = ?", doc_id)
 
     _FILED = ("SELECT d.*, s.sha256, s.file_name, s.imported_at, s.source_path, c.id AS category_id,"
-              " c.name AS category, m.provenance, m.auto_json, p.path AS copy_path,"
+              " c.name AS category, m.provenance, m.auto_json, m.role, (SELECT group_concat(category_id)"
+              " FROM memberships WHERE document_id = d.id AND role = 'secondary' AND status = 'active') AS also_ids,"
+              " p.path AS copy_path,"
               " p.status AS copy_status, p.updated_at AS filed_at FROM documents d"
               " JOIN snapshots s ON s.document_id = d.id"
               " JOIN memberships m ON m.document_id = d.id AND m.status = 'active'"
@@ -351,8 +353,8 @@ class Catalog:
               " AND status IN ('published', 'edited') ORDER BY id DESC LIMIT 1) ")
 
     def documents(self, category_id=None):
-        """Documents in a category (with category, copy path and filed time), or (category_id=None) every document
-        that is not filed: the Inbox."""
+        """Documents in a category, whether it is their own or one they also belong to (with category, copy path
+        and filed time), or (category_id=None) every document that is not filed: the Inbox."""
         if category_id is None:
             return self.all("SELECT d.*, s.sha256, s.file_name, s.imported_at, s.source_path FROM documents d"
                             " JOIN snapshots s ON s.document_id = d.id WHERE d.status != 'filed'"
@@ -367,16 +369,17 @@ class Catalog:
 
     def all_documents(self):
         """Every document: filed ones with their category, copy path and filed time; the rest without."""
-        filed = self.all(self._FILED + "WHERE d.status = 'filed' ORDER BY s.file_name, d.id")
+        filed = self.all(self._FILED + "WHERE d.status = 'filed' AND m.role = 'primary' ORDER BY s.file_name, d.id")
         ids = {d["id"] for d in filed}
         rest = [dict(d) | {"category_id": None, "category": None, "copy_path": None, "copy_status": None,
                            "filed_at": None, "provenance": None, "auto_json": None}
                 for d in self.documents(None) if d["id"] not in ids]
-        return sorted([dict(d) for d in filed] + rest, key=lambda d: (d["file_name"].casefold(), d["id"]))
+        return sorted([dict(d) | {"also": set(d["also_ids"].split(",")) if d["also_ids"] else set()}
+                       for d in filed] + rest, key=lambda d: (d["file_name"].casefold(), d["id"]))
 
     def document_row(self, doc_id):
         """One document as all_documents() gives it, without reading the others."""
-        filed = self.one(self._FILED + "WHERE d.id = ? AND d.status = 'filed'", doc_id)
+        filed = self.one(self._FILED + "WHERE d.id = ? AND d.status = 'filed' AND m.role = 'primary'", doc_id)
         if filed:
             return dict(filed)
         d = self.one("SELECT d.*, s.sha256, s.file_name, s.imported_at, s.source_path FROM documents d"
@@ -559,6 +562,47 @@ class Catalog:
                        " WHERE s.document_id = ?", doc_id)
         self.run("INSERT INTO suggestion_feedback (document_id, analyzer_version, reason, category_id, at)"
                  " VALUES (?, ?, ?, ?, ?)", doc_id, row[0] if row else None, reason, cat_id, now())
+
+    def confirm_primary(self, doc_id):
+        """The user says a placement the app made by itself is right: it becomes their confirmation, and so a
+        training example (A7). Returns True when there was such a placement."""
+        t = now()
+        with self.lock, self.db:
+            row = self.db.execute("SELECT id FROM memberships WHERE document_id = ? AND role = 'primary' AND status ="
+                                  " 'active' AND provenance = 'machine-assigned'", (doc_id,)).fetchone()
+            if row is None:
+                return False
+            self.db.execute("UPDATE memberships SET provenance = 'user-confirmed', updated_at = ? WHERE id = ?",
+                            (t, row[0]))
+            self.db.execute("INSERT INTO membership_events (membership_id, event, provenance, at)"
+                            " VALUES (?, 'confirmed', 'user-confirmed', ?)", (row[0], t))
+            return True
+
+    def add_secondary(self, doc_id, cat_id):
+        """ "Also belongs to": a second, user-chosen membership beside the primary one. Returns its id."""
+        t = now()
+        with self.lock, self.db:
+            mid = self.db.execute(
+                "INSERT INTO memberships (document_id, category_id, role, provenance, status, created_at, updated_at)"
+                " VALUES (?, ?, 'secondary', 'user-confirmed', 'active', ?, ?)", (doc_id, cat_id, t, t)).lastrowid
+            self.db.execute("INSERT INTO membership_events (membership_id, event, provenance, at)"
+                            " VALUES (?, 'created', 'user-confirmed', ?)", (mid, t))
+        return mid
+
+    def secondary_categories(self, doc_id):
+        """[(category id, name)] of the categories a document also belongs to."""
+        return [tuple(r) for r in self.all(
+            "SELECT c.id, c.name FROM memberships m JOIN categories c ON c.id = m.category_id WHERE m.document_id = ?"
+            " AND m.role = 'secondary' AND m.status = 'active' ORDER BY c.name COLLATE NOCASE", doc_id)]
+
+    def remove_secondary(self, doc_id, cat_id):
+        """Undo an "also belongs to" whose copy never succeeded, or that became the primary placement."""
+        with self.lock, self.db:
+            ids = [r[0] for r in self.db.execute("SELECT id FROM memberships WHERE document_id = ? AND category_id = ?"
+                                                 " AND role = 'secondary' AND status = 'active'", (doc_id, cat_id))]
+            for mid in ids:
+                self.db.execute("DELETE FROM membership_events WHERE membership_id = ?", (mid,))
+                self.db.execute("DELETE FROM memberships WHERE id = ?", (mid,))
 
     def remove_primary(self, doc_id):
         """Undo a placement whose copy never succeeded (the membership and its events)."""

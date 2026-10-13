@@ -97,6 +97,9 @@ class DetailsPanel(QFrame):
         filed = d["status"] == "filed"
         missing = not filed and self.c.org.original_missing(doc_id)
         facts = [f"Category: {d['category']}" if d.get("category") else "Category: —"]
+        also = [name for _, name in self.c.org.catalog.secondary_categories(doc_id)] if filed else []
+        if also:
+            facts.append("Also in: " + ", ".join(also))
         if filed:
             facts.append(f"Filed: {self.c.short_date(d['filed_at'])}" if d.get("filed_at") else "Filed")
             if d.get("copy_status") == "edited":

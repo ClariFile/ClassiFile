@@ -339,3 +339,39 @@ def test_delete_only_an_empty_category_and_only_an_empty_folder(samples, make_or
     third = org.create_category("Third")
     (org.output_root / "Third").mkdir()
     assert org.delete_category(third) is None and not (org.output_root / "Third").exists()
+
+
+def test_also_belongs_to_makes_a_second_verified_copy(samples, make_org):
+    before = source_state(samples)
+    org = make_org()
+    ids = _import_all(org, samples)
+    _file_all(org, ids)
+    name, other = SAMPLE["S2"], SAMPLE["S3"]
+    cats = {c["name"]: c["id"] for c in org.catalog.categories()}
+    path = org.also(ids[name], cats["PHP"])
+    assert path == org.output_root / "PHP" / name and path.read_bytes() == (samples / name).read_bytes()
+    assert (org.output_root / "C++" / name).exists()                   # the primary copy stays
+    row = org.catalog.document_row(ids[name])
+    assert (row["category"], row["provenance"]) == ("C++", "user-confirmed")   # the primary category is unchanged
+    assert org.catalog.secondary_categories(ids[name]) == [(cats["PHP"], "PHP")]
+    assert sorted(d["file_name"] for d in org.catalog.documents(cats["PHP"])) == sorted([name, other])
+    listed = [d for d in org.catalog.all_documents() if d["id"] == ids[name]]
+    assert len(listed) == 1 and listed[0]["also"] == {cats["PHP"]}     # one row, in both categories
+    assert org.catalog.category_counts()[cats["PHP"]] == 2
+    assert org.catalog.explicit_labels()[ids[name]] == cats["C++"]     # what the matcher learns from: the primary
+    for wrong in (cats["PHP"], cats["C++"]):
+        with pytest.raises(ValueError, match="already in that category"):
+            org.also(ids[name], wrong)
+
+    assert org.move(ids[name], cats["Course A"]) == "moved"            # moving the primary leaves the second copy
+    assert path.exists() and not (org.output_root / "C++" / name).exists()
+    assert org.move(ids[name], cats["PHP"]) == "moved"                 # moved to where it also was: one copy there
+    assert org.catalog.secondary_categories(ids[name]) == [] and path.exists()
+    assert not (org.output_root / "Course A" / name).exists()
+    assert len(org.catalog.document_copies(ids[name])) == 1
+
+    org.catalog.add_secondary(ids[name], cats["Course B"])             # stopped before its copy was made
+    again = make_org()
+    again.startup()
+    assert again.catalog.secondary_categories(ids[name]) == []         # undone: no membership without a copy
+    assert source_state(samples) == before                             # the originals are never touched
