@@ -71,6 +71,10 @@ Run from the project folder (Windows, Python 3.11+; the venv uses 3.12).
 - Window renders for layout checks: `.venv\Scripts\python -m tools.render_window [--size 1536x864] [--scale 1.25] [--out data]` (dark-theme PNGs: nine views, or five scaled views with `--scale`)
 - OCR needs Tesseract (`C:\Program Files\Tesseract-OCR`, or `TESSDATA_PREFIX`). Tests run OCR only when marked `ocr`; others set `CLASSIFILE_OCR=off`.
 - Apply a split: `.venv\Scripts\python -m tools.apply_split data\splits.csv --from <folder>` (moves the files into `data\development`, `data\validation` and `data\final-eval`; all or nothing). A split made again: `... data\splits_2.csv --previous data\splits.csv` (only files that change folder are touched)
+- Matching (CP3). The model is updated only on request: Settings, "Update matching" (versioned; the previous version is kept if the new one does worse).
+  - E2 and E4 on development data: `.venv\Scripts\python -m tools.match_eval [--families <csv>...] [--growth] [--json FILE]` (reads a copy of the catalog; prints category names: keep the output local)
+  - Validation, measured once: `.venv\Scripts\python -m tools.match_validation data\validation --labels data\splits_incoming_2.csv` (refuses a second run; `--report data\validation_matching.json` prints the saved result)
+  - File waiting development documents from the owner's labels: `.venv\Scripts\python -m tools.file_labels data\splits_incoming_2.csv` (development rows only; close the app first)
 - Interface timings on a made-up catalog: `.venv\Scripts\python -m tools.measure_ui [--json FILE]`
 - Interface acceptance checks (four window sizes, 100/125/150%): `.venv\Scripts\python -m tools.check_ui`
 - `data\final-eval\` is the held-out final evaluation: never open, read or test against it until the user says so. The tools refuse it.

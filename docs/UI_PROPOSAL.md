@@ -249,6 +249,8 @@ Run at the end of every phase that touches the window.
 6. **Decision cards, full width (2026-10-13).** A card is as wide as the page: its number in the list, its name
    and suggestion at the left, its buttons at the right. With details open beside the page the buttons go under
    the suggestion. "Details" on a card opens and closes that document's details.
+7. **Order (2026-10-13).** CP3 (matching documents to the existing categories) is built before phases 2 and 3.
+   Both phases stay queued, with decisions 3 and 4, for after CP3.
 
 ---
 

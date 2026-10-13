@@ -1,6 +1,6 @@
 # ClassiFile status
 
-2026-10-12 · decision record version 2.0
+2026-10-13 · decision record version 2.2
 
 ## Done
 
@@ -79,11 +79,65 @@
   sizes and three scalings).
 - `tools.apply_split`: moves a split's files into `data\development`, `data\validation` and `data\final-eval`,
   all or nothing, never over an existing file; `--previous` applies a split made again.
-- 240 automated tests.
+
+**CP3 Matching to existing categories (2026-10-13; the owner's order: before interface phases 2 and 3)**
+- The goal is in the record (A0, version 2.2): an automatic categorizer; choosing by hand is the fallback.
+- `classifile/matching.py`: one word-level TF-IDF representation fitted on the training documents only, and the
+  primary scorer chosen in E2, nearest centroid. Standard library only: no new dependency.
+- A model is a versioned bundle in the catalog (preprocessing, vectorizer, category mapping, decision
+  settings). It learns only from placements the owner chose or corrected, never from the app's own.
+- **Update matching** (Settings): retrains on the filed documents, off the interface thread. The new version
+  is checked against the one in use on the documents filed or moved since (the new one is never trained on a
+  document it is asked about, or on a near-identical version of it); if it does worse, the previous version
+  stays in use and the new one is recorded as rejected.
+- **Decision cards:** when existing categories are a good match, a card shows the three best, ranked, each a
+  one-click "File in …" with a plain reason ("Similar to 9 documents in …"). When none is a good match (the
+  abstention baseline, E4) it says so and shows the suggested new name instead. No score is ever shown. The
+  suggested new names stay under "Choose another…". Creating a category still takes an explicit choice (B2).
+- Tools: `tools.match_eval` (E2 and E4 on development data), `tools.match_validation` (validation, measured
+  once; it refuses a second run), `tools.file_labels` (files waiting development documents from the owner's
+  labels, as normal verified copies).
+- The owner's 15 waiting development documents were filed from their labels: 83 documents filed in 10 categories.
+- Tests: the smoke test no longer depends on a time limit or a fixed delay, and the worker test's healthy read
+  has a generous limit (both could fail on a busy machine).
+- Not built from the record's CP3 list: selected-category mode and "Also belongs to" (proposed for CP4, see
+  `docs/CP4_PROPOSAL.md`).
+- 249 automated tests.
 
 ## Development results so far
 
 These counts describe development data only. They are not accuracy estimates.
+
+- **Scorer comparison (E2, 2026-10-13):** the 83 filed documents (78 families, 10 categories of 32, 11, 10, 8,
+  7, 6, 4, 3, 1 and 1 documents), each family held out in turn, the vocabulary and every scorer fitted on the
+  rest. 81 documents have a category with other families; the other 2 are a new subject when held out.
+  - The owner's category first / in the first three, of 81: nearest centroid 65 / 77; kNN 69 / 79 (k = 1),
+    67 / 79 (k = 3), 66 / 79 (k = 5); logistic regression 36 / 64 (C = 1), 56 / 73 (C = 10), 58 / 75 (C = 100).
+  - With one to three examples of the category (7 documents): nearest centroid 3 first, kNN (k = 1) 4,
+    logistic regression none.
+  - A growing catalog (a quarter, then half, of the other families training): nearest centroid 49 of 71 and
+    58 of 77 first; kNN (k = 1) 51 and 65; logistic regression (C = 100) 43 and 51.
+  - Per category, nearest centroid, first / in the first three / documents: 30/32/32, 8/11/11, 9/10/10, 6/8/8,
+    6/6/7, 3/6/6, 2/3/4, 1/1/3, and the two single-document categories 0/0/1 each (nothing to learn from).
+  - Chosen: **nearest centroid**. kNN puts the right category first for a few more documents, but nearest
+    centroid knows much better when not to file (next point), which automatic filing depends on; it is also
+    the record's default when the comparison is close. Logistic regression is behind on every count.
+- **Abstention (E4, global baseline):** one level for all categories, set on how far the best category leads
+  the second (set on the best score alone it was clearly worse). Documents filed right while at most 0 / 1 / 3
+  are filed wrong: nearest centroid 32 / 54 / 60; kNN (k = 1) 34 / 35 / 48, (k = 3) 14 / 44 / 57, (k = 5)
+  27 / 34 / 60; logistic regression (C = 100) 32 / 39 / 43.
+  - New subjects: with each whole category held out, all 83 documents are of a subject never seen, and filing
+    any is wrong. At those same levels nearest centroid files 0 / 5 / 16 of them; kNN (k = 1) 7 / 8 / 12.
+  - Cards use a lenient level (lead of 0.02). Of the 81 documents whose category exists, 66 would show three
+    categories (64 with the owner's among them, 61 with it first) and 15 a suggested new name; of the 83 held
+    out as new subjects, 39 would show a new name and 44 existing categories.
+- **Validation, measured once (2026-10-13):** model version 1 (the 83 development documents) on the 23
+  validation documents. The owner's category first for 21 and in the first three for all 23. Per label, first /
+  in the first three / documents: 10/10/10, 2/4/4, 3/3/3, 3/3/3, 2/2/2 and 1/1/1. One label names no category;
+  its 2 documents are counted under the category the owner filed that label's development files in. Every
+  validation document belongs to an existing category, so validation says nothing about new subjects.
+  The strictness trade-off for automatic filing is in `docs/CP4_PROPOSAL.md`. The saved result is
+  `data\validation_matching.json` (local).
 
 - **Selective OCR (E8):** the adopted rule caught 139 of 160 units with content the native text misses.
 - **Name review:** 21 of 34 development files had at least one good name in the top three; 76 suggested names
@@ -173,14 +227,16 @@ These counts describe development data only. They are not accuracy estimates.
     20 of 34 files with a name once marked good (21), 17 names never judged. Development data; not accuracy.
   - What would settle the level: the user's own grouping of the development files (decision record G3), which
     does not exist yet. Filing them in the app with the categories the user wants would provide it.
-- **CP3** has not started.
+- **Automatic filing (CP4)** is proposed, not built: `docs/CP4_PROPOSAL.md`. The owner picks the strictness.
+- **Record changes to propose:** E2 and E4 results; the card rule (three existing categories, one click; new
+  names only when none is a good match); selected-category mode and "Also belongs to" from CP3 to CP4.
 
 ## Next
 
-1. Interface: phase 2 of `docs/UI_PROPOSAL.md` (the page preview), on the owner's go-ahead. Phase 1 is done.
-2. Known from the phase 1 checks: at 1024×640 the decision page with details beside it scrolls sideways by 16
-   pixels (phase 3 removes it); the two lists draw no focus mark of their own (phase 3).
-3. CP3 (after the user's go-ahead): scorer comparison (E2) and abstention baseline (E4) on development data,
-   selected-category mode with permissions through the queue, "Belongs to" / "Also belongs to", primary
-   replacement and edited-copy protection.
-4. Later: CP4 automatic mode and discovery, CP5 quality gate and freeze. SummarEase is a separate project.
+1. The owner's decisions on `docs/CP4_PROPOSAL.md` (strictness level, naming new subjects, record changes).
+2. Queued for after CP3, in the owner's order: interface phases 2 (the page preview) and 3 of
+   `docs/UI_PROPOSAL.md`, with decisions 3 (card actions) and 4 (narrow windows). Known from the phase 1
+   checks: at 1024×640 the decision page with details beside it scrolls sideways by 16 pixels, and the two
+   lists draw no focus mark of their own (both phase 3).
+3. CP4 automatic mode on the owner's go-ahead, then CP5 quality gate and freeze. SummarEase is a separate
+   project.

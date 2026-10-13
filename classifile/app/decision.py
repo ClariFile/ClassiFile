@@ -13,6 +13,7 @@ from classifile.app.widgets import (
 
 TOP = 3
 TEXT_MIN = 320  # a card's buttons sit at its right only while the name and the suggestion keep this much room
+MATCH_MIN = 520  # the same for a card that offers matching categories: their buttons and reasons need more
 # Why the suggested names were set aside: (button, hint, what the catalog records). Optional.
 REASONS = (("Too narrow", "A lesson or a section", "too narrow"), ("Too broad", "", "too broad"),
            ("Wrong topic", "", "wrong topic"), ("Not a real name", "A fragment, a person or a file name",
@@ -22,11 +23,12 @@ REASONS = (("Too narrow", "A lesson or a section", "too narrow"), ("Too broad", 
 
 def group_items(docs):
     """Waiting documents as decision items. Readable documents whose top suggestion is exactly the same (same
-    name key) and whose originals are present form one group item; everything else is a single item."""
+    name key) and whose originals are present form one group item; everything else is a single item, and so is
+    every document that existing categories match (its question is its own)."""
     items, groups = [], {}
     for d in docs:
         top = top_names(d["suggestions"], 1)
-        if d["status"] == "needs_decision" and not d["missing"] and top:
+        if d["status"] == "needs_decision" and not d["missing"] and top and not d.get("matches"):
             groups.setdefault(name_key(top[0]["name"]), []).append(d)
         else:
             items.append([d])
@@ -43,7 +45,7 @@ def card_state(members, categories):
     existing = categories.get(name_key(top[0]["name"])) if top else None
     return ([(d["id"], d["file_name"]) for d in members], first["status"], first["status_reason"], first["missing"],
             first["source_path"], first["suggestions"], first["unit"],
-            existing["name"] if existing else bool(categories))
+            existing["name"] if existing else bool(categories), first.get("matches"), first.get("abstained"))
 
 
 class DecisionItem(QFrame):
@@ -58,6 +60,10 @@ class DecisionItem(QFrame):
         self.group = len(docs) > 1
         top = top_names(first["suggestions"], TOP) if first["status"] == "needs_decision" else []
         self.best = top[0]["name"] if top else ""
+        # [(category name, documents it was compared with)]: the existing categories that match best, if any do
+        self.matches = first.get("matches") or []
+        if self.matches:
+            self.best = self.matches[0][0]
 
         icon = QLabel()
         icon.setPixmap(format_icon(first["file_name"]).pixmap(20, 20))
@@ -83,6 +89,23 @@ class DecisionItem(QFrame):
         self.primary = QPushButton()
         self.primary.setObjectName("primary")
         self.primary.clicked.connect(self.primary_action)
+        self.match_rows = QWidget()             # one row per matching category: a one-click button, then why
+        rows = box(QGridLayout(self.match_rows))
+        rows.setColumnStretch(1, 1)
+        self.match_buttons = []
+        for n, (name, count) in enumerate(self.matches):
+            button = QPushButton() if n else self.primary     # the best match is the card's main action
+            shown = name if len(name) <= 32 else name[:31] + "…"
+            button.setText(f"File in {shown}".replace("&", "&&"))
+            button.setToolTip(f"File in '{name}'")
+            if n:
+                button.clicked.connect(lambda _=False, name=name: self.c.file_docs(self.ids, name))
+            rows.addWidget(button, n, 0)
+            rows.addWidget(ElidedLabel(f"Similar to {count} document{'s' if count != 1 else ''} in {name}",
+                                       "secondary"), n, 1)
+            self.match_buttons.append(button)
+        if not self.matches:
+            self.match_rows.hide()
         self.choose = QPushButton("Choose another…")
         self.choose.clicked.connect(self.toggle_expanded)
         self.pending = QPushButton("Leave pending")
@@ -110,7 +133,8 @@ class DecisionItem(QFrame):
             self.head.addWidget(w)
         self.head.addWidget(self.title, 1)
         self.actions = box(QHBoxLayout())
-        self.actions.addWidget(self.primary)
+        if not self.matches:
+            self.actions.addWidget(self.primary)
         for w in (self.choose, self.pending, self.remove, self.details):
             self.actions.addWidget(w)
         self.actions.addStretch(1)
@@ -122,6 +146,7 @@ class DecisionItem(QFrame):
         text.addLayout(self.head)
         text.addWidget(self.line)
         text.addWidget(self.names)
+        text.addWidget(self.match_rows)
         text.addStretch(1)
         self.stacked = False                    # details are open beside the page: the buttons go underneath
         self.body = box(QBoxLayout(QBoxLayout.LeftToRight), spacing=GROUP)  # description, then the controls
@@ -136,7 +161,7 @@ class DecisionItem(QFrame):
         categories = controller.categories_by_key() if categories is None else categories
         existing = categories.get(name_key(self.best)) if self.best else None
         self.search_text = " ".join([d["file_name"] for d in docs] + [existing["name"] if existing else self.best]
-                                    ).casefold()             # what the page's search looks at
+                                    + [name for name, _ in self.matches]).casefold()   # what the search looks at
         self._configure(first, existing, bool(categories))
 
     # -- what the item asks ------------------------------------------------------------------------------------
@@ -156,7 +181,11 @@ class DecisionItem(QFrame):
             self.line.setToolTip(f"It was at {first['source_path']}")
         else:
             only = "  ·  Only one suggestion found" if len(first["suggestions"]) == 1 else ""
-            if existing:
+            none = "No close match among your categories.  " if first.get("abstained") else ""
+            if self.matches:    # decided from the content; new names stay under "Choose another…" (A0)
+                self.line.setText("Best matches among your categories:")
+                self.one_click = True
+            elif existing:
                 self.line.setText(f"Suggested category: {existing['name']}{only}")
                 shown = existing["name"] if len(existing["name"]) <= 32 else existing["name"][:31] + "…"
                 self.primary.setText(f"File in {shown}".replace("&", "&&"))
@@ -168,8 +197,8 @@ class DecisionItem(QFrame):
                 self.primary.setToolTip(f"Create category '{self.best}' and file")
                 self.one_click = True
             else:  # categories exist: a new one is never created with one click (decision record B2)
-                self.line.setText(f"Suggested new category: {self.best}{only}" if self.best
-                                  else "No suggested name. Choose a category.")
+                self.line.setText(f"{none}Suggested new category: {self.best}{only}" if self.best
+                                  else f"{none}No suggested name. Choose a category.")
                 self.primary.setText("Choose category…")
                 self.choose.hide()
             if first["status_reason"]:
@@ -191,7 +220,8 @@ class DecisionItem(QFrame):
     def _arrange(self):
         """The buttons at the right of the card, using its full width; under the description while details are
         open beside the page, or when the card is too narrow for both."""
-        side = not self.stacked and self.width() - self.actions.sizeHint().width() >= TEXT_MIN
+        room = self.width() - self.actions.sizeHint().width()
+        side = not self.stacked and room >= (MATCH_MIN if self.matches else TEXT_MIN)
         direction = QBoxLayout.LeftToRight if side else QBoxLayout.TopToBottom
         if self.body.direction() != direction:
             self.body.setDirection(direction)

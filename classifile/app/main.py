@@ -461,6 +461,18 @@ class MainWindow(QWidget):
         self.close_toggle = QCheckBox("Ask before closing when documents are waiting")
         self.close_toggle.toggled.connect(
             lambda on: self.org.catalog.set_setting("close_notice", "on" if on else "off"))
+        matching = QLabel("MATCHING")
+        matching.setObjectName("section")
+        self.matching_label = QLabel()
+        self.matching_label.setWordWrap(True)
+        self.matching_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        self.matching_button = QPushButton("Update matching")
+        self.matching_button.setToolTip("Learn again from the documents you filed. The new version is checked, and "
+                                        "the previous one is kept if it did better.")
+        self.matching_button.clicked.connect(self.update_matching)
+        match_row = box(QHBoxLayout(), spacing=GROUP)
+        match_row.addWidget(self.matching_label, 1)
+        match_row.addWidget(self.matching_button, 0, Qt.AlignTop)
         about = QLabel("ABOUT")
         about.setObjectName("section")
         about_text = QLabel("ClassiFile organizes copies of your documents into categories; original files stay "
@@ -472,6 +484,9 @@ class MainWindow(QWidget):
         v.addSpacing(SECTION)
         v.addWidget(behaviour)
         v.addWidget(self.close_toggle)
+        v.addSpacing(SECTION)
+        v.addWidget(matching)
+        v.addLayout(match_row)
         v.addSpacing(SECTION)
         v.addWidget(about)
         v.addWidget(about_text)
@@ -509,9 +524,12 @@ class MainWindow(QWidget):
     def waiting(self):
         return [d for d in self.org.catalog.documents(None) if d["status"] in WAITING]
 
-    def decision_docs(self, recheck=True):
+    def decision_docs(self, recheck=True, cats=None):
         """The waiting documents with what their cards show, from one query. recheck: look on disk for every
-        original again; otherwise only for documents not looked for yet."""
+        original again; otherwise only for documents not looked for yet. cats: the categories as they are now.
+        Once matching is in use, a document's stored text is read and scored the first time it is seen."""
+        names = {c["id"]: c["name"] for c in (self.org.catalog.categories() if cats is None else cats)}
+        matching = bool(self.org.matcher())
         docs = []
         for d in self.org.catalog.waiting_documents():
             if d["status"] not in WAITING:
@@ -525,8 +543,11 @@ class MainWindow(QWidget):
                 missing = self.missing[d["id"]]
             d = dict(d)
             del d["analysis_json"]
+            ready = d["status"] == "needs_decision" and not missing
+            matches = [(names[c], n) for c, n in self.org.matches(d["id"], names)] if ready and matching else []
             docs.append(d | {"missing": missing, "suggestions": analysis.get("suggestions", []),
-                             "unit": analysis.get("unit", "page")})
+                             "unit": analysis.get("unit", "page"), "matches": matches,
+                             "abstained": ready and matching and not matches})
         self.missing = {d["id"]: d["missing"] for d in docs}
         return sorted(docs, key=lambda d: d["id"] in self.deferred)
 
@@ -564,13 +585,13 @@ class MainWindow(QWidget):
         """Bring the window in line with the catalog, in place: rows, cards and counts that did not change are
         left alone, so what is typed, opened, selected or scrolled to stays. Five queries, whatever the size.
         recheck: look on disk for the waiting documents' originals again (a background read ending is no reason)."""
-        self.waiting_docs = waiting = self.decision_docs(recheck)
+        cats = self._fill_categories()
+        self.waiting_docs = waiting = self.decision_docs(recheck, cats)
         n = len(waiting)
         if self.decide_doc not in [d["id"] for d in waiting]:
             self.decide_doc = None  # filed or removed: its details close
         self.setWindowTitle(f"ClassiFile — {n} waiting" if n else "ClassiFile")
         self.decide_count.setText(str(n) if n else "")
-        cats = self._fill_categories()
         if self.view[0] == "category" and self.cat_model.get(self.view[1]) is None:
             self.view = (ALL, None)  # the category was deleted
         key = self.view[0]
@@ -582,6 +603,7 @@ class MainWindow(QWidget):
             self.select_docs(select_docs)
         if key == SETTINGS:
             self._show_root()
+            self._show_matching()
             self.close_toggle.blockSignals(True)
             self.close_toggle.setChecked(self.org.catalog.get_setting("close_notice") != "off")
             self.close_toggle.blockSignals(False)
@@ -1140,6 +1162,52 @@ class MainWindow(QWidget):
         if ids:
             self.pick_category(f"File {len(ids)} document{'s' if len(ids) > 1 else ''} in…", "File",
                                lambda kind, cat_id, name: self.file_docs(ids, name))
+
+    # -- matching (decision record B4): updated only on request, versioned and checked -------------------------
+    def _show_matching(self):
+        m = self.org.matching_status()
+        since = m["since"]
+        if "version" not in m:
+            text = ("ClassiFile hasn't learned your categories yet. It learns from the documents you filed, then "
+                    "offers the categories that fit a new document best."
+                    + (f" {since} filed document{'s are' if since != 1 else ' is'} ready to learn from." if since
+                       else ""))
+        else:
+            text = (f"Version {m['version']}: learned from {m['documents']} documents in {m['categories']} "
+                    f"categories on {short_date(m['created_at'])}. "
+                    + (f"{since} document{'s' if since != 1 else ''} filed or moved since." if since
+                       else "Nothing was filed or moved since."))
+        self.matching_label.setText(text)
+
+    def update_matching(self):
+        self.matching_button.setEnabled(False)
+        self.matching_button.setText("Updating…")
+
+        def done(result):
+            self.moving -= 1
+            self.matching_button.setEnabled(True)
+            self.matching_button.setText("Update matching")
+            if isinstance(result, ValueError):
+                text = str(result)
+            elif isinstance(result, Exception):
+                text = f"Something went wrong while updating matching ({type(result).__name__}). Try again."
+            elif result["outcome"] == "up to date":
+                text = "Matching is already up to date."
+            else:
+                found = result["check"]
+                since = found and f"{found['documents']} document{'s' if found['documents'] != 1 else ''} filed since"
+                if result["outcome"] == "kept previous":
+                    text = (f"Kept version {result['version']}: the new one did worse on the {since} (your category "
+                            f"first for {found['new']}, against {found['previous']}).")
+                else:
+                    text = (f"Matching updated (version {result['version']}): {result['documents']} documents in "
+                            f"{result['categories']} categories."
+                            + (f" On the {since}, it put your category first for {found['new']}; the previous "
+                               f"version for {found['previous']}." if found and found["documents"] else ""))
+            self.toast.show_message(text, ms=10000)
+            self.refresh()
+
+        self._background(self.org.update_matching, done)
 
     def _background(self, job, done):
         """Run job() off this thread, then done(result or the exception) in the window."""

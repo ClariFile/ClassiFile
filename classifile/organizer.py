@@ -2,6 +2,7 @@
 import os
 from pathlib import Path
 
+from classifile import matching
 from classifile.analysis.candidates import analyze, name_key
 from classifile.analysis.summary import summarize
 import json
@@ -35,6 +36,8 @@ def read_and_analyze(path):
 class Organizer:
     def __init__(self, catalog):
         self.catalog = catalog
+        self._matcher = False       # False: not loaded yet; None: no usable model; else (version row, Matcher)
+        self._ranked = {}           # doc_id -> its categories ranked by the model in use
 
     @property
     def output_root(self):
@@ -295,6 +298,62 @@ class Organizer:
         if doc["status"] == "needs_decision":
             self.catalog.set_document_status(doc_id, "needs_decision", None)  # the "no longer at" note is resolved
         return path
+
+    # -- matching to existing categories by content (decision record B4, CP3) ---------------------------------
+    def matcher(self):
+        """(version row, Matcher) for the model in use, or None when there is none this version can read."""
+        if self._matcher is False:
+            row = self.catalog.active_matcher()
+            bundle = json.loads(row["bundle_json"]) if row else {}
+            usable = (bundle.get("representation"), bundle.get("scorer")) == (matching.REPRESENTATION, matching.SCORER)
+            self._matcher, self._ranked = ((row, matching.Matcher(bundle)) if usable else None), {}
+        return self._matcher
+
+    def matches(self, doc_id, live):
+        """The existing categories that fit a waiting document best: up to three (category id, documents of that
+        category the model was trained on), best first. Empty when there is no model, or when no category is a
+        good match: the abstention baseline (E4). live: ids of the categories that exist now."""
+        if not self.matcher():
+            return []
+        _, model = self.matcher()
+        if doc_id not in self._ranked:      # once per document and model: the stored text is read and scored
+            self._ranked[doc_id] = model.rank(self.catalog.texts(doc_id).get(doc_id, ""))
+        ranked = [(c, s) for c, s in self._ranked[doc_id] if c in live]
+        return [(c, model.bundle["documents"][c]) for c, _ in ranked[:3]] if model.good(ranked) else []
+
+    def matching_status(self):
+        """{"version", "created_at", "documents", "categories", "since"} for the model in use (since: documents
+        filed or moved after it was trained), or {"since"} alone when there is none."""
+        labels = self.catalog.explicit_labels()
+        if not self.matcher():
+            return {"since": len(labels)}
+        row, model = self.matcher()
+        trained = model.bundle["training"]
+        return {k: row[k] for k in ("version", "created_at", "documents", "categories")} | {
+            "since": sum(trained.get(d) != c for d, c in labels.items())}
+
+    def update_matching(self):
+        """Retrain on the documents the user filed, deliberately (A7): the new version is checked against the one
+        in use and replaces it unless it does worse; either way it is recorded with what the check found.
+        Returns {"outcome": "updated" | "kept previous" | "up to date", "version", "documents", "categories",
+        "check"}. Raises ValueError with a plain reason when there is too little to learn from."""
+        texts, labels = self.catalog.texts(), self.catalog.explicit_labels()
+        if len({c for d, c in labels.items() if texts.get(d)}) < 2:
+            raise ValueError("Matching needs filed documents in at least two categories.")
+        self._matcher = False               # read the catalog's state, not a remembered one
+        current = self.matcher()
+        if current and current[1].bundle["training"] == labels:
+            return {"outcome": "up to date", "version": current[0]["version"],
+                    "documents": current[0]["documents"], "categories": current[0]["categories"], "check": None}
+        bundle = matching.train(texts, labels)
+        found = matching.check(texts, labels, current[1].bundle) if current else None
+        keep = found is None or found["new"] >= found["previous"]
+        version = self.catalog.add_matcher(bundle, found, keep)
+        self._matcher = False
+        return {"outcome": "updated" if keep else "kept previous",
+                "version": version if keep else current[0]["version"],
+                "documents": sum(bundle["documents"].values()), "categories": len(bundle["documents"]),
+                "check": found}
 
     def discard_unused_category(self, cat_id):
         """A category with no documents (e.g. created for a filing that failed) is removed again."""

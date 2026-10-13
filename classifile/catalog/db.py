@@ -168,6 +168,18 @@ MIGRATIONS = [
         at TEXT NOT NULL
     );
     """,
+    # v8: matching to existing categories by content (CP3): versioned models, each with what its check found
+    """
+    CREATE TABLE matchers (
+        version INTEGER PRIMARY KEY,
+        created_at TEXT NOT NULL,
+        status TEXT NOT NULL,          -- active | previous | rejected (it did worse than the one before)
+        documents INTEGER NOT NULL,    -- filed documents it was trained on
+        categories INTEGER NOT NULL,
+        check_json TEXT,               -- how it compared with the version before (NULL for the first)
+        bundle_json TEXT NOT NULL      -- preprocessing, vectorizer, category mapping, decision settings
+    );
+    """,
 ]
 
 
@@ -395,6 +407,44 @@ class Catalog:
         row = self.one("SELECT e.first_page_lines_json FROM extractions e JOIN snapshots s ON e.snapshot_id = s.id"
                        " WHERE s.document_id = ?", doc_id)
         return json.loads(row[0]) if row and row[0] else []
+
+    def texts(self, doc_id=None):
+        """{document id: its full extracted text} (native text, speaker notes and OCR text of every unit), for one
+        document or for all. Internal: for matching only, never shown or logged."""
+        rows = self.all("SELECT s.document_id, u.text, u.notes, u.ocr_text FROM extraction_units u"
+                        " JOIN extractions e ON e.id = u.extraction_id JOIN snapshots s ON s.id = e.snapshot_id"
+                        + (" WHERE s.document_id = ?" if doc_id else "") + " ORDER BY s.document_id, u.unit_index",
+                        *([doc_id] if doc_id else []))
+        out = {}
+        for r in rows:
+            out.setdefault(r[0], []).extend(t for t in r[1:] if t)
+        return {d: "\n".join(parts) for d, parts in out.items()}
+
+    def explicit_labels(self):
+        """{document id: category id} for filed documents whose category the user chose or corrected (A7): the
+        latest explicit choice. Placements the app made by itself are no confirmation and are left out."""
+        return dict(self.all(
+            "SELECT m.document_id, m.category_id FROM memberships m JOIN documents d ON d.id = m.document_id"
+            " JOIN categories c ON c.id = m.category_id WHERE m.role = 'primary' AND m.status = 'active'"
+            " AND m.provenance IN ('user-confirmed', 'user-corrected') AND d.status = 'filed'"
+            " AND c.deleted_at IS NULL"))
+
+    def add_matcher(self, bundle, found, keep):
+        """Store a trained model as the next version. keep: it becomes the active one (the one before stays as
+        "previous"); otherwise it is recorded as rejected and the active one stays. Returns the version."""
+        with self.lock, self.db:
+            if keep:
+                self.db.execute("UPDATE matchers SET status = 'previous' WHERE status = 'active'")
+            return self.db.execute(
+                "INSERT INTO matchers (created_at, status, documents, categories, check_json, bundle_json)"
+                " VALUES (?, ?, ?, ?, ?, ?)",
+                (now(), "active" if keep else "rejected", sum(bundle["documents"].values()),
+                 len(bundle["documents"]),
+                 json.dumps(found) if found else None, json.dumps(bundle))).lastrowid
+
+    def active_matcher(self):
+        """The model in use (version, created_at, documents, categories, bundle_json), or None."""
+        return self.one("SELECT * FROM matchers WHERE status = 'active'")
 
     # -- categories --------------------------------------------------------------------------
     def categories(self):

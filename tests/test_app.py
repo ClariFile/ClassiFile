@@ -1005,3 +1005,59 @@ def test_the_list_fits_beside_the_details_panel(app, samples, make_org):
     QTest.keyClick(item.picker.field, Qt.Key_Escape)
     assert not item.expanded.isVisible() and item.hasFocus()
     _close(w, rec)
+
+
+def test_cards_offer_the_best_matching_categories_once_matching_is_updated(app, make_org, tmp_path):
+    from test_matching import SUBJECTS, _add, _pdf
+    from classifile.organizer import read_and_analyze
+
+    org, src = make_org(), tmp_path / "src"
+    for n in range(3):
+        for subject in SUBJECTS:
+            _add(org, src, subject, n)
+    known = org.catalog.document(_add(org, src, "Networks", 7, file_it=False))["file_name"]
+    _pdf(src / "unknown.pdf", "zebra giraffe antelope savanna migration herd", 1)   # none of the three subjects
+    org.record(src / "unknown.pdf", *read_and_analyze(src / "unknown.pdf"))
+
+    w, rec = _window(make_org)
+    w.review()
+    assert all(not i.matches for i in w.decision.items)            # nothing is learned until the user asks
+    w.show_view(SETTINGS)
+    assert "hasn't learned your categories yet" in w.matching_label.text()
+    assert "9 filed documents are ready" in w.matching_label.text()
+    w.matching_button.click()
+    assert not w.matching_button.isEnabled()                       # off the interface thread
+    _pump(app, lambda: w.matching_button.isEnabled())
+    assert w.toast.label.text() == "Matching updated (version 1): 9 documents in 3 categories."
+    assert w.matching_label.text().startswith("Version 1: learned from 9 documents in 3 categories on ")
+    assert w.matching_label.text().endswith("Nothing was filed or moved since.")
+
+    w.review()
+    item, other = _item(w, known), _item(w, "unknown.pdf")
+    assert item.matches[0] == ("Networks", 3) and len(item.matches) == 3   # ranked, the best first
+    assert item.line.text() == "Best matches among your categories:" and item.match_rows.isVisible()
+    assert [b.text() for b in item.match_buttons][0] == "File in Networks" and item.primary is item.match_buttons[0]
+    reasons = [x.full for x in item.match_rows.findChildren(QLabel)]
+    assert reasons[0] == "Similar to 3 documents in Networks" and len(reasons) == 3
+    shown = " ".join(reasons + [b.text() for b in item.match_buttons])
+    assert "%" not in shown and not any(a.isdigit() and b == "." for a, b in zip(shown, shown[1:]))  # no scores
+    assert item.choose.isVisible() and not item.expanded.isVisible()       # new names only under "Choose another…"
+    assert not other.matches and not other.match_rows.isVisible()          # no category fits: a new name instead
+    assert other.line.text().startswith("No close match among your categories.  Suggested new category: ")
+    assert other.primary.text() == "Choose category…"
+
+    second = item.matches[1][0]
+    item.match_buttons[1].click()                                  # any of the three files with one click
+    _pump(app, lambda: not w.filing)
+    assert w.toast.label.text() == f"Filed {known} in {second}"
+    assert [d["file_name"] for d in w.waiting()] == ["unknown.pdf"]
+    w.show_view(SETTINGS)
+    assert "1 document filed or moved since." in w.matching_label.text()
+    w.matching_button.click()
+    _pump(app, lambda: w.matching_button.isEnabled())
+    assert w.toast.label.text().startswith("Matching updated (version 2): 10 documents in 3 categories. On the 1 "
+                                           "document filed since, it put your category first for ")
+    w.matching_button.click()
+    _pump(app, lambda: w.matching_button.isEnabled())
+    assert w.toast.label.text() == "Matching is already up to date."
+    _close(w, rec)
