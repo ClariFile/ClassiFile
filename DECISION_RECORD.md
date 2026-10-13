@@ -1,6 +1,6 @@
 # Decision Record — ClassiFile (Offline Document Organizer)
 
-Version 2.3 · 2026-10-13
+Version 2.4 · 2026-10-13
 
 **Names**
 - **ClariFile:** the suite.
@@ -177,10 +177,15 @@ Version 2.3 · 2026-10-13
   - No automatic filing into a category until it holds at least 3 documents the user confirmed. Until then its documents wait, with the three best categories.
   - Automatically filed documents are machine-assigned and never train the matcher. Only the user's confirmations and moves do (A7).
   - A "Filed automatically" view lists what the app filed by itself, each with its reason and a one-click Move to….
+  - "Looks right" in that view, for one document or many selected at once, records the user's confirmation: those documents become training examples (2.4). Moving a document stays the correction.
+  - Waiting documents are looked at again when a category reaches 3 confirmed documents, and after a model update or a change of level (2.4).
+  - Selected-category mode (A5) is a setting beside the level: "All categories" or "Only the ones I tick", with a checklist. In selected mode a document is filed automatically only when its best category among all categories is a ticked one (B1). The active mode is always shown at the top of the main window, with a link to change it (2.4).
 - **[Decision] Grouping new subjects** (2.3; a narrow exception to the clustering deferral in F).
   - Only waiting documents that match no existing category are grouped. Nothing is ever merged into an existing category, and no folder is created by the app itself.
   - A group has at least 2 documents. It is shown as one question: its documents, the shared key words as the reason, and the suggested names. The user names the folder once and can untick documents before confirming.
   - It is tested on development data first (each of the user's categories held out in turn), and the user sees that report before it goes into the app.
+  - Result (development data, 2.4): with each of the 11 categories held out, 43 of the 83 documents match no existing category; the other 40 are taken for an existing one and are never grouped. Joining documents while their average similarity is at least 0.15, 30 of the 43 land in a group, with 2 documents of another category mixed in; at 0.20, 20 do, with none mixed. A held-out subject usually comes back as two or three groups plus single documents. The user chose 0.15. These counts describe development data; they are not accuracy estimates.
+  - The question shows the shared key words first, then each document's file name with a Details link and a tick. The name field starts empty, with the suggested names as optional choices below it (subject names are usually not written in the documents, E1) (2.4).
 - **[Decision]** Effort is reported as four numbers:
   - pending documents;
   - distinct questions;
@@ -259,6 +264,7 @@ Version 2.3 · 2026-10-13
   - Removing a document's final membership leaves a retained, unfiled app copy. It is never a deletion.
   - "Remove membership" is recorded separately from an explicit "incorrect category" judgment.
 - **[Decision]** Each membership has its own copy.
+- **[Decision] Also belongs to…** (2.4): a right-click action on a filed document. It adds a secondary membership (A6) with a second verified copy in that category's folder. The primary category, and what the matcher learns from, do not change.
 - **[Decision] Move to…** (one or several filed documents).
   - Replaces the primary category by the primary-replacement rules above: the new copy is made from a verified copy, the old copy is removed only if it is unchanged, edited copies stay in place and are flagged, nothing is ever overwritten.
   - An interrupted move is finished at the next start.
@@ -515,3 +521,4 @@ Partial checkpoints are not the completed v1. Evaluation runs alongside developm
 - **2.1 (2026-10-12):** E1: result on development data recorded. No name-based policy reproduces the user's regrouped library (all 80 kept-together pairs fragmented; the shared-name upper bound keeps 8 and over-merges 4), because the folders are subject names that usually are not written in the documents. CP3 (matching to existing categories by content) comes first; CP4 needs a plan for naming new subjects. No rule changed. Authorized by the user.
 - **2.2 (2026-10-13):** A0: the goal, stated by the user. ClassiFile is an automatic categorizer and choosing by hand is the fallback; it decides from the document's content, files automatically when the match is clear, asks only when it is unsure, and suggests new names only when no existing category fits. No other entry changed. Authorized by the user.
 - **2.3 (2026-10-13):** B2: cards offer the three best-matching existing categories as one-click choices, and suggested new names only when no category is a good match. C: E2 result (nearest centroid selected) and E4 result (one global level on the best category's lead) recorded, with the validation measurement. B2 and Part E: the user chose Strict for automatic filing, with no automatic filing into a category that holds fewer than 3 confirmed documents, a "Filed automatically" view, and the level kept as a setting whose changes are recorded. B2 and F: grouping of waiting documents that match no existing category, approved as a narrow exception to the clustering deferral, shown to the user on development data first. D: selected-category mode and "Also belongs to" move from CP3 to CP4. `data\final-eval` stays untouched until CP5. Authorized by the user.
+- **2.4 (2026-10-13):** B2: grouping new subjects goes into the app at an average similarity of 0.15, with the development result recorded; the question shows the key words first, an empty name field with the suggested names as optional choices, a tick and a Details link per document. B2: "Looks right" in the "Filed automatically" view records the user's confirmation, for one or many documents; waiting documents are looked at again when a category reaches 3 confirmed documents; selected-category mode is a setting ("All categories" or "Only the ones I tick"), and the active mode is always shown at the top of the main window. B5: "Also belongs to…" as a right-click action making a second verified copy. Authorized by the user.
