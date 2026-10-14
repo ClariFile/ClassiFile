@@ -18,7 +18,7 @@ from PySide6.QtCore import (
 from PySide6.QtGui import QDesktopServices, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QButtonGroup, QCheckBox, QComboBox, QFileDialog, QFrame, QHBoxLayout,
-    QHeaderView, QInputDialog, QLabel, QLineEdit, QMenu, QMessageBox, QPushButton, QSizePolicy, QSplitter,
+    QHeaderView, QInputDialog, QLabel, QLayout, QLineEdit, QMenu, QMessageBox, QPushButton, QSizePolicy, QSplitter,
     QListView, QScrollArea, QStackedWidget, QStyleFactory, QTreeView, QVBoxLayout, QWidget,
 )
 
@@ -29,7 +29,7 @@ from classifile.app.decision import DecisionPage
 from classifile.app.details import DetailsPanel
 from classifile.app.models import DOC, SORTS, CategoryModel, DocumentFilter, DocumentModel, sorted_by_name
 from classifile.app.widgets import (
-    CHECKLIST_MAX, DATE_COLUMN_MIN, DETAILS_MAX, DETAILS_MIN, DETAILS_WIDTH, FILE_ICON, GROUP, LIST_MIN, MIN_WINDOW,
+    CHECKLIST_MAX, DATE_COLUMN_MIN, PANEL, TIGHT, DETAILS_MAX, DETAILS_MIN, DETAILS_WIDTH, FILE_ICON, GROUP, LIST_MIN, MIN_WINDOW,
     MOTION_STANDARD, NARROW, PAD, RELATED, SEARCH_MAX, SECTION, SIDEBAR_WIDTH, SUPPORTED, TOAST, TOAST_LONG,
     WIDE, WINDOW, box, motion, qt_palette, set_motion, slide_away, style_sheet, use_theme,
     DropOverlay, ElidedLabel, Notices, PickerDialog, PreviewOverlay, Toast, wrappable,
@@ -64,6 +64,26 @@ def short_date(iso):
 def stored_analysis(text):
     """A document's stored analysis, parsed once per distinct text. Shared: never change what it returns."""
     return json.loads(text) if text else {}
+
+
+def settings_card(title, sentence, *parts):
+    """One Settings topic as a titled panel: a heading, a plain sentence (optional), then its rows and controls."""
+    card = QFrame()
+    card.setObjectName("settingsCard")
+    v = box(QVBoxLayout(card), PANEL, RELATED)
+    heading = QLabel(title)
+    heading.setObjectName("heading")
+    v.addWidget(heading)
+    if sentence:
+        about = QLabel(sentence)
+        about.setObjectName("secondary")
+        about.setWordWrap(True)
+        about.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        v.addWidget(about)
+    v.addSpacing(TIGHT)
+    for part in parts:
+        v.addLayout(part) if isinstance(part, QLayout) else v.addWidget(part)
+    return card
 
 
 def recent_since():
@@ -387,6 +407,8 @@ class MainWindow(QWidget):
         self.cats_empty.setContentsMargins(GROUP, 0, GROUP, 0)
         settings = QPushButton("⚙  Settings")
         settings.setObjectName("nav")
+        settings.setProperty("prominent", True)  # outlined and set apart: easy to find
+        settings.setToolTip("Automatic filing, new folders, learning, output folder and appearance")
         settings.setCheckable(True)
         settings.clicked.connect(lambda: self.show_view(SETTINGS))
         self.nav_group.addButton(settings)
@@ -402,6 +424,7 @@ class MainWindow(QWidget):
         v.addWidget(self.cats_empty)
         v.addWidget(self.cats_none)
         v.addWidget(self.cats, 1)
+        v.addSpacing(RELATED)
         v.addWidget(settings)
         return side
 
@@ -500,8 +523,6 @@ class MainWindow(QWidget):
         page.setMinimumWidth(0)
         page.setContentsMargins(0, 0, GROUP, 0) # room for the scroll bar
         outer.setWidget(page)
-        out = QLabel("OUTPUT FOLDER")
-        out.setObjectName("section")
         self.root_label = QLabel()
         self.root_label.setWordWrap(True)
         self.root_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
@@ -510,8 +531,6 @@ class MainWindow(QWidget):
         row = box(QHBoxLayout(), spacing=GROUP)
         row.addWidget(self.root_label, 1)
         row.addWidget(self.change_root)
-        look = QLabel("APPEARANCE")
-        look.setObjectName("section")
         self.appearance = QComboBox()             # light, dark, or what Windows is set to
         self.appearance.setView(QListView())
         self.appearance.setAccessibleName("Appearance")
@@ -528,15 +547,11 @@ class MainWindow(QWidget):
             self.motion.addItem(words, name)
         self.motion.activated.connect(lambda *_: self.set_motion(self.motion.currentData()))
         motion_row = box(QHBoxLayout(), spacing=GROUP)
-        motion_row.addWidget(QLabel("Motion: panels that slide and rows that fold away"), 1)
+        motion_row.addWidget(QLabel("Motion (panels that slide, rows that fold away)"), 1)
         motion_row.addWidget(self.motion)
-        behaviour = QLabel("WHEN CLOSING")
-        behaviour.setObjectName("section")
         self.close_toggle = QCheckBox("Ask before closing when documents are waiting")
         self.close_toggle.toggled.connect(
             lambda on: self.org.catalog.set_setting("close_notice", "on" if on else "off"))
-        matching = QLabel("MATCHING")
-        matching.setObjectName("section")
         self.matching_label = QLabel()
         self.matching_label.setWordWrap(True)
         self.matching_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
@@ -555,10 +570,9 @@ class MainWindow(QWidget):
         self.auto_folders.setToolTip("Off until you turn it on")
         self.auto_folders.toggled.connect(self.set_auto_folders)
         folders_text = QLabel("When at least three waiting documents match none of your categories and clearly share "
-                              "a subject, ClassiFile creates a folder for them and names it. Two alike stay a question "
-                              "for you. You can rename it with one "
-                              "click in Filed automatically. A single document always waits for you, and in "
-                              "\u201cOnly the ones I tick\u201d mode ClassiFile asks first.")
+                              "a subject, ClassiFile creates a folder for them and names it; rename it with one click "
+                              "in Filed automatically. Two alike, or one alone, stay a question for you. In "
+                              "\u201cOnly the ones I tick\u201d mode ClassiFile always asks first.")
         folders_text.setObjectName("secondary")
         folders_text.setWordWrap(True)
         folders_text.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
@@ -568,9 +582,7 @@ class MainWindow(QWidget):
             self.auto_level.addItem(words, name)
         self.auto_level.setAccessibleName("Automatic filing level")
         self.auto_level.activated.connect(lambda *_: self.set_auto_level(self.auto_level.currentData()))
-        auto_text = QLabel("Automatic filing: a document is filed without a question when one category is "
-                           "clearly ahead of the others and already holds 3 documents you confirmed. "
-                           "Stricter levels ask you more often and make fewer mistakes.")
+        auto_text = QLabel("How sure ClassiFile must be before it files by itself")
         auto_text.setWordWrap(True)
         auto_text.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         auto_row = box(QHBoxLayout(), spacing=GROUP)
@@ -582,7 +594,7 @@ class MainWindow(QWidget):
         self.auto_scope.addItem("Only the ones I tick", "selected")
         self.auto_scope.setAccessibleName("File automatically into")
         self.auto_scope.activated.connect(lambda *_: self.set_auto_scope())
-        scope_text = QLabel("File automatically into:")
+        scope_text = QLabel("Which categories it may file into")
         scope_row = box(QHBoxLayout(), spacing=GROUP)
         scope_row.addWidget(scope_text, 1)
         scope_row.addWidget(self.auto_scope)
@@ -591,35 +603,24 @@ class MainWindow(QWidget):
         self.auto_ticks.setFrameShape(QFrame.NoFrame)
         self.auto_ticks.setMaximumHeight(CHECKLIST_MAX)
         self.scope_boxes = []
-        about = QLabel("ABOUT")
-        about.setObjectName("section")
         about_text = QLabel("ClassiFile organizes copies of your documents into categories; original files stay "
                             "unchanged. Part of ClariFile.")
         about_text.setWordWrap(True)
-        v = box(QVBoxLayout(page))
-        v.addWidget(out)
-        v.addLayout(row)
-        v.addSpacing(SECTION)
-        v.addWidget(behaviour)
-        v.addWidget(self.close_toggle)
-        v.addSpacing(SECTION)
-        v.addWidget(look)
-        v.addLayout(look_row)
-        v.addLayout(motion_row)
-        v.addSpacing(SECTION)
-        v.addWidget(matching)
-        v.addLayout(match_row)
-        v.addWidget(self.matching_log)
-        v.addSpacing(GROUP)
-        v.addLayout(auto_row)
-        v.addLayout(scope_row)
-        v.addWidget(self.auto_ticks)
-        v.addSpacing(GROUP)
-        v.addWidget(self.auto_folders)
-        v.addWidget(folders_text)
-        v.addSpacing(SECTION)
-        v.addWidget(about)
-        v.addWidget(about_text)
+        # One titled panel per topic, the most used first: a heading, a plain sentence, then the controls.
+        v = box(QVBoxLayout(page), spacing=GROUP)
+        v.addWidget(settings_card(
+            "Automatic filing", "A document is filed without a question when one category is clearly ahead of the "
+            "others and already holds 3 documents you confirmed. Stricter levels ask you more often and make fewer "
+            "mistakes.", auto_row, scope_row, self.auto_ticks, self.auto_folders, folders_text))
+        v.addWidget(settings_card(
+            "Learning", "ClassiFile learns from the documents you file, confirm or move. It updates by itself after "
+            "every 10 of them, and keeps the previous version if the new one does worse.",
+            match_row, self.matching_log))
+        v.addWidget(settings_card("Output folder", "Copies of your documents are filed here. The originals are "
+                                  "never changed.", row))
+        v.addWidget(settings_card("Appearance", "", look_row, motion_row))
+        v.addWidget(settings_card("When closing", "", self.close_toggle))
+        v.addWidget(settings_card("About", "", about_text))
         v.addStretch(1)
         return outer
 

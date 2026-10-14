@@ -84,6 +84,13 @@ QPushButton#nav {{ text-align: left; border: none; background: transparent; colo
                    max-height: none; }}
 QLabel#count {{ font-size: {TEXT_SECONDARY}px; color: {t['secondary']}; }}
 QPushButton#nav:checked {{ background: {t['nav']}; border-left: {BAR}px solid {t['accent']}; }}
+QPushButton#nav[prominent="true"] {{ border: {HAIR}px solid {t['control']}; border-radius: {RADIUS_CONTROL}px;
+                                     margin: 0 {GROUP - TIGHT}px; padding-left: {GROUP - TIGHT}px;
+                                     font-weight: {WEIGHT_STRONG}; background: {t['base']}; }}
+QPushButton#nav[prominent="true"]:checked {{ background: {t['nav']}; border-left: {BAR}px solid {t['accent']}; }}
+QPushButton#nav[prominent="true"]:hover {{ background: {t['hover']}; }}
+QFrame#settingsCard {{ background: {t['base']}; border: {HAIR}px solid {t['divider']};
+                       border-radius: {RADIUS_PANEL}px; }}
 QPushButton#nav:hover {{ background: {t['hover']}; }}
 QPushButton#nav:focus {{ background: {t['hover']}; }}
 /* The lists keep a border of one colour or none, so focus is seen and nothing moves. */
