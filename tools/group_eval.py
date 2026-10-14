@@ -27,7 +27,7 @@ from pathlib import Path
 
 from classifile.catalog.db import default_data_dir
 from classifile.analysis.candidates import name_key
-from classifile.matching import FOLDER_LEVEL, GOOD_MATCH, GROUP_LEVEL, group_name, Centroids, fit_idf, lead, shared_words, similar_groups, vector
+from classifile.matching import FOLDER_LEVEL, FOLDER_MIN, GOOD_MATCH, GROUP_LEVEL, group_name, Centroids, fit_idf, lead, shared_words, similar_groups, vector
 from tools.match_eval import csv_families, families, load
 
 
@@ -104,17 +104,20 @@ def report(docs, rows, level, out=print):
             out(f"      suggested names: {'; '.join(n for n, _ in names.most_common(3)) or '(none)'}")
 
 
-def replay(docs, fam, level=FOLDER_LEVEL):
+def replay(docs, fam, level=FOLDER_LEVEL, least=FOLDER_MIN):
     """Automatic new folders, each category held out in turn: one row per category with the folders the app would
     create, each {"own", "others", "kind", "name", "named"}. kind: "new subject" (only the held-out category's
     documents), "mixed" (several categories), "known subject" (only documents of one category the app has).
-    named: "repeated" (suggested for several of its documents), "best" or None (no free name: stays a question)."""
+    named: "repeated" (suggested for several of its documents), "best" or None (no free name: stays a question).
+    least: the fewest documents a folder is made for (smaller groups stay questions)."""
     rows = []
     for r in evaluate(docs, fam, level):
         taken = {name_key(d["category"]) for d in docs if d["category"] != r["category"]}
         folders = []
         for g in r["groups"]:
             members = g["own"] + g["others"]
+            if len(members) < least:
+                continue                        # a smaller group stays a question for the user
             cats = {docs[i]["category"] for i in members}
             kind = "mixed" if len(cats) > 1 else "new subject" if g["own"] else "known subject"
             name = group_name([docs[i]["suggested"] for i in members], taken)
@@ -125,8 +128,8 @@ def replay(docs, fam, level=FOLDER_LEVEL):
     return rows
 
 
-def report_replay(docs, rows, level, out=print):
-    out(f"Automatic new folders at a similarity of {level}: {len(docs)} development documents, "
+def report_replay(docs, rows, level, out=print, least=FOLDER_MIN):
+    out(f"Automatic new folders at a similarity of {level}, groups of at least {least}: {len(docs)} development documents, "
         f"{len(rows)} categories, each held out in turn")
     out("\nPer held-out category: documents / unmatched | folders: new subject, mixed, known subject | "
         "the held-out subject comes back as")
@@ -169,6 +172,7 @@ def main(argv=None):
     ap.add_argument("--level", type=float, default=GROUP_LEVEL)
     ap.add_argument("--compare", nargs="*", type=float, help="print the counts at these levels instead")
     ap.add_argument("--folders", action="store_true", help="replay automatic new folders instead (record 2.6)")
+    ap.add_argument("--least", type=int, default=FOLDER_MIN, help="with --folders: the fewest documents per folder")
     ap.add_argument("--out", type=Path, help="also save the report here (never overwritten)")
     ap.add_argument("--catalog", type=Path, default=default_data_dir() / "catalog.sqlite3")
     a = ap.parse_args(argv)
@@ -189,7 +193,7 @@ def main(argv=None):
     lines = []
     if a.folders:
         level = FOLDER_LEVEL if a.level == GROUP_LEVEL else a.level
-        report_replay(docs, replay(docs, fam, level), level, lines.append)
+        report_replay(docs, replay(docs, fam, level, a.least), level, lines.append, a.least)
     else:
         report(docs, evaluate(docs, fam, a.level), a.level, lines.append)
     print("\n".join(lines))

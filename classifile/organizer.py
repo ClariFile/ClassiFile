@@ -464,20 +464,21 @@ class Organizer:
         """The folders the app would create by itself among these waiting documents: [(ids, key words, name)].
         Only in automatic mode (a level other than Off, all categories: selected-category mode asks first, A5)
         with automatic new folders switched on. Only documents no existing category matches, in groups of at
-        least two at matching.FOLDER_LEVEL; a single document waits. A group with no free name stays a question:
-        a name equal to an existing category is never reused or merged into (B1)."""
+        least matching.FOLDER_MIN at matching.FOLDER_LEVEL; smaller groups stay questions and a single document
+        waits. A group with no free name stays a question: a name equal to an existing category is never reused or
+        merged into (B1)."""
         if not (self.auto_folders() and self.auto_level() != "off" and self.auto_scope() is None and self.matcher()):
             return []
         cats = self.catalog.categories()
         live = {c["id"] for c in cats}
         unmatched = [d for d in doc_ids if (self.catalog.document(d) or {"status": ""})["status"] == "needs_decision"
                      and not self.original_missing(d) and not self.matches(d, live)]
-        if len(unmatched) < 2:
+        if len(unmatched) < matching.FOLDER_MIN:
             return []
         model = self.matcher()[1]
         vectors = matching.group_vectors({d: self._terms(d) for d in unmatched}, model.bundle)
         taken, out = {c["name_key"] for c in cats}, []
-        for ids in matching.similar_groups(vectors, matching.FOLDER_LEVEL):
+        for ids in [g for g in matching.similar_groups(vectors, matching.FOLDER_LEVEL) if len(g) >= matching.FOLDER_MIN]:
             name = matching.group_name([top_names((self.catalog.analysis(d) or {}).get("suggestions", []))
                                         for d in ids], taken)
             if name:

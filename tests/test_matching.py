@@ -410,6 +410,8 @@ def test_automatic_new_folders_only_when_switched_on_in_automatic_mode(make_org,
     assert org.folder_groups(waiting) == []                            # automatic mode only
     org.set_auto_level("strict")
     assert org.folder_groups([poems[0], zoo]) == []                    # a single unmatched document waits
+    assert org.folder_groups(poems[:2] + [zoo]) == []                  # a pair stays a question (record 2.7)
+    assert [ids for ids, _ in org.new_subject_groups(poems[:2] + [zoo])] == [sorted(poems[:2])]
 
     (cat_id, filed), = org.create_folders(waiting)
     assert sorted(filed) == sorted(poems) and org.catalog.document(zoo)["status"] == "needs_decision"

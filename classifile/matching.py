@@ -74,6 +74,7 @@ AUTO_MIN_CONFIRMED = 3      # no automatic filing into a category with fewer doc
 NEAR_TEXT = 0.9     # documents this similar count as versions of one another (a format twin, a revision)
 GROUP_LEVEL = 0.15  # [Default] unmatched waiting documents this alike on average form a group (B2); see tools.group_eval
 FOLDER_LEVEL = 0.20  # groups this alike become a folder by themselves (B2 "Automatic new folders", record 2.6)
+FOLDER_MIN = 3       # and only groups of at least this many (record 2.7): pairs stay a question for the user
 AUTO_UPDATE_EVERY = 10  # matching updates by itself after this many new confirmations or moves (A7, record 2.6)
 CHECK_FOLDS = 5
 
