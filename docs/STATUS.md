@@ -1,6 +1,6 @@
 # ClassiFile status
 
-2026-10-13 · decision record version 2.5
+2026-10-14 · decision record version 2.5
 
 ## Done
 
@@ -186,6 +186,15 @@
 - The record (2.5) now says that ClassiFile never creates a folder by itself; the discovery replay is not needed.
 - 261 automated tests.
 
+**Matcher checked on new files and retrained (2026-10-14)**
+- The owner's run on 33 new files at Strict: 21 filed automatically (20 kept, 1 moved: a file of a new subject),
+  12 waited (the owner filed them). The matcher put the owner's category first for all 28 files whose category
+  existed.
+- The accuracy-round combination was measured on the same 33 and on all 116 documents: no gain on the new files,
+  more wrong at Strict on the 116. Not adopted (`docs/ACCURACY_ROUND.md`, section 9). No code changed.
+- Matching version 3 (116 documents, 12 categories) is in use; on the 33 it puts the owner's category first for 32,
+  version 2 for 28. A copy of the catalog from before is kept beside it.
+
 ## Development results so far
 
 These counts describe development data only. They are not accuracy estimates.
@@ -324,7 +333,8 @@ These counts describe development data only. They are not accuracy estimates.
 
 ## Next
 
-1. The owner's decision on `docs/ACCURACY_ROUND.md` (adopt the combination, the key-word reason, or neither).
+1. The owner's decision on the key-word reason for the cards (`docs/ACCURACY_ROUND.md`, section 5); the
+   combination is withdrawn (section 9).
    The owner tries CP4 and the new interface in the app.
 2. The rest of interface phase 4 (motion elsewhere; Reduce motion is done for details and decision rows) and 5 (retry for unreadable documents, "Find category…", the
    written states) of `docs/UI_PROPOSAL.md`, on the owner's go-ahead.

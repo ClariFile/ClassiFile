@@ -155,3 +155,33 @@ The record defers additional representations (F, E3), so this needs the owner's 
 2. Add the key-word reason to the cards.
 3. Add documents to the three small folders. This is the change that matters.
 4. Leave embeddings for a later round.
+
+## 9. Checked on new files (2026-10-14): not adopted; the matcher was retrained instead
+
+The owner imported 33 new files (none is a byte copy of a file in any split) and ran the app at Strict: 21 were
+filed automatically and 12 waited. The owner kept 20 of the 21, moved 1, and filed the 12. 5 of the 33 are of a
+subject the owner made a new folder for, so 28 have a category that existed before.
+
+These files came after section 8, so they test it fairly. Both representations were trained on the 83 earlier
+documents (11 categories) and asked about the 33:
+
+| | Right first (of 28 whose category existed) | Filed at Strict: right / wrong | New-subject files filed (of 5) |
+|---|---|---|---|
+| In use | 28 | 20 / 1 | 1 |
+| Recommended combination | 28 | 19 / 1 | 1 |
+
+- **No gain.** The matcher in use already put the owner's category first for all 28 known files. The one wrong
+  filing is a new-subject file taken for the largest folder (lead 0.109, just over Strict). The other four
+  new-subject files waited, as they should.
+- **The 8 known files that waited** had leads from 0.06 to 0.10, all with the right category first.
+- **The same comparison on all 116 documents** (families held out in turn, as in section 2): the combination puts
+  3 more first (97 against 94 of 114), but at Strict it files 5 wrong against 3, and takes 9 of 116 new-subject
+  documents for known folders against 5. That is worse on exactly what Strict protects.
+- **Decision for the matcher:** recommendation 1 (section 8) is withdrawn. The representation stays as it is.
+
+**What did help: learning from the 33.** "Update matching" (the app's own check, done with the app closed and a
+copy of the catalog kept) trained version 3 on 116 documents in 12 categories. Each of the 33 was asked of a
+version trained without it: the owner's category first for 32, against 28 for version 2. Most of the gain is the
+new folder, which version 2 could not know. Version 2 is kept as the previous version.
+
+These counts describe development data and the owner's own run. They are not accuracy estimates.
