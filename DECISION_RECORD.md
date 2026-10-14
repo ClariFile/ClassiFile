@@ -1,6 +1,6 @@
 # Decision Record — ClassiFile (Offline Document Organizer)
 
-Version 2.5 · 2026-10-13
+Version 2.6 · 2026-10-14
 
 **Names**
 - **ClariFile:** the suite.
@@ -68,7 +68,8 @@ Version 2.5 · 2026-10-13
 **A4 [Requirement] Automatic mode**
 - Each document is analysed independently from its own content and purpose, then compared with existing categories.
 - A genuinely equivalent existing category is reused when the match is supported.
-- ClassiFile never creates a folder by itself. A new category comes only from the user's answer to a card or to a group question (2.5). The app may suggest one: a single document can justify the suggestion if it clearly supports its own category and passes duplicate and conflict checks.
+- In automatic mode the app may create a new category when the evidence supports it (2.6): a group of at least 2 waiting documents that match no existing category and group together at an average similarity of at least 0.20 (B2, "Automatic new folders"). In selected-category mode creation still asks first (A5).
+- A single unmatched document never creates a category; it waits for the user. It may justify a suggestion if it clearly supports its own category and passes duplicate and conflict checks.
 - An unmatched string alone is insufficient for a suggestion. It must describe this document, not a prerequisite, a reference or an incidental topic.
 - Ambiguous cases stay pending.
 - No folder per file.
@@ -87,7 +88,7 @@ Version 2.5 · 2026-10-13
 
 **A7 [Requirement] Learning**
 - Explicit confirmations and corrections are eligible supervised training examples by default.
-- Model updates are deliberate, versioned and validated.
+- Model updates are versioned and validated. Since 2.6 they also run by themselves in the background after every 10 new confirmations or moves, with the same check (the previous version stays in use if the new one does worse). Each update is logged in Settings and noted at the top of the window.
 
 **A8 [Requirement] Originals**
 - Source files are never moved, renamed, deleted, overwritten or edited, and their metadata is never deliberately changed. They are read only.
@@ -152,7 +153,7 @@ Version 2.5 · 2026-10-13
 - **[Decision] Category definitions.**
   - A category is defined by its name, a concise scope description when supported, and its confirmed members.
   - A founding document is provisional evidence.
-  - Definitions never widen silently as documents arrive. Automatically assigned documents never change a definition; only deliberate, validated updates do.
+  - Definitions never widen silently as documents arrive. Automatically assigned documents never change a definition; only validated updates do (A7).
 - **[Decision] Re-evaluation.**
   - Pending documents are re-evaluated when categories change.
   - Re-evaluation is separate from re-notification.
@@ -181,11 +182,16 @@ Version 2.5 · 2026-10-13
   - Waiting documents are looked at again when a category reaches 3 confirmed documents, and after a model update or a change of level (2.4).
   - Selected-category mode (A5) is a setting beside the level: "All categories" or "Only the ones I tick", with a checklist. In selected mode a document is filed automatically only when its best category among all categories is a ticked one (B1). The active mode is always shown at the top of the main window, with a link to change it (2.4).
 - **[Decision] Grouping new subjects** (2.3; a narrow exception to the clustering deferral in F).
-  - Only waiting documents that match no existing category are grouped. Nothing is ever merged into an existing category, and no folder is created by the app itself.
+  - Only waiting documents that match no existing category are grouped. Nothing is ever merged into an existing category. Groups found only at 0.15 stay questions for the user; the app creates a folder by itself only under "Automatic new folders" below (2.6).
   - A group has at least 2 documents. It is shown as one question: its documents, the shared key words as the reason, and the suggested names. The user names the folder once and can untick documents before confirming.
   - It is tested on development data first (each of the user's categories held out in turn), and the user sees that report before it goes into the app.
   - Result (development data, 2.4): with each of the 11 categories held out, 43 of the 83 documents match no existing category; the other 40 are taken for an existing one and are never grouped. Joining documents while their average similarity is at least 0.15, 30 of the 43 land in a group, with 2 documents of another category mixed in; at 0.20, 20 do, with none mixed. A held-out subject usually comes back as two or three groups plus single documents. The user chose 0.15. These counts describe development data; they are not accuracy estimates.
   - The question shows the shared key words first, then each document's file name with a Details link and a tick. The name field starts empty, with the suggested names as optional choices below it (subject names are usually not written in the documents, E1) (2.4).
+- **[Decision] Automatic new folders** (2.6; automatic mode only, A4).
+  - The app creates a folder by itself only for a group of at least 2 waiting documents that match no existing category and group together at an average similarity of at least 0.20 (no group mixed subjects at 0.20 on development data, 2.4). Groups found only at 0.15 stay questions. A single unmatched document waits for the user.
+  - Name: a name repeated across the group's documents if there is one, otherwise the best suggested name. A name that equals an existing category is never reused or merged into it (B1): the next name is tried, and without one the group stays a question.
+  - The folder is marked "New (named by ClassiFile)" with a one-click Rename, and listed with its documents and key words in "Filed automatically". Its documents are machine-assigned and never train the matcher until the user confirms them; no further automatic filing goes into it until it holds 3 confirmed documents.
+  - It is replayed on development data first (each category held out in turn: folders created, folders mixing subjects, subjects split in two), and stays off until the user has seen that report and switches it on.
 - **[Decision]** Effort is reported as four numbers:
   - pending documents;
   - distinct questions;
@@ -384,7 +390,7 @@ Each experiment lists its alternatives, data, measurements, what decides it, and
 - Measure: a comparison under identical conditions.
 - Default: full content.
 
-**E10 Discovery replay (diagnostic)** — not needed since 2.5: ClassiFile never creates a folder by itself (A4). Kept for the history of the design.
+**E10 Discovery replay (diagnostic)** — since 2.6 replaced by the held-out replay of automatic new folders (B2, CP4). Kept for the history of the design.
 - Process the development documents in automatic mode, starting from an empty taxonomy, in several orders.
 - Report:
   - categories created;
@@ -438,9 +444,10 @@ Partial checkpoints are not the completed v1. Evaluation runs alongside developm
 - Selected-category mode, with permissions through the queue (from CP3).
 - "Also belongs to" (from CP3).
 - The documented policy (E1) drives the proposer.
-- No category is created by the app itself (A4, since 2.5): single-document automatic creation is dropped. Suggested names keep the duplicate and equivalence checks of the defaults above (E5–E7).
+- Automatic new folders for groups of at least 2 unmatched waiting documents at 0.20 (A4, B2, since 2.6), off until the user has seen the development replay. A single document never creates a category. Suggested names keep the duplicate and equivalence checks of the defaults above (E5–E7).
 - Re-evaluation of pending documents.
-- Discovery replay (E10) is not needed (2.5): with no automatic creation there is no discovery to replay.
+- The replay of automatic new folders on development data, each category held out in turn (replaces E10, 2.6).
+- Matching updated by itself after every 10 new confirmations or moves (A7, 2.6).
 
 **CP5 Quality gate and freeze**
 - From validation results, the user chooses the operating point.
@@ -523,3 +530,4 @@ Partial checkpoints are not the completed v1. Evaluation runs alongside developm
 - **2.3 (2026-10-13):** B2: cards offer the three best-matching existing categories as one-click choices, and suggested new names only when no category is a good match. C: E2 result (nearest centroid selected) and E4 result (one global level on the best category's lead) recorded, with the validation measurement. B2 and Part E: the user chose Strict for automatic filing, with no automatic filing into a category that holds fewer than 3 confirmed documents, a "Filed automatically" view, and the level kept as a setting whose changes are recorded. B2 and F: grouping of waiting documents that match no existing category, approved as a narrow exception to the clustering deferral, shown to the user on development data first. D: selected-category mode and "Also belongs to" move from CP3 to CP4. `data\final-eval` stays untouched until CP5. Authorized by the user.
 - **2.4 (2026-10-13):** B2: grouping new subjects goes into the app at an average similarity of 0.15, with the development result recorded; the question shows the key words first, an empty name field with the suggested names as optional choices, a tick and a Details link per document. B2: "Looks right" in the "Filed automatically" view records the user's confirmation, for one or many documents; waiting documents are looked at again when a category reaches 3 confirmed documents; selected-category mode is a setting ("All categories" or "Only the ones I tick"), and the active mode is always shown at the top of the main window. B5: "Also belongs to…" as a right-click action making a second verified copy. Authorized by the user.
 - **2.5 (2026-10-13):** A4: the user ruled that ClassiFile never creates a folder by itself; new folders come only from the user's answer to a card or a group question, and a single document can justify a suggestion, never a creation. D/CP4: single-document automatic creation is dropped, and the discovery replay (E10) is marked not needed. C/E10: marked not needed. Authorized by the user.
+- **2.6 (2026-10-14):** correction by the user: the 2.5 wording "ClassiFile never creates a folder by itself" was Claude's phrasing, not the user's rule. A4: in automatic mode the app may create a category when the evidence supports it; a single unmatched document still waits. B2: automatic new folders for groups of at least 2 unmatched waiting documents at an average similarity of 0.20 (0.15-only groups stay questions), named from a name repeated across the group or the best suggested name, never reused or merged by name (B1), marked "New (named by ClassiFile)" with Rename and listed in "Filed automatically"; off until the user has seen a held-out replay on development data. A7: matching also updates by itself after every 10 new confirmations or moves, with the existing check, logged in Settings and noted in the window. D/CP4 and C/E10 updated to match. Authorized by the user.
