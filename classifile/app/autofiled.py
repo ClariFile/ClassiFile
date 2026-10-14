@@ -1,104 +1,283 @@
-"""The "Filed automatically" page: what the app filed by itself, each with its reason. "Looks right" records the
-user's confirmation (for one document, or for all the ticked ones); Move to… is the correction."""
-import json
-
+"""The "Filed automatically" page: what the app filed by itself, as an aligned list of name, category and review
+status. A click on a row inspects it (details open beside the list; that confirms nothing). "Looks right" records
+the user's confirmation, for one document or for all the ticked ones; Move to… is the correction. A row the user
+has just reviewed stays where it is, with its new status, until the page is left, so no row slides under the
+mouse."""
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QCheckBox, QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea, QVBoxLayout, QWidget,
+    QCheckBox, QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea, QSizePolicy, QVBoxLayout, QWidget,
 )
 
-from classifile.app.reasons import similar_reason
-from classifile.app.widgets import FILE_ICON, GROUP, PANEL, ElidedLabel, box, format_icon
+from classifile.app.decision import cap_width
+from classifile.app.widgets import (
+    BAR, COLUMNS_MIN, FILE_ICON, GROUP, RELATED, STATUS_COLUMN, TIGHT, ElidedLabel, ListRow, box, format_icon,
+    status_icon,
+)
+
+REVIEW = {"machine-assigned": ("Not reviewed", "queued"), "user-confirmed": ("Confirmed", "filed"),
+          "user-corrected": ("Moved by you", "filed")}
+NAME_STRETCH, CATEGORY_STRETCH = 3, 2
 
 
-class AutoItem(QFrame):
+def retained(widget):
+    """Hidden, it keeps its room: the columns of every row stay lined up."""
+    policy = widget.sizePolicy()
+    policy.setRetainSizeWhenHidden(True)
+    widget.setSizePolicy(policy)
+    return widget
+
+
+def action_buttons():
+    right = QPushButton("Looks right")
+    right.setObjectName("accent")
+    move = QPushButton("Move to…")
+    move.setObjectName("quiet")
+    actions = QWidget()
+    h = box(QHBoxLayout(actions))
+    h.addWidget(retained(right))
+    h.addWidget(retained(move))
+    return actions, right, move
+
+
+class AutoItem(ListRow):
     def __init__(self, doc, controller):
-        super().__init__()
-        self.setObjectName("decision")          # the same row style as a decision item
-        self.doc_id = doc["id"]
-        self.tick = QCheckBox()
+        super().__init__(controller)
+        self.doc_id, self.ids, self.narrow, self.state = doc["id"], [doc["id"]], False, None
+        self.tick = retained(QCheckBox())
         self.tick.setToolTip("Tick several documents to confirm them together")
         self.tick.setAccessibleName(f"Select {doc['file_name']}")
         icon = QLabel()
         icon.setPixmap(format_icon(doc["file_name"]).pixmap(FILE_ICON, FILE_ICON))
         self.title = ElidedLabel(doc["file_name"], "strong")
-        head = box(QHBoxLayout())
-        head.addWidget(self.tick)
-        head.addWidget(icon)
-        head.addWidget(self.title, 1)
-        why = json.loads(doc["auto_json"] or "{}").get("documents")
-        self.reason = ElidedLabel(f"Filed in {doc['category']}" + (
-            f"  ·  {similar_reason(why, doc['category'])}" if why else ""), "secondary")
-        self.right = QPushButton("Looks right")
+        self.filed_in = QLabel("Filed in")      # on the second line only: the column header says it otherwise
+        self.filed_in.setObjectName("secondary")
+        self.category = ElidedLabel()
+        self.status_icon = QLabel()
+        self.status_word = QLabel()
+        self.status_word.setObjectName("secondary")
+        self.status = QWidget()
+        h = box(QHBoxLayout(self.status), spacing=TIGHT)
+        h.addWidget(self.status_icon)
+        h.addWidget(self.status_word, 1)
+        self.status.setFixedWidth(STATUS_COLUMN)
+        self.actions, self.right, self.move = action_buttons()
         self.right.setToolTip("Confirm this category. ClassiFile learns from documents you confirm.")
-        self.right.clicked.connect(lambda: controller.looks_right([self.doc_id]))
-        self.move = QPushButton("Move to…")
         self.move.setToolTip("Wrong category? Choose the right one. Your choice is what ClassiFile learns from.")
-        self.move.clicked.connect(lambda: controller.move_docs([self.doc_id]))
-        text = box(QVBoxLayout())
-        text.addLayout(head)
-        text.addWidget(self.reason)
-        row = box(QHBoxLayout(self), (0, PANEL, 0, PANEL), GROUP)
-        row.addLayout(text, 1)
-        row.addWidget(self.right)
-        row.addWidget(self.move)
+        self.right.clicked.connect(lambda: controller.auto_page.review([self.doc_id]))
+        self.move.clicked.connect(lambda: controller.auto_page.correct([self.doc_id]))
+        self.top = box(QHBoxLayout(), spacing=RELATED)
+        for w, stretch in ((self.tick, 0), (icon, 0), (self.title, NAME_STRETCH), (self.category, CATEGORY_STRETCH),
+                           (self.status, 0), (self.actions, 0)):
+            self.top.addWidget(w, stretch)
+        self.second = QWidget()                 # narrow: the category and status under the name
+        self.sub = box(QHBoxLayout(self.second), (self.tick.sizeHint().width() + FILE_ICON + 2 * RELATED, 0, 0, 0),
+                       TIGHT)
+        self.sub.addWidget(self.filed_in)
+        v = box(QVBoxLayout(self), (RELATED - BAR, RELATED, RELATED, RELATED), TIGHT)
+        v.addLayout(self.top)
+        v.addWidget(self.second)
+        self.second.hide()
+        self.fill(doc)
+
+    def fill(self, doc):
+        """Show the document as the catalog has it now; the row itself (tick, focus) stays."""
+        state = (doc["category"], doc["provenance"])
+        if state == self.state:
+            return
+        self.state = state
+        self.category.setText(doc["category"])
+        word, icon = REVIEW.get(doc["provenance"], ("Filed by you", "filed"))
+        self.status_word.setText(word)
+        self.status_icon.setPixmap(status_icon(icon).pixmap(16, 16))
+        reviewed = doc["provenance"] != "machine-assigned"
+        self.search_text = f"{doc['file_name']} {doc['category']}".casefold()
+        if reviewed:
+            self.tick.setChecked(False)
+        for w in (self.tick, self.right, self.move):
+            w.setVisible(not reviewed)
+
+    @property
+    def reviewed(self):
+        return self.state[1] != "machine-assigned"
+
+    def set_narrow(self, narrow):
+        """Narrow: name and buttons on the first line; where it was filed, and its status, on the second."""
+        if narrow == self.narrow:
+            return
+        self.narrow = narrow
+        for w in (self.category, self.status):
+            self.top.removeWidget(w)
+            self.sub.removeWidget(w)
+        if narrow:
+            self.sub.addWidget(self.category, 1)
+            self.sub.addWidget(self.status)
+        else:
+            self.top.insertWidget(3, self.category, CATEGORY_STRETCH)
+            self.top.insertWidget(4, self.status)
+        self.second.setVisible(narrow)
+
+    def keyPressEvent(self, e):
+        if e.key() == Qt.Key_Space and not self.reviewed:
+            self.tick.toggle()
+        elif e.key() in (Qt.Key_Return, Qt.Key_Enter):
+            self.c.show_details(self.doc_id)    # inspecting; confirming takes "Looks right"
+        else:
+            super().keyPressEvent(e)
 
 
 class AutoPage(QWidget):
     def __init__(self, controller):
         super().__init__()
-        self.c, self.items, self.state = controller, [], None
+        self.c, self.items, self.query, self.inspected, self.narrow = controller, [], "", None, False
+        self.reviewed = set()                   # reviewed on this page since it was opened: they stay in view
+        self.order = {}                         # doc_id -> when it was first listed: rows keep their places
+        self.all = QCheckBox("Select all")
+        self.all.clicked.connect(lambda on: [i.tick.setChecked(on) for i in self.items if not i.reviewed])
+        self.count = QLabel()
+        self.count.setObjectName("secondary")
+        self.right = QPushButton()              # for the ticked documents, together; shown only when there are some
+        self.right.setObjectName("primary")
+        self.right.clicked.connect(lambda: self.review(self.ticked()))
+        self.clear = QPushButton("Clear")
+        self.clear.setObjectName("quiet")
+        self.clear.clicked.connect(lambda: [i.tick.setChecked(False) for i in self.items])
+        self.bar = QWidget()
+        bar = box(QHBoxLayout(self.bar), (RELATED, 0, 0, 0), GROUP)
+        for w in (self.all, self.count, self.right, self.clear):
+            bar.addWidget(retained(w))          # the bar keeps its height: the list never jumps on the first tick
+        bar.addStretch(1)
+        self.header = QWidget()                 # the column names, lined up with the rows below
+        h = box(QHBoxLayout(self.header), (RELATED, 0, RELATED, 0), RELATED)
+        h.addWidget(retained(QCheckBox()))
+        icon = QLabel()
+        icon.setPixmap(format_icon(".pdf").pixmap(FILE_ICON, FILE_ICON))
+        h.addWidget(retained(icon))
+        for text, stretch in (("NAME", NAME_STRETCH), ("FILED IN", CATEGORY_STRETCH), ("STATUS", 0)):
+            label = QLabel(text)
+            label.setObjectName("section")
+            h.addWidget(label, stretch)
+            if not stretch:
+                label.setFixedWidth(STATUS_COLUMN)
+        caption = label.sizeHint().height()
+        h.addWidget(retained(action_buttons()[0]))
+        for i in range(h.count()):              # spacers only: never seen, never focused
+            w = h.itemAt(i).widget()
+            if w is not None and w.objectName() != "section":
+                w.hide()
+        self.header.setFixedHeight(caption)
         holder = QWidget()
         self.list = box(QVBoxLayout(holder), (0, 0, GROUP, 0), 0)   # room for the scroll bar
-        self.list.addStretch(1)                                     # always last; the items go before it
+        self.list.addStretch(1)                                     # always last; the rows go before it
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
         scroll.setWidget(holder)
         self.empty = QLabel("Nothing was filed automatically.\nA document that clearly matches one of your "
-                            "categories is filed without a question and listed here with the reason.")
+                            "categories is filed without a question and listed here for you to review.")
         self.empty.setObjectName("secondary")
         self.empty.setAlignment(Qt.AlignCenter)
         self.empty.setWordWrap(True)            # a long line here would set the least width of every page
-        self.all = QCheckBox("Select all")
-        self.all.clicked.connect(lambda on: [i.tick.setChecked(on) for i in self.items])
-        self.right = QPushButton()                 # for the ticked documents, together
-        self.right.setObjectName("primary")
-        self.right.clicked.connect(lambda: self.c.looks_right(self.ticked()))
-        self.bar = QWidget()
-        bar = box(QHBoxLayout(self.bar), spacing=GROUP)
-        bar.addWidget(self.all)
-        bar.addWidget(self.right)
-        bar.addStretch(1)
-        v = box(QVBoxLayout(self))
-        v.addWidget(self.bar)
+        for w in (self.bar, self.header):       # never what sets the least width of the page
+            w.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        self.top = box(QVBoxLayout(), (0, 0, GROUP, 0), RELATED)
+        self.top.addWidget(self.bar)
+        self.top.addWidget(self.header)
+        v = box(QVBoxLayout(self), spacing=0)
+        v.addLayout(self.top)
         v.addWidget(scroll, 1)
         v.addWidget(self.empty)
 
+    # -- the user's actions ------------------------------------------------------------------------------------
+    def review(self, ids):
+        """Looks right: confirmed; the rows stay, marked Confirmed."""
+        self.reviewed.update(ids)
+        self.c.looks_right(ids)
+
+    def correct(self, ids):
+        self.reviewed.update(ids)
+        self.c.move_docs(ids)
+
+    def leave(self):
+        """The page was left: what was reviewed on it goes from the list at the next visit."""
+        self.reviewed.clear()
+
+    # -- the rows ----------------------------------------------------------------------------------------------
     def ticked(self):
         return [i.doc_id for i in self.items if i.tick.isChecked()]
 
+    def awaiting(self):
+        return sum(1 for i in self.items if not i.reviewed)
+
     def _ticks_changed(self):
-        n = len(self.ticked())
-        self.right.setText(f"Looks right ({n})" if n else "Looks right")
-        self.right.setEnabled(bool(n))
-        self.all.setChecked(bool(n) and n == len(self.items))
+        n, open_ = len(self.ticked()), [i for i in self.items if not i.reviewed]
+        self.count.setText(f"{n} selected")
+        self.right.setText(f"Looks right ({n})")
+        for w in (self.count, self.right, self.clear):
+            w.setVisible(bool(n))
+        self.all.setChecked(bool(n) and n == len(open_))
+        self.all.setEnabled(bool(open_))
 
     def show_docs(self, docs):
-        """docs: the catalog's rows for the documents the app filed by itself. Rebuilt only when they changed."""
-        docs = sorted(docs, key=lambda d: d["filed_at"] or "", reverse=True)   # the latest first
-        state = [(d["id"], d["file_name"], d["category"], d["auto_json"]) for d in docs]
-        if state == self.state:
-            return
-        self.state = state
-        for item in self.items:
-            self.list.removeWidget(item)
-            item.hide()
-            item.deleteLater()
-        self.items = [AutoItem(d, self.c) for d in docs]
-        for n, item in enumerate(self.items):
-            self.list.insertWidget(n, item)
-            item.tick.toggled.connect(self._ticks_changed)
-        self.empty.setVisible(not docs)
-        self.bar.setVisible(bool(docs))
+        """docs: the catalog's rows for the documents the app filed by itself, and those reviewed on this page
+        since it was opened. Rows are updated in place: ticks, focus and the scroll position stay."""
+        for d in docs:
+            self.order.setdefault(d["id"], d["filed_at"] or "")
+        docs = sorted(docs, key=lambda d: (self.order[d["id"]], d["id"]), reverse=True)   # the latest first
+        old = {i.doc_id: i for i in self.items}
+        items = []
+        for d in docs:
+            item = old.pop(d["id"], None)
+            if item is None:
+                item = AutoItem(d, self.c)
+                item.set_narrow(self.narrow)
+                item.set_inspected(self.inspected)
+                item.tick.toggled.connect(self._ticks_changed)
+            item.fill(d)
+            items.append(item)
+        for gone in old.values():
+            self.list.removeWidget(gone)
+            gone.hide()
+            gone.deleteLater()
+        for n, item in enumerate(items):
+            if self.list.itemAt(n).widget() is not item:
+                self.list.removeWidget(item)
+                self.list.insertWidget(n, item)
+                item.setVisible(self._matches(item))
+        self.items = items
+        self.empty.setVisible(not items)
+        for w in (self.bar, self.header):
+            w.setVisible(bool(items))
+        self.header.setVisible(bool(items) and not self.narrow)
         self._ticks_changed()
+
+    def set_inspected(self, doc_id):
+        if doc_id != self.inspected:
+            self.inspected = doc_id
+            for item in self.items:
+                item.set_inspected(doc_id)
+
+    def row_of(self, doc_id):
+        return next((i for i in self.items if i.doc_id == doc_id), None)
+
+    def _matches(self, item):
+        return not self.query or self.query in item.search_text
+
+    def set_query(self, query):
+        self.query = query.strip().casefold()
+        for item in self.items:
+            if item.isHidden() == self._matches(item):
+                item.setVisible(self._matches(item))
+
+    def shown_documents(self):
+        return sum(1 for i in self.items if self._matches(i))
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        cap_width(self, self.list)
+        cap_width(self, self.top)
+        narrow = self.width() - self.list.contentsMargins().right() < COLUMNS_MIN
+        if narrow != self.narrow:
+            self.narrow = narrow
+            for item in self.items:
+                item.set_narrow(narrow)
+            self.header.setVisible(bool(self.items) and not narrow)

@@ -10,6 +10,7 @@ from PySide6.QtTest import QTest  # noqa: E402
 from PySide6.QtWidgets import QApplication, QLabel  # noqa: E402
 
 from classifile.app.main import ALL, DECIDE, DOC, RECENT, SETTINGS, MainWindow  # noqa: E402
+from classifile.app.widgets import LIST_MAX, RELATED, reduced_motion  # noqa: E402
 from classifile.app.reasons import reason_text  # noqa: E402
 from conftest import SAMPLE, EXPECT, source_state  # noqa: E402
 
@@ -75,6 +76,11 @@ def _cell(w, row, column, role=Qt.DisplayRole):
 
 def _item(w, title):
     return next(i for i in w.decision.items if i.title.full == title)
+
+
+def _said(item):
+    """What a decision row offers, in one line: "Suggested category: X", or the sentence it says instead."""
+    return f"{item.kind.text()} {item.category.full}" if item.suggestion.isVisibleTo(item) else item.line.text()
 
 
 def _rows_of(picker):
@@ -151,7 +157,7 @@ def test_decision_page_two_step_filing_toast_and_details(app, samples, make_org)
     assert w.stack.currentWidget() is w.decision and len(w.decision.items) == 3 and not _notices(w)
     cst = _item(w, SAMPLE["S1"])
     cover, course = EXPECT["S1.cover_title"], EXPECT["S1.course_line"]   # from the local fixture map
-    assert cst.line.text() == f"Suggested new category: {cover}"
+    assert _said(cst) == f"Suggested new category: {cover}" and cst.reason.full.startswith("Found on the cover")
     assert cst.primary.text() == "Create && file" and cst.choose.isVisible() and cst.pending.isVisible()
     cst.choose.click()                                              # expands in place
     # two names now: lines that only repeat on some pages are under "More"
@@ -187,14 +193,15 @@ def test_decision_page_two_step_filing_toast_and_details(app, samples, make_org)
     assert not w.details.isVisible()                                # details only on request
     QTest.keyClick(w.table, Qt.Key_Space)
     assert w.details.isVisible() and w.details.title.full == SAMPLE["S1"]
-    facts = w.details.facts.text()
-    assert f"Category: {course}" in facts and "Filed: 20" in facts
-    assert not w.details.locations.isVisible() and not w.details.why.isVisible()  # collapsed sections
-    w.details.locations_section.toggle.click()
-    locations = w.details.locations.text().replace("​", "")
-    assert f"Copy: {out}" in locations and "Original: " in locations
-    w.details.why_section.toggle.click()
-    assert course in w.details.why.text()
+    d = w.details
+    assert (d.category.caption.text(), d.category.value.text()) == ("Filed in", course)   # done, not suggested
+    assert d.name.value.text() == SAMPLE["S1"] and d.same_name.isVisible() and not d.copy_name.isVisible()
+    assert d.state.value.text().startswith("Filed by you · 20")
+    assert d.why.isVisible() and course in d.why.text()           # the reason is shown; the paths are folded
+    assert not d.locations.isVisible()
+    d.locations_section.toggle.click()
+    locations = d.locations.text().replace("​", "")
+    assert f"Filed copy: {out}" in locations and "Original: " in locations
     w.details.open_button.click()
     w.details.folder_button.click()
     QTest.keyClick(w.table, Qt.Key_Return)                          # Enter opens a filed copy
@@ -520,28 +527,32 @@ def test_details_open_beside_the_decision_page(app, samples, make_org):
     _pump(app, lambda: not w.inflight)
     w.resize(1024, 700)
     w.review()
-    _item(w, SAMPLE["S4"]).details.click()
-    assert w.details.parent() is w.content                         # beside the items even in a narrow window
-    w.close_details()
+    item = _item(w, SAMPLE["S4"])
+    item.details.click()                                           # too narrow for both: over the list, a way back
+    assert w.details.parent() is w.workspace and w.details.back.isVisible() and item.inspected
+    assert (w.details.category.caption.text(), w.details.category.value.text()) == ("Suggested new category", item.best)
+    w.details.back.click()
+    assert not w.details.isVisible() and not item.inspected and item.hasFocus()   # back on the row it looked at
     w.resize(1920, 1000)                                           # test fonts are wide: room for both
     w.review()
     item = _item(w, SAMPLE["S4"])
-    _pump(app, lambda: item.width() > 1040 and item.details.geometry().right() >= item.width() - 2)
-    assert item.width() > 1040 and item.details.geometry().right() >= item.width() - 2  # full width, buttons right
-    assert item.primary.y() < item.line.geometry().bottom()        # beside the name and the suggestion
+    right = lambda: item.more_menu.mapTo(item, item.more_menu.rect().topRight()).x()
+    _pump(app, lambda: item.width() > 1040 and right() >= item.width() - 2 * RELATED)
+    assert item.width() <= LIST_MAX                                # wide screens: the buttons stay near the name
+    side = lambda: item.action_bar.y() < item.suggestion.geometry().bottom()
+    assert side()                                                  # beside the name and the suggestion
     assert item.number.text() == "1." and not item.details.isChecked()
     item.details.click()
-    _pump(app, lambda: item.primary.y() > item.line.geometry().bottom())   # under the suggestion now
-    assert item.details.isChecked()
+    _pump(app, lambda: w.details.isVisible() and w.details.parent() is w.content)
+    assert item.details.isChecked() and item.inspected and side()  # room for both: nothing moves
     item.details.click()                                           # Details again closes them
-    _pump(app, lambda: item.primary.y() < item.line.geometry().bottom())
-    assert not w.details.isVisible() and not item.details.isChecked() and w.decide_doc is None
-    item.details.click()
+    assert not w.details.isVisible() and not item.details.isChecked() and w.inspected is None
+    QTest.mouseClick(item.title, Qt.LeftButton)                    # a click on the row inspects it, files nothing
     assert w.view[0] == DECIDE and w.stack.currentWidget() is w.decision   # no jump to the document list
-    assert w.details.isVisible() and w.details.title.full == SAMPLE["S4"]
+    assert w.details.isVisible() and w.details.title.full == SAMPLE["S4"] and not w.filing
     assert w.details.preview.page_label.text() == "Page 1 of 25"
-    assert w.details.parent() is w.content                         # beside the items, never over them
-    assert w.slide.state() == w.slide.State.Running                # it slides in from the right edge
+    assert w.details.parent() is w.content                         # beside the rows
+    assert w.slide.state() == w.slide.State.Running or reduced_motion()   # it slides in from the right edge
     _pump(app, lambda: w.slide.state() != w.slide.State.Running)
     item.choose.click()
     _pump(app, lambda: item.confirm.isVisible())
@@ -629,8 +640,9 @@ def test_the_decision_page_stays_where_it_is_after_filing(app, samples, make_org
     last = w.decision.items[-1]                                    # its choices would open below the window:
     bar.setValue(bar.maximum() // 2)
     (last.choose if last.choose.isVisible() else last.primary).click()
-    below = last.expanded.mapTo(area.viewport(), last.expanded.rect().bottomLeft()).y()
-    assert last.expanded.isVisible() and 0 < below <= area.viewport().height()   # the page scrolls them into view
+    below = lambda: last.expanded.mapTo(area.viewport(), last.expanded.rect().bottomLeft()).y()
+    _pump(app, lambda: 0 < below() <= area.viewport().height())    # the page scrolls them into view
+    assert last.expanded.isVisible()
     last.toggle_expanded()
     bar.setValue(0)
     item = w.decision.items[1]
@@ -701,7 +713,7 @@ def test_no_one_click_creation_once_categories_exist(app, samples, make_org):
     w.refresh()
     item = _item(w, SAMPLE["S3"])
     assert item.primary.text() == f"File in {item.best}" and item.choose.isVisible()
-    assert item.line.text().startswith(f"Suggested category: {item.best}")
+    assert _said(item) == f"Suggested category: {item.best}"
     item.primary.click()
     _pump(app, lambda: not w.filing)
     assert w.org.catalog.document(_doc(w, SAMPLE["S3"]))["status"] == "filed"
@@ -757,7 +769,9 @@ def test_only_one_suggestion_is_said(app, make_org, tmp_path):
     w, rec = _window(make_org, [src / "x.pdf"])
     _pump(app, lambda: not w.inflight)
     w.review()
-    assert w.decision.items[0].line.text() == "Suggested new category: Thermal Expansion  ·  Only one suggestion found"
+    item = w.decision.items[0]
+    assert _said(item) == "Suggested new category: Thermal Expansion"
+    assert item.reason.full == "Found on the cover  ·  Only one suggestion found"
     _close(w, rec)
 
 
@@ -840,7 +854,7 @@ def test_sidebar_keeps_its_place_and_details_stay_on(app, samples, make_org):
     w.show_view(ALL)
     w.details_toggle.click()                                       # nothing selected: it opens and says what to do
     assert w.details.isVisible() and w.details.title.full == "Details"
-    assert "Select a document" in w.details.facts.text() and not w.details.locations_section.isVisible()
+    assert "Select a document" in w.details.hint.text() and not w.details.locations_section.isVisible()
     w.select_docs([_doc(w, SAMPLE["S4"])])
     assert w.details.title.full == SAMPLE["S4"] and w.details.preview.page_label.text() == "Page 1 of 25"
     assert w.details.locations_section.isVisible()
@@ -1036,19 +1050,22 @@ def test_cards_offer_the_best_matching_categories_once_matching_is_updated(app, 
     w.review()
     item, other = _item(w, known), _item(w, "unknown.pdf")
     assert item.matches[0] == ("Networks", 3) and len(item.matches) == 3   # ranked, the best first
-    assert item.line.text() == "Best matches among your categories:" and item.match_rows.isVisible()
-    assert [b.text() for b in item.match_buttons][0] == "File in Networks" and item.primary is item.match_buttons[0]
-    reasons = [x.full for x in item.match_rows.findChildren(QLabel)]
-    assert reasons[0] == "Similar to 3 documents in Networks" and len(reasons) == 3
-    shown = " ".join(reasons + [b.text() for b in item.match_buttons])
+    assert _said(item) == "Suggested category: Networks" and item.primary.text() == "File in Networks"
+    assert item.reason.full == "Similar to 3 documents in Networks"
+    assert item.others.isVisible() and item.others.text().count("<a ") == 2   # the other two: quiet, one click
+    shown = " ".join([item.reason.full, item.others.text(), item.others.toolTip(), item.primary.text()])
     assert "%" not in shown and not any(a.isdigit() and b == "." for a, b in zip(shown, shown[1:]))  # no scores
     assert item.choose.isVisible() and not item.expanded.isVisible()       # new names only under "Choose another…"
-    assert not other.matches and not other.match_rows.isVisible()          # no category fits: a new name instead
-    assert other.line.text().startswith("No close match among your categories.  Suggested new category: ")
+    item.choose.click()
+    assert _rows_of(item.picker)[:3] == [f"{name} · {n}" for name, n in item.matches]   # the matches lead
+    item.toggle_expanded()
+    assert not other.matches and not other.others.isVisible()              # no category fits: a new name instead
+    assert _said(other).startswith("Suggested new category: ")
+    assert other.reason.full == "No close match among your categories"
     assert other.primary.text() == "Choose category…"
 
     second = item.matches[1][0]
-    item.match_buttons[1].click()                                  # any of the three files with one click
+    item.others.linkActivated.emit("1")                            # any of the three files with one click
     _pump(app, lambda: not w.filing)
     assert w.toast.label.text() == f"Filed {known} in {second}"
     assert [d["file_name"] for d in w.waiting()] == ["unknown.pdf"]
@@ -1091,10 +1108,19 @@ def test_a_clear_match_is_filed_automatically_and_listed_with_its_reason(app, ma
 
     w.toast.action.click()                                         # Show: what the app filed by itself
     assert w.view[0] == AUTO and w.stack.currentWidget() is w.auto_page
-    assert w.page_title.full == "Filed automatically · 1" and not w.toolbar.isVisible()
+    assert w.page_title.full == "Filed automatically · 1" and w.toolbar.isVisible() and not w.sort.isVisible()
     item = w.auto_page.items[0]
-    assert item.title.full == "clear.pdf"
-    assert item.reason.full == "Filed in Networks  ·  Similar to 3 documents in Networks"
+    assert item.title.full == "clear.pdf" and item.category.full == "Networks"
+    assert item.status_word.text() == "Not reviewed"
+    QTest.mouseClick(item.title, Qt.LeftButton)                    # a click inspects; it confirms nothing
+    d = w.details
+    assert d.isVisible() and d.title.full == "clear.pdf" and item.inspected
+    assert (d.category.caption.text(), d.category.value.text()) == ("Filed in", "Networks")
+    assert d.state.value.text().startswith("Filed automatically · not reviewed yet")
+    assert d.why.text() == "Filed automatically. Similar to 3 documents in Networks."
+    assert w.org.catalog.document_row(_doc(w, "clear.pdf"))["provenance"] == "machine-assigned"
+    QTest.keyClick(item, Qt.Key_Escape)
+    assert not d.isVisible() and item.hasFocus()
     w.review()
     small = _item(w, "small.pdf")
     assert small.matches[0] == ("Poetry", 2) and small.primary.text() == "File in Poetry"   # waits, with the three
@@ -1106,7 +1132,11 @@ def test_a_clear_match_is_filed_automatically_and_listed_with_its_reason(app, ma
     assert _pick(dialog.picker, "alg")[2] == "Algebra"
     dialog.confirm.click()
     _pump(app, lambda: not w.moving)
-    assert w.auto_page.items == [] and w.auto_page.empty.isVisible() and w.auto_count.text() == ""
+    assert [i.status_word.text() for i in w.auto_page.items] == ["Moved by you"]   # it stays where it was
+    assert not w.auto_page.items[0].move.isVisible() and w.auto_count.text() == ""
+    w.show_view(ALL)
+    w.show_view(AUTO)                                              # once the page is left, it goes
+    assert w.auto_page.items == [] and w.auto_page.empty.isVisible() and not w.toolbar.isVisible()
     moved = w.org.catalog.document_row(_doc(w, "clear.pdf"))
     assert (moved["category"], moved["provenance"]) == ("Algebra", "user-corrected")
 
@@ -1219,18 +1249,39 @@ def test_looks_right_selected_categories_and_also_belongs_to_in_the_window(app, 
     _pump(app, lambda: not w.inflight and not w.filing and not w.auto_running)
     w.show_view(AUTO)
     page = w.auto_page
-    assert len(page.items) == 4 and page.bar.isVisible() and not page.right.isEnabled()
+    assert len(page.items) == 4 and page.bar.isVisible() and not page.right.isVisible()   # nothing ticked
     one = next(i for i in page.items if i.title.full == "a1.pdf")
+    at = page.items.index(one)
     one.right.click()                                               # "Looks right" for one document
-    assert w.toast.label.text().startswith("Confirmed 1 document.") and len(page.items) == 3
+    assert w.toast.label.text().startswith("Confirmed 1 document.") and page.awaiting() == 3
+    assert page.items.index(one) == at and one.status_word.text() == "Confirmed"   # in its place, marked
+    assert not one.right.isVisible() and not one.tick.isVisible() and w.auto_count.text() == "3"
     assert w.org.catalog.document_row(_doc(w, "a1.pdf"))["provenance"] == "user-confirmed"
-    for item in page.items[:2]:
+    rest = [i for i in page.items if not i.reviewed]
+    for item in rest[:2]:
         item.tick.setChecked(True)
-    assert page.right.text() == "Looks right (2)" and page.right.isEnabled()
+    assert page.right.text() == "Looks right (2)" and page.right.isVisible() and page.count.text() == "2 selected"
+    QTest.mouseClick(rest[2].title, Qt.LeftButton)                  # inspecting another one leaves the ticks alone
+    assert w.details.title.full == rest[2].title.full and rest[2].inspected and page.ticked() == [
+        i.doc_id for i in rest[:2]]
+    before = list(page.items)
+    w.refresh()                                                     # a background update: ticks and details stay
+    assert page.items == before
+    assert page.ticked() == [i.doc_id for i in rest[:2]] and w.details.isVisible() and rest[2].inspected
+    above = page.items[page.items.index(rest[2]) - 1]
+    QTest.keyClick(rest[2], Qt.Key_Up)                              # the arrows walk the rows; details follow
+    assert w.details.title.full == above.title.full and above.hasFocus()
+    w.search.setText(rest[0].title.full)                            # the page's search
+    assert [i for i in page.items if i.isVisible()] == [rest[0]] and w.result_count.text() == "1 of 4"
+    w.search.setText("no such thing")
+    assert w.stack.currentWidget() is w.no_match
+    w.search.clear()
     page.all.click()                                                # or all of them at once
     assert page.right.text() == "Looks right (3)"
     page.right.click()
-    assert page.items == [] and w.auto_count.text() == "" and w.toast.label.text().startswith("Confirmed 3 documents.")
+    assert page.awaiting() == 0 and w.auto_count.text() == ""
+    assert w.toast.label.text().startswith("Confirmed 3 documents.")
+    assert all(i.status_word.text() == "Confirmed" for i in page.items) and not page.right.isVisible()
     assert len(w.org.catalog.explicit_labels()) == 10               # they are training examples now
     w.show_view(ALL)
     assert _cell(w, next(r for r in range(w.filter.rowCount()) if _cell(w, r, 0) == "n2.pdf"), 2) == "Approved"
@@ -1250,7 +1301,7 @@ def test_looks_right_selected_categories_and_also_belongs_to_in_the_window(app, 
     assert "n2.pdf" in [_cell(w, r, 0) for r in range(w.filter.rowCount())]   # listed where it also belongs
     w.select_docs([doc])
     w.set_details_open(True)
-    assert "Category: Networks" in w.details.facts.text() and "Also in: Algebra" in w.details.facts.text()
+    assert w.details.category.value.text() == "Networks" and w.details.also.value.text() == "Algebra"
     w.show_view(SETTINGS)
     w.auto_level.setCurrentIndex(w.auto_level.findData("off"))
     w.auto_level.activated.emit(w.auto_level.currentIndex())
@@ -1352,7 +1403,8 @@ def test_every_button_has_a_name_light_and_dark_and_leave_pending_is_in_the_menu
     w.review()
     card = _item(w, "algebra-8.pdf")
     assert [b.text() for b in card.findChildren(QAbstractButton) if b.isVisible() and b.text() != "⋯"] == \
-        ["File in Algebra", "File in Networks", "Choose another…", "Details"]   # the rest is under "more"
+        ["File in Algebra", "Choose another…", "Details"]          # the rest is under "more", at the row's end
+    assert card.more_menu.x() > card.details.x() and "Networks" in card.others.text()
     assert [a.text() for a in card.more_menu.menu().actions()] == ["Leave pending", "Remove from ClassiFile"]
     card.pending.trigger()
     assert w.toast.label.text() == "Left pending. It stays here until you decide."
@@ -1381,3 +1433,23 @@ def test_every_button_has_a_name_light_and_dark_and_leave_pending_is_in_the_menu
     again.appearance.setCurrentIndex(again.appearance.findData("system"))
     again.appearance.activated.emit(again.appearance.currentIndex())
     _close(again, rec)
+
+
+def test_reduced_motion_makes_every_change_instant(app, samples, make_org, monkeypatch):
+    from classifile.app import widgets
+
+    monkeypatch.setattr(widgets, "reduced_motion", lambda: True)   # Windows' "Animation effects" switched off
+    w, rec = _window(make_org, [samples / SAMPLE["S4"]])
+    _pump(app, lambda: not w.inflight)
+    w.resize(1920, 1000)
+    w.review()
+    item = _item(w, SAMPLE["S4"])
+    item.details.click()
+    assert w.details.isVisible() and w.slide.state() != w.slide.State.Running
+    w.close_details()
+    ghosts = [c for c in w.workspace.children() if isinstance(c, QLabel) and
+              c.testAttribute(Qt.WA_TransparentForMouseEvents)]
+    assert not w.details.isVisible() and ghosts == []              # no picture of the panel slides away
+    item.choose.click()
+    assert item.expanded.isVisible() and item.expanded.maximumHeight() == widgets.QWIDGETSIZE_MAX
+    _close(w, rec)

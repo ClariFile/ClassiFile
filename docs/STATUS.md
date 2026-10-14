@@ -159,6 +159,24 @@
 - `tools.check_ui`: all checks pass at 100%, 125% and 150%, including the two palettes and the button names.
 - 260 automated tests.
 
+**Redesign of "Needs your decision" and "Filed automatically" (2026-10-14, the owner's request)**
+- Both pages: title and count, the search, a list capped at a readable width, and one Details panel. A click on a
+  row inspects it (teal tint and bar; hover is grey); it never files or confirms. Up/Down walk the rows and
+  details follow; Esc closes details and returns to the row. Details sit beside the list while it keeps 520 px,
+  otherwise over it with "Back to list" (replaces decision 4: beside the cards even when narrow).
+- Decision rows: name, "Suggested category: **X**", one line of reason, one main action, then quiet "Choose
+  another…", "Details" and ⋯ at the end. The second and third matching categories stay one click away as quiet
+  "Or file in:" links (record B2); in the picker they come first. Buttons stack under the text, then on two
+  lines, when room is short.
+- Auto-filed rows: tick, name, Filed in, status (Not reviewed / Confirmed / Moved by you), "Looks right"
+  (outlined) and a quiet "Move to…". A reviewed row stays in its place until the page is left. The bulk bar shows
+  the count and "Looks right (N)" only when something is ticked. The "need your decision" notice is a quiet line.
+- Details: file name (and the filed name only when it differs), "Suggested category" or "Filed in", status with
+  review state, preview, why, and the paths folded under "File locations".
+- Motion: details slide in and out, a row's choices unfold; all instant when Windows' Animation effects is off.
+  Ticks use the ClassiFile teal.
+- `tools.check_ui` covers the auto-filed page and reduced motion; all pass at 100%, 125% and 150%.
+
 **Accuracy round (2026-10-13; a report, nothing changed in the app)**
 - `tools.accuracy_round` measures changes to the representation with the E2 test, one at a time: extra weight
   for titles, headings and the first page; character n-grams; word pairs; less weight for OCR text and template
@@ -308,7 +326,7 @@ These counts describe development data only. They are not accuracy estimates.
 
 1. The owner's decision on `docs/ACCURACY_ROUND.md` (adopt the combination, the key-word reason, or neither).
    The owner tries CP4 and the new interface in the app.
-2. Interface phases 4 (motion, Reduce motion) and 5 (retry for unreadable documents, "Find category…", the
+2. The rest of interface phase 4 (motion elsewhere; Reduce motion is done for details and decision rows) and 5 (retry for unreadable documents, "Find category…", the
    written states) of `docs/UI_PROPOSAL.md`, on the owner's go-ahead.
 3. CP5 quality gate and freeze (`data\final-eval` stays untouched until then). SummarEase is a separate
    project.

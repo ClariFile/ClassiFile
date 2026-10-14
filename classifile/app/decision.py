@@ -1,7 +1,8 @@
-"""The "Needs your decision" page: one item per question, with one primary action each."""
-from PySide6.QtCore import QCoreApplication, QEvent, Qt
+"""The "Needs your decision" page: one row per question, with one primary action each."""
+import html
 from collections import Counter
 
+from PySide6.QtCore import QCoreApplication, QEvent, Qt
 from PySide6.QtWidgets import (
     QApplication, QBoxLayout, QButtonGroup, QCheckBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QMenu,
     QPushButton, QScrollArea, QToolButton, QVBoxLayout, QWidget,
@@ -10,8 +11,8 @@ from PySide6.QtWidgets import (
 from classifile.analysis.candidates import name_key, top_names
 from classifile.app.reasons import reason_text, similar_reason
 from classifile.app.widgets import (
-    CHOICES_MAX, FILE_ICON, GROUP, MATCH_MIN, NAME_FIELD_MAX, PANEL, RELATED, TEXT_MIN, CategoryPicker, ElidedLabel,
-    box, format_icon, restyle,
+    BAR, BUTTON_TEXT_MAX, CHOICES_MAX, FILE_ICON, GROUP, LIST_MAX, NAME_FIELD_MAX, RELATED, TEXT_MIN, TIGHT,
+    CategoryPicker, ElidedLabel, ListRow, box, format_icon, restyle, scroll_area_of, unfold, wrappable, wrapped,
 )
 
 TOP = 3
@@ -20,6 +21,7 @@ REASONS = (("Too narrow", "A lesson or a section", "too narrow"), ("Too broad", 
            ("Wrong topic", "", "wrong topic"), ("Not a real name", "A fragment, a person or a file name",
                                                 "not a real name"),
            ("Couldn't read the document", "", "could not read"))
+ROW_MARGINS = (RELATED - BAR, GROUP - TIGHT, RELATED, GROUP - TIGHT)   # inside a row, after its bar
 
 
 def group_items(docs):
@@ -54,13 +56,36 @@ def card_state(members, categories):
             existing["name"] if existing else bool(categories), first.get("matches"), first.get("abstained"))
 
 
-class DecisionItem(QFrame):
+def shorten(name, limit=BUTTON_TEXT_MAX):
+    """A category name for a button: the rest ends in "…" (the tooltip has it whole)."""
+    return (name if len(name) <= limit else name[:limit - 1] + "…").replace("&", "&&")
+
+
+def found_text(evidence, unit):
+    """Where a suggested name was found, as a sentence: "Found on the cover and most pages"."""
+    where = reason_text(evidence, unit)
+    return "" if not where else where.capitalize() if where.startswith("key") else f"Found {where}"
+
+
+def more_button():
+    more = QToolButton()
+    more.setObjectName("more")
+    more.setText("⋯")
+    more.setToolTip("More actions")
+    more.setAccessibleName("More actions")
+    more.setPopupMode(QToolButton.InstantPopup)
+    return more
+
+
+class DecisionItem(ListRow):
+    """One question: the document, what is suggested and why on quiet lines under it, one main action. The other
+    matching categories stay one click away on a quiet line (decision record B2); everything else is under
+    "Choose another…" and ⋯. A click on the row itself only inspects it."""
+
     def __init__(self, docs, controller, categories=None):
         """categories: {name key: category} as the catalog has them now (asked for when not given)."""
-        super().__init__()
-        self.setObjectName("decision")
-        self.setFocusPolicy(Qt.StrongFocus)
-        self.docs, self.c = docs, controller
+        super().__init__(controller)
+        self.docs = docs
         self.ids = [d["id"] for d in docs]
         first = docs[0]
         self.group = len(docs) > 1
@@ -77,107 +102,122 @@ class DecisionItem(QFrame):
                                  else first["file_name"], "strong")
         self.number = QLabel()                  # the item's place in the list, set by the page
         self.number.setObjectName("secondary")
-        self.head = box(QHBoxLayout())          # "more" comes first: the same place on every item
+        self.number.setMinimumWidth(self.number.fontMetrics().horizontalAdvance("99.") + TIGHT)
+        self.number.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
 
-        self.line = QLabel()
-        self.line.setWordWrap(True)
+        self.kind = QLabel()                    # "Suggested category:", then the name in bold
+        self.kind.setObjectName("secondary")
+        self.category = ElidedLabel(object_name="strong")
+        self.suggestion = QWidget()
+        row = box(QHBoxLayout(self.suggestion), spacing=TIGHT)
+        row.addWidget(self.kind)
+        row.addWidget(self.category, 1)
+        self.line = QLabel()                    # problems and other whole sentences; wraps
+        wrapped(self.line)
+        self.reason = ElidedLabel(object_name="secondary")
         self.names = QLabel()
         self.names.setObjectName("secondary")
-        self.names.setWordWrap(True)
+        wrapped(self.names)
         if self.group:
             shown = [d["file_name"] for d in docs[:6]]
             more = len(docs) - len(shown)
             self.names.setText(", ".join(shown) + (f" and {more} more" if more else ""))
-        if not self.group:                      # hide(), never show(): shown without a parent it is a window
-            self.names.hide()
 
         self.primary = QPushButton()
         self.primary.setObjectName("primary")
         self.primary.clicked.connect(self.primary_action)
-        self.match_rows = QWidget()             # one row per matching category: a one-click button, then why
-        rows = box(QGridLayout(self.match_rows))
-        rows.setColumnStretch(1, 1)
-        self.match_buttons = []
-        for n, (name, count) in enumerate(self.matches):
-            button = QPushButton() if n else self.primary     # the best match is the card's main action
-            shown = name if len(name) <= 32 else name[:31] + "…"
-            button.setText(f"File in {shown}".replace("&", "&&"))
-            button.setToolTip(f"File in '{name}'")
-            if n:
-                button.clicked.connect(lambda _=False, name=name: self.c.file_docs(self.ids, name))
-            rows.addWidget(button, n, 0)
-            rows.addWidget(ElidedLabel(similar_reason(count, name), "secondary"), n, 1)
-            self.match_buttons.append(button)
-        if not self.matches:
-            self.match_rows.hide()
+        # The second and third matching categories: one click each (decision record B2), as quiet links that wrap.
+        self.others = QLabel("Or file in: " + " · ".join(
+            f'<a href="{n}">{html.escape(name)}</a>' for n, (name, _) in enumerate(self.matches) if n))
+        self.others.setObjectName("secondary")
+        wrapped(self.others)
+        self.others.setTextFormat(Qt.RichText)
+        self.others.setTextInteractionFlags(Qt.LinksAccessibleByMouse | Qt.LinksAccessibleByKeyboard)
+        self.others.setToolTip("\n".join(f"File in '{name}'. {similar_reason(n, name)}."
+                                         for name, n in self.matches[1:]))
+        self.others.setAccessibleName("Or file in another matching category")
+        self.others.linkActivated.connect(lambda n: self.c.file_docs(self.ids, self.matches[int(n)][0]))
         self.choose = QPushButton("Choose another…")
+        self.choose.setObjectName("quiet")
         self.choose.clicked.connect(self.toggle_expanded)
         self.remove = QPushButton("Remove from ClassiFile")
         self.remove.clicked.connect(lambda: self.c.remove_docs(self.ids))
-        self.more_menu = QToolButton()
-        self.more_menu.setObjectName("more")
-        self.more_menu.setText("⋯")
-        self.more_menu.setToolTip("More actions")
-        self.more_menu.setAccessibleName("More actions")
-        self.more_menu.setPopupMode(QToolButton.InstantPopup)
         self.details = QPushButton("Details")
-        self.details.setToolTip("Show or hide this document's pages beside this list")
+        self.details.setObjectName("quiet")
+        self.details.setToolTip("Show or hide this document's pages and details beside the list")
         self.details.setCheckable(True)         # pressed while this document's details are open
         self.details.clicked.connect(
             lambda on: self.c.show_details(first["id"]) if on else self.c.close_details())
-        if self.group:
-            self.details.hide()
+        self.more_menu = more_button()
         menu = QMenu(self)
         for d in docs if self.group else ():    # a group: each member's pages
             menu.addAction(f"Details: {d['file_name']}", lambda i=d["id"]: self.c.show_details(i))
-        # A card keeps one main action, "Choose another…" and "Details"; the rest is here (the owner's decision 3).
+        if self.group:
+            self.details.hide()
+        # A row keeps one main action, "Choose another…" and "Details"; the rest is under ⋯, at the row's end.
         self.pending = menu.addAction("Leave pending", lambda: self.c.leave_pending(self.ids))
         menu.addAction("Remove from ClassiFile", lambda: self.c.remove_docs(self.ids))
         self.more_menu.setMenu(menu)
-        for w in (self.more_menu, self.number, icon):
-            self.head.addWidget(w)
-        self.head.addWidget(self.title, 1)
-        self.actions = box(QHBoxLayout())
-        if not self.matches:
-            self.actions.addWidget(self.primary)
-        for w in (self.choose, self.remove, self.details):
-            self.actions.addWidget(w)
-        self.actions.addStretch(1)
 
+        self.action_bar = QWidget()             # at the right of the text, or under it when room is short;
+        self.actions = box(QBoxLayout(QBoxLayout.LeftToRight, self.action_bar))   # narrower still, on two lines
+        self.quiet = box(QHBoxLayout())
+        for w in (self.choose, self.details, self.more_menu):
+            self.quiet.addWidget(w)
+        self.quiet.addStretch(1)
+        self.actions.addWidget(self.primary, 0, Qt.AlignLeft)
+        self.actions.addWidget(self.remove, 0, Qt.AlignLeft)
+        self.actions.addLayout(self.quiet)
+        text = box(QVBoxLayout(), spacing=TIGHT)
+        text.addWidget(self.title)
+        for w in (self.suggestion, self.line, self.reason, self.names, self.others):
+            text.addWidget(w)
+            w.hide()                            # hide(), never show(): shown without a parent it is a window
+        text.addStretch(1)
+        self.body = box(QBoxLayout(QBoxLayout.LeftToRight), spacing=GROUP)  # description, then the controls
+        self.body.addLayout(text, 1)
+        self.body.addWidget(self.action_bar, 0, Qt.AlignVCenter)
         self.all_suggestions = top[:1] if self.group else first["suggestions"]
         self.one_click = False                  # the primary button files at once (else it opens the choices)
         self.expanded = self._expanded_area()
-        text = box(QVBoxLayout())
-        text.addLayout(self.head)
-        text.addWidget(self.line)
-        text.addWidget(self.names)
-        text.addWidget(self.match_rows)
-        text.addStretch(1)
-        self.stacked = False                    # details are open beside the page: the buttons go underneath
-        self.body = box(QBoxLayout(QBoxLayout.LeftToRight), spacing=GROUP)  # description, then the controls
-        self.body.addLayout(text, 1)
-        self.body.addLayout(self.actions)
-        v = box(QVBoxLayout(self), (0, PANEL, 0, PANEL))
-        v.addLayout(self.body)
-        choices = box(QHBoxLayout(), (0, RELATED, 0, 0))
-        choices.addWidget(self.expanded, 100)   # up to its widest, at the left
-        choices.addStretch(1)
-        v.addLayout(choices)
+        column = box(QVBoxLayout(), spacing=RELATED)
+        column.addLayout(self.body)
+        column.addWidget(self.expanded)
+        lead = box(QHBoxLayout(), spacing=RELATED)
+        lead.addWidget(self.number)
+        lead.addWidget(icon)
+        lead_column = box(QVBoxLayout())
+        lead_column.addLayout(lead)
+        lead_column.addStretch(1)
+        v = box(QHBoxLayout(self), ROW_MARGINS, RELATED)
+        v.addLayout(lead_column)
+        v.addLayout(column, 1)
         categories = controller.categories_by_key() if categories is None else categories
         existing = categories.get(name_key(self.best)) if self.best else None
         self.search_text = " ".join([d["file_name"] for d in docs] + [existing["name"] if existing else self.best]
                                     + [name for name, _ in self.matches]).casefold()   # what the search looks at
-        self._configure(first, existing, bool(categories))
+        self._configure(first, top, existing, bool(categories))
 
     # -- what the item asks ------------------------------------------------------------------------------------
-    def _configure(self, first, existing, any_categories):
-        problem = first["status"] in ("failed", "pending")
-        if problem:
-            self.line.setText(f"⚠ This document couldn't be read: {first['status_reason'] or 'unknown reason'}.")
+    @staticmethod
+    def _say(label, text):
+        label.setText(text)
+        label.setVisible(bool(text))
+
+    def _suggest(self, kind, name, reason=""):
+        self.kind.setText(kind)
+        self.category.setText(name)
+        self.suggestion.show()
+        self._say(self.reason, reason)
+
+    def _configure(self, first, top, existing, any_categories):
+        if first["status"] in ("failed", "pending"):
+            self._say(self.line, "⚠ This document couldn't be read: "
+                      f"{wrappable(first['status_reason'] or 'unknown reason')}.")
             self.line.setObjectName("error")
             self._only(self.remove)
         elif first["missing"]:
-            self.line.setText("⚠ The original file has moved. Locate it to file this document.")
+            self._say(self.line, "⚠ The original file has moved. Locate it to file this document.")
             self.line.setObjectName("warning")
             self.primary.setText("Locate file…")
             self.primary.clicked.disconnect()
@@ -185,29 +225,37 @@ class DecisionItem(QFrame):
             self._only(self.primary, self.remove)
             self.line.setToolTip(f"It was at {first['source_path']}")
         else:
-            only = "  ·  Only one suggestion found" if len(first["suggestions"]) == 1 else ""
-            none = "No close match among your categories.  " if first.get("abstained") else ""
+            found = found_text(top[0]["evidence"], first["unit"]) if top else ""
+            if len(first["suggestions"]) == 1:
+                found += ("  ·  " if found else "") + "Only one suggestion found"
+            self.names.setVisible(self.group)
             if self.matches:    # decided from the content; new names stay under "Choose another…" (A0)
-                self.line.setText("Best matches among your categories:")
+                self._suggest("Suggested category:", self.best, similar_reason(self.matches[0][1], self.best))
+                self.others.setVisible(len(self.matches) > 1)
+                self.primary.setText(f"File in {shorten(self.best)}")
+                self.primary.setToolTip(f"File in '{self.best}'")
                 self.one_click = True
             elif existing:
-                self.line.setText(f"Suggested category: {existing['name']}{only}")
-                shown = existing["name"] if len(existing["name"]) <= 32 else existing["name"][:31] + "…"
-                self.primary.setText(f"File in {shown}".replace("&", "&&"))
+                self._suggest("Suggested category:", existing["name"], found)
+                self.primary.setText(f"File in {shorten(existing['name'])}")
                 self.primary.setToolTip(f"File in '{existing['name']}'")
                 self.one_click = True
             elif self.best and not any_categories:  # the very first category: one click is enough
-                self.line.setText(f"Suggested new category: {self.best}{only}")
+                self._suggest("Suggested new category:", self.best, found)
                 self.primary.setText("Create && file")
                 self.primary.setToolTip(f"Create category '{self.best}' and file")
                 self.one_click = True
             else:  # categories exist: a new one is never created with one click (decision record B2)
-                self.line.setText(f"{none}Suggested new category: {self.best}{only}" if self.best
-                                  else f"{none}No suggested name. Choose a category.")
+                none = "No close match among your categories" if first.get("abstained") else ""
+                if self.best:
+                    self._suggest("Suggested new category:", self.best, none or found)
+                else:
+                    self._say(self.line, (f"{none}. " if none else "") + "No suggested name. Choose a category.")
                 self.primary.setText("Choose category…")
                 self.choose.hide()
             if first["status_reason"]:
-                self.line.setText(self.line.text() + f"\nLast attempt: {first['status_reason']}")
+                self._say(self.line, (self.line.text() + "\n" if self.line.text() else "")
+                          + f"Last attempt: {wrappable(first['status_reason'])}")
             self.remove.hide()
         restyle(self.line)
 
@@ -216,20 +264,22 @@ class DecisionItem(QFrame):
             w.setVisible(w in keep)
 
     # -- where the buttons are ---------------------------------------------------------------------------------
-    def set_details(self, doc_id):
-        """doc_id: the document whose details are open beside the page (None: closed)."""
-        self.stacked = doc_id is not None
+    def set_inspected(self, doc_id):
+        """doc_id: the document whose details are open (None: closed). Its Details button stays pressed."""
+        super().set_inspected(doc_id)
         self.details.setChecked(doc_id == self.ids[0])
-        self._arrange()
 
     def _arrange(self):
-        """The buttons at the right of the card, using its full width; under the description while details are
-        open beside the page, or when the card is too narrow for both."""
-        room = self.width() - self.actions.sizeHint().width()
-        side = not self.stacked and room >= (MATCH_MIN if self.matches else TEXT_MIN)
-        direction = QBoxLayout.LeftToRight if side else QBoxLayout.TopToBottom
-        if self.body.direction() != direction:
-            self.body.setDirection(direction)
+        """The buttons at the right of the text while it keeps enough room; under it otherwise, and on two lines
+        (the main action, then the others) when even that is too narrow."""
+        shown = [w for w in (self.primary, self.remove) if not w.isHidden()]
+        wide = sum(w.sizeHint().width() + RELATED for w in shown) + self.quiet.sizeHint().width()
+        room = self.width() - self.number.minimumWidth() - FILE_ICON - 4 * RELATED
+        side = room - wide >= TEXT_MIN
+        for layout, flat in ((self.body, side), (self.actions, side or room >= wide)):
+            direction = QBoxLayout.LeftToRight if flat else QBoxLayout.TopToBottom
+            if layout.direction() != direction:
+                layout.setDirection(direction)
 
     def resizeEvent(self, e):
         super().resizeEvent(e)
@@ -285,7 +335,10 @@ class DecisionItem(QFrame):
         top = top_names(self.all_suggestions, TOP)
         rest = [s for s in self.all_suggestions if s not in top]
         offered = [] if self.rejected else top + (rest if self.show_all else [])
-        self.picker.set_choices(*self.c.picker_choices(), suggestions=[
+        cats, recent = self.c.picker_choices()
+        ids = {name_key(name): i for i, name, _ in cats}
+        first = [ids[name_key(name)] for name, _ in self.matches if name_key(name) in ids]   # the matches lead
+        self.picker.set_choices(cats, first + [i for i in recent if i not in first], suggestions=[
             (s["name"], reason_text(s["evidence"], self.docs[0]["unit"])) for s in offered])
         self.more_button.setText("Fewer" if self.show_all else f"More ({len(rest)})")
         self.more_button.setVisible(bool(rest) and not self.rejected)
@@ -303,14 +356,12 @@ class DecisionItem(QFrame):
         self._reveal()
 
     def _reveal(self):
-        """Scroll the page so the choices just opened are in view: the whole card when it fits, else from its
+        """Scroll the page so the choices just opened are in view: the whole row when it fits, else from its
         top. Nothing moves when it is in view already."""
-        area = self.parentWidget()
-        while area is not None and not isinstance(area, QScrollArea):
-            area = area.parentWidget()
+        area = scroll_area_of(self)
         if area is None:
             return
-        QCoreApplication.sendPostedEvents(None, QEvent.LayoutRequest)  # the card has its new height now
+        QCoreApplication.sendPostedEvents(None, QEvent.LayoutRequest)  # the row has its new height now
         top = self.mapTo(area.widget(), self.rect().topLeft()).y()
         bar = area.verticalScrollBar()
         bar.setValue(min(top, max(bar.value(), top + self.height() - area.viewport().height())))
@@ -328,14 +379,15 @@ class DecisionItem(QFrame):
         open_ = not self.expanded.isVisible()
         focus = QApplication.focusWidget()
         inside = focus is not None and self.isAncestorOf(focus)
-        self.expanded.setVisible(open_)
         self.choose.setText("Hide choices" if open_ else "Choose another…")
         if open_:
             self._fill_choices()
+            unfold(self.expanded, self._reveal)
             self.picker.field.setFocus()
-            self._reveal()
-        elif inside:
-            self.setFocus()                     # the field went away: the keyboard stays on this card
+        else:
+            self.expanded.hide()
+            if inside:
+                self.setFocus()                 # the field went away: the keyboard stays on this row
 
     def _update_confirm(self):
         choice = self.picker.current()
@@ -371,39 +423,33 @@ class DecisionItem(QFrame):
             super().keyPressEvent(e)
 
 
-class SubjectItem(QFrame):
+class SubjectItem(ListRow):
     """One question for several waiting documents that match no existing category and resemble one another
     (decision record B2). The user names the new category once and can untick documents first. Nothing is created
     or filed until then, and nothing here ever goes into an existing category unless the user types its name."""
     group, matches = True, ()
 
     def __init__(self, docs, controller):
-        super().__init__()
-        self.setObjectName("decision")
-        self.setFocusPolicy(Qt.StrongFocus)
-        self.docs, self.c = docs, controller
+        super().__init__(controller)
+        self.docs = docs
         self.ids = [d["id"] for d in docs]
         words = docs[0]["subject"][1]
         self.number = QLabel()
         self.number.setObjectName("secondary")
         self.title = ElidedLabel(f"{len(docs)} documents look like one new subject", "strong")
-        self.more_menu = QToolButton()
-        self.more_menu.setObjectName("more")
-        self.more_menu.setText("⋯")
-        self.more_menu.setToolTip("More actions")
-        self.more_menu.setAccessibleName("More actions")
-        self.more_menu.setPopupMode(QToolButton.InstantPopup)
+        self.more_menu = more_button()
         menu = QMenu(self)
         self.pending = menu.addAction("Leave pending", lambda: self.c.leave_pending(self.ids))
         menu.addAction("Remove from ClassiFile", lambda: self.c.remove_docs(self.ids))
         self.more_menu.setMenu(menu)
         head = box(QHBoxLayout())
-        head.addWidget(self.more_menu)
         head.addWidget(self.number)
         head.addWidget(self.title, 1)
+        head.addWidget(self.more_menu)
         self.line = QLabel("Shared key words: " + ", ".join(words) if words
                            else "These documents use many of the same words.")
-        self.line.setWordWrap(True)
+        self.line.setObjectName("secondary")
+        wrapped(self.line)
         rows = box(QGridLayout())
         rows.setColumnStretch(1, 1)
         self.ticks, self.detail_links = {}, {}
@@ -414,7 +460,7 @@ class SubjectItem(QFrame):
             tick.setAccessibleName(f"Include {d['file_name']}")
             tick.toggled.connect(self._update)
             link = QPushButton("Details")
-            link.setObjectName("link")
+            link.setObjectName("quiet")
             link.setAccessibleName(f"Details of {d['file_name']}")
             link.clicked.connect(lambda _=False, i=d["id"]: self.c.show_details(i))
             rows.addWidget(tick, n, 0)
@@ -431,9 +477,9 @@ class SubjectItem(QFrame):
         self.confirm.clicked.connect(self.confirm_action)
         self.field.setAccessibleName("Name of the new category")
         name_row = box(QHBoxLayout())
-        for w in (self.field, self.confirm):
-            name_row.addWidget(w)
-        name_row.addStretch(1)
+        name_row.addWidget(self.field, 1)
+        name_row.addWidget(self.confirm)
+        name_row.addStretch(0)
         names = Counter(s["name"] for d in docs for s in top_names(d["suggestions"], 1))
         self.name_links = []
         suggested = box(QHBoxLayout())
@@ -441,16 +487,17 @@ class SubjectItem(QFrame):
         hint.setObjectName("secondary")
         suggested.addWidget(hint)
         for name, _ in names.most_common(TOP):  # optional: a click only fills the field
-            b = QPushButton(name if len(name) <= 32 else name[:31] + "…")
+            b = QPushButton(shorten(name, 32))
             b.setObjectName("link")
             b.setToolTip(name)
             b.clicked.connect(lambda _=False, name=name: self.field.setText(name))
             suggested.addWidget(b)
             self.name_links.append(b)
         suggested.addStretch(1)
-        v = box(QVBoxLayout(self), (0, PANEL, 0, PANEL))
+        v = box(QVBoxLayout(self), ROW_MARGINS, TIGHT)
         v.addLayout(head)
         v.addWidget(self.line)
+        v.addSpacing(RELATED - TIGHT)
         v.addLayout(rows)
         v.addSpacing(RELATED)
         v.addLayout(name_row)
@@ -476,9 +523,6 @@ class SubjectItem(QFrame):
         if name and self.ticked():
             self.c.file_docs(self.ticked(), name)   # only the ticked documents; the others keep waiting
 
-    def set_details(self, doc_id):
-        pass                                    # one column already: nothing moves when details open
-
     def refresh_choices(self):
         self._update()                          # a category of the typed name may exist now
 
@@ -489,16 +533,20 @@ class SubjectItem(QFrame):
             super().keyPressEvent(e)
 
 
+def cap_width(page, layout):
+    """A list stops growing at LIST_MAX: the room beyond it is left empty at its right."""
+    m = layout.contentsMargins()
+    layout.setContentsMargins(m.left(), m.top(), max(GROUP, page.width() - LIST_MAX), m.bottom())
+
+
 class DecisionPage(QWidget):
     def __init__(self, controller):
         super().__init__()
         self.c = controller
-        self.title = QLabel()
-        self.title.setObjectName("pageTitle")
-        self.items, self.query, self.version, self.details_doc = [], "", None, None
-        self.holder = QWidget()                     # as wide as the page: each card's buttons are at its right
+        self.items, self.query, self.version, self.inspected = [], "", None, None
+        self.holder = QWidget()
         self.list = box(QVBoxLayout(self.holder), (0, 0, GROUP, 0), 0)  # room for the scroll bar
-        self.list.addStretch(1)                     # always last; the cards go before it
+        self.list.addStretch(1)                     # always last; the rows go before it
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
@@ -510,11 +558,15 @@ class DecisionPage(QWidget):
         v.addWidget(scroll, 1)
         v.addWidget(self.empty)
 
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        cap_width(self, self.list)
+
     def show_items(self, docs, categories=None, version=None, enter=False):
-        """Bring the cards in line with the waiting documents, in place. A card whose question is unchanged is
+        """Bring the rows in line with the waiting documents, in place. A row whose question is unchanged is
         kept, with whatever is typed, opened or focused in it; only new and changed ones are built.
         categories: {name key: category}; version: anything that changes when the category list or its counts
-        do; enter: the page has just been opened (the first card takes the focus)."""
+        do; enter: the page has just been opened (the first row takes the focus)."""
         categories = self.c.categories_by_key() if categories is None else categories
         focus = QApplication.focusWidget()
         at = next((n for n, i in enumerate(self.items) if focus and (i is focus or i.isAncestorOf(focus))), None)
@@ -530,11 +582,11 @@ class DecisionPage(QWidget):
                 item = (SubjectItem(members, self.c) if members[0].get("subject")
                         else DecisionItem(members, self.c, categories))
                 item.state = state
-                item.set_details(self.details_doc)
+                item.set_inspected(self.inspected)
             items.append(item)
         refocus = at is not None and self.items[at] in old.values()
         if refocus:
-            focus.clearFocus()  # hiding the focused item hands focus down the list, and the page scrolls after it
+            focus.clearFocus()  # hiding the focused row hands focus down the list, and the page scrolls after it
         for gone in old.values():
             self.list.removeWidget(gone)
             gone.hide()
@@ -555,23 +607,25 @@ class DecisionPage(QWidget):
             target = items[min(at or 0, len(items) - 1)]
             (target if target in shown else shown[0]).setFocus()  # where the user was, not back at the top
 
-    def set_details(self, doc_id):
-        """The document whose details are open beside the page (None: closed). The cards put their buttons under
-        the description while they are, and that document's Details button stays pressed."""
-        if doc_id != self.details_doc:
-            self.details_doc = doc_id
+    def set_inspected(self, doc_id):
+        """The document whose details are open beside the page (None: closed): its row is marked."""
+        if doc_id != self.inspected:
+            self.inspected = doc_id
             for item in self.items:
-                item.set_details(doc_id)
+                item.set_inspected(doc_id)
+
+    def row_of(self, doc_id):
+        return next((i for i in self.items if doc_id in i.ids), None)
 
     def _matches(self, item):
         return not self.query or self.query in item.search_text
 
     def set_query(self, query):
-        """The page's search: cards that don't match are hidden, not rebuilt."""
+        """The page's search: rows that don't match are hidden, not rebuilt."""
         self.query = query.strip().casefold()
         for item in self.items:
             match = self._matches(item)
-            if item.isHidden() == match:    # only the cards whose answer changed
+            if item.isHidden() == match:    # only the rows whose answer changed
                 item.setVisible(match)
 
     def shown_documents(self):

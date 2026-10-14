@@ -81,12 +81,17 @@ CHECKLIST_MAX = 220     # the ticks of selected-category mode scroll beyond this
 PREVIEW_MAX = 560       # tallest details preview; the page is fitted to the panel width below this
 PREVIEW_MIN = 200       # the details preview never shrinks below this; the panel scrolls instead
 TEXT_MIN = 320          # a card's buttons sit at its right only while its text keeps this much room
-MATCH_MIN = 520         # the same for a card that offers matching categories
+LIST_MIN = 520          # decision and auto-filed lists: details sit beside them only while they keep this much
+LIST_MAX = 1120         # those lists stop growing here, so a name and its buttons stay close on wide screens
+BUTTON_TEXT_MAX = 20    # characters of a category name inside a button; the rest ends in "…"
+STATUS_COLUMN = 150     # the review status column of the auto-filed list
+COLUMNS_MIN = 780       # narrower, that list puts the category and status on a second line in each row
 DATE_COLUMN_MIN = 760   # the document list itself: narrower (the details panel beside it), no date column
 PREVIEW_KEEP = 8        # drawn pages kept, so paging back draws nothing
 
 # -- motion ---------------------------------------------------------------------------------------------------
-MOTION_STANDARD = 180   # the details panel sliding in
+MOTION_STANDARD = 180   # the details panel sliding in and out
+MOTION_QUICK = 120      # a row's choices opening
 MOTION_PANEL = 200      # the toast
 PREVIEW_SETTLE = 150    # after the last resize step, before the page is drawn again at its new size
 TOAST = 5000            # how long a message stays

@@ -37,8 +37,8 @@ def build(base):
     for n, name in enumerate(names):
         make_pdf(base / "src" / name, title(100 + n))
         doc, _ = org.record(base / "src" / name, *read_and_analyze(base / "src" / name))
-        if n % 2 == 0:                          # one long name is filed, the other waits
-            org.file(doc, cats[n])
+        if n % 2 == 0:                          # one long name is filed (by the app itself), the other waits
+            org.file(doc, cats[n], *(("machine-assigned", {"documents": 3}) if n < 6 else ()))
     for n in range(IMPORTS):
         make_pdf(base / "more" / f"Extra {n:02d}.pdf", title(300 + n))
     org.catalog.close()
@@ -49,10 +49,11 @@ def run(base):
     from PySide6.QtCore import QPoint, Qt
     from PySide6.QtGui import QFont, QFontDatabase, QKeySequence
     from PySide6.QtTest import QTest
-    from PySide6.QtWidgets import QAbstractButton, QAbstractScrollArea, QApplication, QLineEdit, QScrollArea
+    from PySide6.QtWidgets import QAbstractButton, QAbstractScrollArea, QApplication, QLabel, QLineEdit, QScrollArea
 
     from classifile.app import decision, make_app
-    from classifile.app.main import ALL, DECIDE, DOC, SETTINGS, MainWindow
+    from classifile.app import widgets
+    from classifile.app.main import ALL, AUTO, DECIDE, DOC, SETTINGS, MainWindow
     from classifile.catalog.db import Catalog
     from classifile.organizer import Organizer
 
@@ -161,6 +162,14 @@ def run(base):
         w.show_details(item.ids[0])
         look("decision page with details")
         item.toggle_expanded()
+        w.close_details()
+        w.show_view(AUTO)
+        look("Filed automatically")
+        row = next(i for i in w.auto_page.items if i.title.full == long_filed)
+        if not shortened(row.title, long_filed):
+            found.append("auto-filed row: the long name is not shortened with its full name on hover")
+        w.show_details(row.doc_id)
+        look("Filed automatically with details")
         w.close_details()
         w.show_view(SETTINGS)
         look("Settings")
@@ -317,7 +326,27 @@ def run(base):
     if area.value() != at:
         found.append(f"the page scrolled from {at} to {area.value()}")
     results.append((f"Typing in a card while {IMPORTS} documents import: text, panel, cursor and scroll stay", found, ""))
-    results.append(("Reduce motion: every change is instant", None, "not built yet (phase 4)"))
+    found, real = [], widgets.reduced_motion
+    widgets.reduced_motion = lambda: True
+    try:
+        w.resize(1536, 864)
+        w.show_view(DECIDE)
+        item = w.decision.items[0]
+        w.show_details(item.ids[0])
+        if w.slide.state() == w.slide.State.Running:
+            found.append("details still slide in")
+        w.close_details()
+        if any(isinstance(c, QLabel) and c.testAttribute(Qt.WA_TransparentForMouseEvents)
+               for c in w.workspace.children()):
+            found.append("a picture of the details still slides away")
+        item.toggle_expanded()
+        if item.expanded.maximumHeight() != widgets.QWIDGETSIZE_MAX:
+            found.append("a row's choices still unfold")
+        item.toggle_expanded()
+    finally:
+        widgets.reduced_motion = real
+    results.append(("Reduce motion: details and a row's choices change at once", found,
+                    "Windows' Animation effects setting is simulated here; the app reads it from Windows"))
     # -- light and dark: the same layout checks with each palette ---------------------------------------------------
     from tools.render_window import dark_palette
     found, light = [], app.palette()

@@ -29,9 +29,9 @@ from classifile.app.decision import DecisionPage
 from classifile.app.details import DetailsPanel
 from classifile.app.models import DOC, SORTS, CategoryModel, DocumentFilter, DocumentModel, sorted_by_name
 from classifile.app.widgets import (
-    CHECKLIST_MAX, DATE_COLUMN_MIN, DETAILS_MAX, DETAILS_MIN, DETAILS_WIDTH, FILE_ICON, GROUP, MIN_WINDOW,
+    CHECKLIST_MAX, DATE_COLUMN_MIN, DETAILS_MAX, DETAILS_MIN, DETAILS_WIDTH, FILE_ICON, GROUP, LIST_MIN, MIN_WINDOW,
     MOTION_STANDARD, NARROW, PAD, RELATED, SEARCH_MAX, SECTION, SIDEBAR_WIDTH, STYLE, SUPPORTED, TOAST, TOAST_LONG,
-    WIDE, WINDOW, box,
+    WIDE, WINDOW, box, motion, slide_away,
     DropOverlay, ElidedLabel, Notices, PickerDialog, PreviewOverlay, Toast, wrappable,
 )
 from classifile.copies.engine import CopyError
@@ -49,7 +49,8 @@ READ_WORKERS = min(4, os.cpu_count() or 2)  # documents read (and OCR'd) at once
 WAITING = ("needs_decision", "pending", "failed")
 APPEARANCES = (("system", "Follow Windows", Qt.ColorScheme.Unknown), ("light", "Light", Qt.ColorScheme.Light),
                ("dark", "Dark", Qt.ColorScheme.Dark))
-SEARCH_HINTS = {ALL: "Search all documents…", RECENT: "Search recently added…", DECIDE: "Search these documents…"}
+SEARCH_HINTS = {ALL: "Search all documents…", RECENT: "Search recently added…", DECIDE: "Search these documents…",
+                AUTO: "Search these documents…"}
 
 
 @lru_cache(maxsize=4096)
@@ -91,7 +92,7 @@ class MainWindow(QWidget):
         self.deferred = []          # "Leave pending": moved to the end of the decision page for this session
         self.view = (ALL, None)     # ("all" | "decide" | "recent" | "settings" | "category", category id)
         self.details_open = False
-        self.decide_doc = None      # the waiting document whose details are open beside the decision page
+        self.inspected = None       # the document whose details are open beside the decision or auto-filed page
         self.missing = {}           # waiting doc_id -> its original is not where it was (looked for on request)
         self.waiting_docs = []      # the waiting documents as of the last refresh, with what their cards show
         self.doc_rows = []          # every document as of the last refresh
@@ -569,6 +570,10 @@ class MainWindow(QWidget):
     # -- views ------------------------------------------------------------------------------------------------
     def show_view(self, key, category=None):
         self._clear_search()        # no hidden text ever filters a page
+        if key != self.view[0]:
+            self.inspected = None   # another page: its details close
+            if self.view[0] == AUTO:
+                self.auto_page.leave()
         self.view, self.since = (key, category), recent_since()
         if key in self.nav:
             self.nav[key].setChecked(True)
@@ -665,8 +670,6 @@ class MainWindow(QWidget):
         cats = self._fill_categories()
         self.waiting_docs = waiting = self.decision_docs(recheck, cats)
         n = len(waiting)
-        if self.decide_doc not in [d["id"] for d in waiting]:
-            self.decide_doc = None  # filed or removed: its details close
         self.setWindowTitle(f"ClassiFile — {n} waiting" if n else "ClassiFile")
         self.decide_count.setText(str(n) if n else "")
         if self.view[0] == "category" and self.cat_model.get(self.view[1]) is None:
@@ -676,9 +679,15 @@ class MainWindow(QWidget):
             self.nav[key].setChecked(True)
         self._select_category()
         self._fill_list(self.org.catalog.all_documents())
-        filed_by_app = [r for r in self.doc_rows if r["provenance"] == "machine-assigned" and r["status"] == "filed"]
-        self.auto_count.setText(str(len(filed_by_app)) if filed_by_app else "")
+        reviewed = self.auto_page.reviewed      # reviewed on the page just now: listed until it is left
+        filed_by_app = [r for r in self.doc_rows if r["status"] == "filed" and (
+            r["provenance"] == "machine-assigned" or r["id"] in reviewed)]
         self.auto_page.show_docs(filed_by_app)
+        awaiting = self.auto_page.awaiting()
+        self.auto_count.setText(str(awaiting) if awaiting else "")
+        rows = [d["id"] for d in waiting] if key == DECIDE else [r["id"] for r in filed_by_app] if key == AUTO else []
+        if self.inspected not in rows:
+            self.inspected = None   # filed, removed or moved away: its details close
         if select_docs is not None:
             self.select_docs(select_docs)
         if key == SETTINGS:
@@ -719,16 +728,20 @@ class MainWindow(QWidget):
             self.decision.set_query(q)
             shown = self.decision.shown_documents()
         elif key == AUTO:
-            total = len(self.auto_page.items)
+            total = self.auto_page.awaiting()
+            self.auto_page.set_query(q)
+            shown = self.auto_page.shown_documents()
         elif key != SETTINGS:
             total, shown = self.filter.total(), self.filter.rowCount()
         self.page_title.setText(title + (f" · {total}" if total else ""))
-        searchable = key not in (SETTINGS, AUTO) and not empty and (key != DECIDE or bool(total))
+        searchable = key != SETTINGS and not empty and (key not in (DECIDE, AUTO) or bool(shown or q))
         self.toolbar.setVisible(searchable)
         for w in (self.sort, self.details_toggle):
-            w.setVisible(key != DECIDE)
+            w.setVisible(key not in (DECIDE, AUTO))     # rows open their own details there
         self.search.setPlaceholderText(SEARCH_HINTS.get(key) or f"Search {title}…")
         searching = bool(q) and searchable
+        if key == AUTO:
+            total = len(self.auto_page.items)
         self.result_count.setText(f"{shown} of {total}" if searching else "")
         self.result_count.setVisible(searching)
         if key == SETTINGS:
@@ -815,8 +828,9 @@ class MainWindow(QWidget):
             notices.append(("warning", f"{n} document{'s have' if n > 1 else ' has'} moved since it was added. "
                             "Locate the original to file it.", "Review", self.review))
         ready = len(waiting) - len(unreadable)
-        if ready and self.view[0] != DECIDE:
-            notices.append(("info", f"{ready} document{'s need' if ready > 1 else ' needs'} your decision.",
+        if ready and self.view[0] != DECIDE:    # on the auto-filed page a quiet line: that page is for reviewing
+            notices.append(("quiet" if self.view[0] == AUTO else "info",
+                            f"{ready} document{'s need' if ready > 1 else ' needs'} your decision.",
                             "Review", self.review))
         self.notices.show_notices(notices[:3])
 
@@ -874,9 +888,10 @@ class MainWindow(QWidget):
         self._place_details()
 
     def show_details(self, doc_id):
-        if self.view[0] == DECIDE:  # stays on the page: the pages open beside the item and its buttons
-            self.decide_doc = doc_id
-            self.details.show_doc(doc_id)
+        if self.view[0] in (DECIDE, AUTO):  # stays on the page: the details open beside the rows and their buttons
+            if (self.inspected, self.details.doc_id) != (doc_id, doc_id) or self.details.isHidden():
+                self.inspected = doc_id
+                self.details.show_doc(doc_id)   # the list is not touched: it keeps its scroll position
             return self._place_details()
         if self.view[0] == SETTINGS:
             self.show_view(ALL)
@@ -884,27 +899,37 @@ class MainWindow(QWidget):
         self.set_details_open(True)
 
     def close_details(self):
-        self.decide_doc = None
+        page, inspected = self.stack.currentWidget(), self.inspected
+        self.inspected = None
         self.set_details_open(False)
+        row = page.row_of(inspected) if inspected and page in (self.decision, self.auto_page) else None
+        if row is not None and row.isVisible():
+            row.setFocus()                      # the keyboard goes back to the row it was looking at
 
     def _place_details(self):
-        """Wide windows: the panel sits beside the list. Narrower: it opens over the list. On the decision page it
-        is always beside the items, so their buttons and the category field stay in reach."""
+        """Beside the list while both stay comfortable to use; otherwise over the list, with a way back. The
+        document list goes by the window's width; the decision and auto-filed lists by the room they keep."""
         page = self.stack.currentWidget()
-        self.decision.set_details(self.decide_doc)
-        show = (self.details_open and page is self.table) or (self.decide_doc is not None and page is self.decision)
-        wide = self.width() >= WIDE or page is self.decision
+        rows = page in (self.decision, self.auto_page)
+        for p in (self.decision, self.auto_page):
+            p.set_inspected(self.inspected if p is page else None)
+        show = (self.details_open and page is self.table) or (self.inspected is not None and rows)
+        wide = self.content.width() - DETAILS_MIN >= LIST_MIN if rows else self.width() >= WIDE
         was_hidden = self.details.isHidden()
         if not show:
-            self.details.hide()
+            if not was_hidden:
+                slide_away(self.details, self.workspace)
             return
         if wide and self.details.parent() is not self.content:
             self.content.addWidget(self.details)
             default = max(DETAILS_WIDTH, min(DETAILS_MAX, self.content.width() * 3 // 10))
             width = max(DETAILS_MIN, self._setting("ui_details_width", default))
+            if rows:                            # the list keeps its room
+                width = min(width, self.content.width() - LIST_MIN)
             self.content.setSizes([max(300, self.content.width() - width), width])
         elif not wide and self.details.parent() is not self.workspace:
             self.details.setParent(self.workspace)
+        self.details.set_overlay(not wide)
         self.details.show()
         if not wide:
             g = self.content.geometry()
@@ -914,6 +939,7 @@ class MainWindow(QWidget):
         if was_hidden:  # slides in at its final size, so the page picture is drawn once
             QCoreApplication.sendPostedEvents(self.content, QEvent.LayoutRequest)  # the splitter places it now
             self.slide.stop()
+            self.slide.setDuration(motion(MOTION_STANDARD))
             self.slide.setStartValue(QPoint(self.details.parentWidget().width(), self.details.y()))
             self.slide.setEndValue(self.details.pos())
             self.slide.start()

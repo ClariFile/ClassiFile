@@ -1,4 +1,5 @@
 """Small shared widgets and the visual style of the main window."""
+import sys
 from pathlib import Path
 
 from PySide6.QtCore import (
@@ -9,6 +10,8 @@ from PySide6.QtWidgets import (
     QDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QPushButton, QScrollArea,
     QSizePolicy, QToolButton, QVBoxLayout, QWidget,
 )
+
+QWIDGETSIZE_MAX = (1 << 24) - 1
 
 from classifile.analysis.candidates import name_key
 from classifile.app import ICON_DIR
@@ -29,7 +32,7 @@ def box(layout, margins=0, spacing=RELATED):
     return layout
 
 STYLE = f"""
-QWidget {{ font-family: "{FONT}"; font-size: {TEXT_BODY}px; }}
+QWidget {{ font-family: "{FONT}"; font-size: {TEXT_BODY}px; accent-color: {TEAL}; }}  /* ticks in ClassiFile teal */
 QLabel#pageTitle, QLabel#hero {{ font-size: {TEXT_TITLE}px; font-weight: {WEIGHT_STRONG}; }}
 QLabel#heading {{ font-size: {TEXT_HEADING}px; font-weight: {WEIGHT_STRONG}; }}
 QLabel#lead {{ font-size: {TEXT_HEADING}px; }}
@@ -54,15 +57,19 @@ QPushButton#link, QToolButton#link {{ border-color: transparent; color: palette(
 QToolButton#disclosure {{ background: transparent; border: {HAIR}px solid transparent;
                           border-radius: {RADIUS_CONTROL}px; font-weight: {WEIGHT_STRONG};
                           padding: {RELATED - HAIR}px 0; }}
-QToolButton#more {{ border: {HAIR}px solid {BORDER}; border-radius: {RADIUS_CONTROL}px;
+QToolButton#more {{ border: {HAIR}px solid transparent; border-radius: {RADIUS_CONTROL}px;
                     font-size: {TEXT_HEADING}px; font-weight: {WEIGHT_STRONG}; padding: 0;
                     min-width: {CONTROL - 2 * HAIR}px; max-width: {CONTROL - 2 * HAIR}px;
                     min-height: {CONTROL - 2 * HAIR}px; max-height: {CONTROL - 2 * HAIR}px; }}
 QPushButton#icon {{ border-color: transparent; padding: {RELATED - HAIR}px 0; min-width: {CONTROL - 2 * HAIR}px;
                     max-width: {CONTROL - 2 * HAIR}px; }}
+QPushButton#quiet {{ border-color: transparent; }}
+QPushButton#quiet:checked, QPushButton#accent {{ border-color: {TEAL}; }}
+QPushButton#accent {{ font-weight: {WEIGHT_STRONG}; }}
 /* Focus changes only the border colour: every control keeps its size. */
-QPushButton:focus, QPushButton#link:focus, QPushButton#icon:focus, QToolButton#more:focus,
+QPushButton:focus, QPushButton#link:focus, QPushButton#icon:focus, QPushButton#quiet:focus, QToolButton#more:focus,
 QToolButton#disclosure:focus, QLineEdit:focus, QComboBox:focus {{ outline: none; border-color: {TEAL}; }}
+QPushButton#accent:focus {{ border-color: palette(text); }}
 QPushButton#primary:focus {{ border-color: palette(text); }}
 QPushButton#nav {{ text-align: left; border: none; background: transparent;
                    padding: {NAV_PAD}px {GROUP - BAR}px; border-left: {BAR}px solid transparent; border-radius: 0;
@@ -110,7 +117,12 @@ QFrame#toast QLabel {{ color: palette(window); }}
 QFrame#toast QPushButton {{ color: palette(window); border: {HAIR}px solid palette(window);
                             background: transparent; }}
 QFrame#bulk {{ border-radius: {RADIUS_CONTROL}px; background: {TEAL_BAR}; }}
-QFrame#decision {{ border-bottom: {HAIR}px solid {HAIRLINE}; }}
+/* Rows of the decision and auto-filed lists: hover is faint grey; the inspected row has the teal tint and bar;
+   a focused row has the bar alone. The bar is always there (transparent), so nothing moves. */
+QFrame#row {{ border: none; border-bottom: {HAIR}px solid {ROW_LINE}; border-left: {BAR}px solid transparent; }}
+QFrame#row:hover {{ background: {HOVER}; }}
+QFrame#row:focus {{ border-left-color: {TEAL}; }}
+QFrame#row[inspected="true"] {{ background: {TEAL_TINT}; border-left-color: {TEAL}; }}
 QFrame#details {{ border-left: {HAIR}px solid {HAIRLINE}; background: palette(window); }}
 QFrame#sidebar {{ border-right: {HAIR}px solid {HAIRLINE}; }}
 QLabel#card {{ background: palette(base); border-radius: {RADIUS_CONTROL}px; padding: {GROUP}px; }}
@@ -130,6 +142,110 @@ QFrame#previewOverlay QLabel {{ color: {WHITE}; }}
 def restyle(widget):
     widget.style().unpolish(widget)
     widget.style().polish(widget)
+
+
+def reduced_motion():
+    """Windows' "Animation effects" is off (Settings > Accessibility > Visual effects): every change is instant."""
+    if sys.platform != "win32":
+        return False
+    import ctypes
+    on = ctypes.c_int(1)
+    ok = ctypes.windll.user32.SystemParametersInfoW(0x1042, 0, ctypes.byref(on), 0)  # SPI_GETCLIENTAREAANIMATION
+    return bool(ok) and not on.value
+
+
+def motion(ms):
+    """A duration, or 0 when the system asks for reduced motion."""
+    return 0 if reduced_motion() else ms
+
+
+def unfold(widget, then=None):
+    """Show a hidden widget, growing it to its full height over a moment; then() when it has its full height."""
+    widget.show()
+    duration = motion(MOTION_QUICK)
+    if not duration:
+        return then and then()
+    grow = QPropertyAnimation(widget, b"maximumHeight", widget)
+    grow.setDuration(duration)
+    grow.setStartValue(0)
+    grow.setEndValue(widget.sizeHint().height())
+    grow.setEasingCurve(QEasingCurve.OutCubic)
+    grow.finished.connect(lambda: (widget.setMaximumHeight(QWIDGETSIZE_MAX), then and then()))
+    grow.start(QPropertyAnimation.DeleteWhenStopped)
+
+
+def slide_away(widget, parent):
+    """A closing panel: it is hidden at once (nothing waits for the motion), and a picture of it slides out
+    to the right edge of parent, then goes."""
+    duration = motion(MOTION_STANDARD)
+    if duration and widget.isVisible():
+        ghost = QLabel(parent)
+        ghost.setPixmap(widget.grab())
+        ghost.setAttribute(Qt.WA_TransparentForMouseEvents)
+        ghost.setGeometry(widget.geometry().translated(widget.parentWidget().mapTo(parent, QPoint(0, 0))))
+        ghost.show()
+        ghost.raise_()
+        away = QPropertyAnimation(ghost, b"pos", ghost)
+        away.setDuration(duration)
+        away.setEndValue(QPoint(parent.width(), ghost.y()))
+        away.setEasingCurve(QEasingCurve.InCubic)
+        away.finished.connect(ghost.deleteLater)
+        away.start()
+    widget.hide()
+
+
+def scroll_area_of(widget):
+    area = widget.parentWidget()
+    while area is not None and not isinstance(area, QScrollArea):
+        area = area.parentWidget()
+    return area
+
+
+class ListRow(QFrame):
+    """A row of the decision and auto-filed lists (subclasses set self.ids). A click on the row itself, not on
+    its buttons or tick, inspects the document: its details open beside the list. Inspecting never files or
+    confirms anything. Up and Down move to the row above or below; details, when open, follow."""
+
+    def __init__(self, controller):
+        super().__init__()
+        self.setObjectName("row")
+        self.setAttribute(Qt.WA_Hover)
+        self.setFocusPolicy(Qt.StrongFocus)
+        self.c, self.inspected = controller, False
+
+    def set_inspected(self, doc_id):
+        on = doc_id is not None and doc_id in self.ids
+        if on != self.inspected:
+            self.inspected = on
+            self.setProperty("inspected", on)
+            restyle(self)
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.LeftButton:
+            self.setFocus(Qt.MouseFocusReason)
+            self.c.show_details(self.ids[0])
+        super().mousePressEvent(e)
+
+    def keyPressEvent(self, e):
+        if e.key() in (Qt.Key_Up, Qt.Key_Down):
+            layout = self.parentWidget().layout()
+            rows = [w for w in (layout.itemAt(i).widget() for i in range(layout.count()))
+                    if isinstance(w, ListRow) and w.isVisible()]
+            at = rows.index(self) + (1 if e.key() == Qt.Key_Down else -1)
+            if 0 <= at < len(rows):
+                rows[at].setFocus(Qt.OtherFocusReason)
+                scroll_area_of(self).ensureWidgetVisible(rows[at], 0, 0)
+                if self.c.inspected is not None:
+                    self.c.show_details(rows[at].ids[0])
+        else:
+            super().keyPressEvent(e)
+
+
+def wrapped(label):
+    """A label that wraps and never widens its row: a long word or path wraps or is cut, never scrolls sideways."""
+    label.setWordWrap(True)
+    label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+    return label
 
 
 def wrappable(path):
@@ -266,7 +382,8 @@ class Notices(QWidget):
         self.items = []
 
     def show_notices(self, notices):
-        """notices: [(kind "error" | "warning" | "info", text, action label or None, callback)]."""
+        """notices: [(kind "error" | "warning" | "info" | "quiet", text, action label or None, callback)].
+        "quiet": one line without a panel, its action a link, for a page that is about something else."""
         if [n[:3] for n in notices] == self.items and self.box.count() == len(notices):
             return self.setVisible(bool(notices))   # the same notices: nothing is rebuilt
         while self.box.count():
@@ -275,14 +392,15 @@ class Notices(QWidget):
             old.deleteLater()
         self.items = []
         for kind, text, action, callback in notices:
+            quiet = kind == "quiet"
             frame = QFrame()
-            frame.setObjectName("notice")
-            h = box(QHBoxLayout(frame), (GROUP, RELATED, RELATED, RELATED), GROUP)
+            frame.setObjectName("" if quiet else "notice")
+            h = box(QHBoxLayout(frame), (BAR, 0, 0, 0) if quiet else (GROUP, RELATED, RELATED, RELATED), GROUP)
             icon = QLabel()
             icon.setPixmap(status_icon("failed" if kind == "error" else "needs_decision").pixmap(FILE_ICON, FILE_ICON))
             label = QLabel(text)
             label.setWordWrap(True)
-            label.setObjectName("error" if kind == "error" else "")
+            label.setObjectName("error" if kind == "error" else "secondary" if quiet else "")
             frame.setParent(self)
             label.setParent(frame)
             label.ensurePolished()                  # measure with the notice font, not the default
@@ -292,6 +410,7 @@ class Notices(QWidget):
             h.addWidget(label, 1)
             if action:
                 button = QPushButton(action)
+                button.setObjectName("link" if quiet else "")
                 button.clicked.connect(callback)
                 h.addWidget(button)
             h.addStretch(1)
@@ -329,6 +448,7 @@ class Toast(QFrame):
         self.action.setVisible(bool(action))
         self.adjustSize()
         self.slide.stop()
+        self.slide.setDuration(motion(MOTION_PANEL))
         self.place()
         if self.isHidden():  # up from below the window's bottom edge, in the right corner
             self.slide.setStartValue(QPoint(self.x(), self.parent().height()))
