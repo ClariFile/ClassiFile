@@ -1,6 +1,9 @@
 """The two themes: every pair of colours the interface puts together is readable (WCAG contrast ratios).
 Text at least 4.5:1; icons, control borders, the focus and selection bars at least 3:1. Dividers between rows
-and panels are decorative and not held to 3:1; disabled text is exempt, as WCAG allows."""
+and panels are decorative and not held to 3:1; disabled text is exempt, as WCAG allows. A primary button is told
+by its white label (checked), not by its fill against the page.
+And the owner's rules: teal only on the primary button, the selection bar, the focus outline and links; every large
+surface neutral grey; hover a grey change."""
 import pytest
 from test_app import app  # noqa: F401  the QApplication fixture
 
@@ -31,22 +34,22 @@ def pairs(t):
                 (f"secondary text on {surface}", t["secondary"], t[surface], TEXT)]
     for surface in ("window", "base", "raised", "notice", "selection", "hover"):
         out += [(f"{status} text on {surface}", t[status], t[surface], TEXT) for status in ("amber", "red", "green")]
-    for surface in ("base", "raised", "window"):
-        out.append((f"accent text (tags) on {surface}", t["accent"], t[surface], TEXT))
+    for surface in ("window", "base", "raised", "selection", "hover"):
+        out.append((f"links (teal) on {surface}", t["link"], t[surface], TEXT))
     out += [("primary button text", t["on_primary"], t["primary"], TEXT),
             ("primary button text, hovered", t["on_primary"], t["primary_hover"], TEXT),
-            ("selected text in a field", t["on_primary"], t["accent"], TEXT),
+            ("text on a pressed toggle", t["text"], t["pressed"], TEXT),
             ("toast text", t["on_toast"], t["toast"], TEXT),
             ("text on the dark overlays", WHITE, OVERLAY, TEXT)]
     for surface in ("window", "sidebar", "base", "raised", "inset"):
         out += [(f"control border on {surface}", t["control"], t[surface], GRAPHIC),
                 (f"focus border on {surface}", t["accent"], t[surface], GRAPHIC),
-                (f"primary button on {surface}", t["primary"], t[surface], GRAPHIC)]
+                (f"a ticked box on {surface}", t["tick"], t[surface], GRAPHIC)]
     for surface in ("selection", "nav", "base", "sidebar", "hover"):
         out.append((f"selection bar beside {surface}", t["accent"], t[surface], GRAPHIC))
     for surface in ("window", "base", "raised", "selection", "hover", "notice"):
         out += [(f"{role} icon on {surface}", t[role], t[surface], GRAPHIC)
-                for role in ("amber", "red", "green", "secondary", "accent")]
+                for role in ("amber", "red", "green", "secondary")]
     out.append(("the mark inside the failed icon", t["base"], t["red"], GRAPHIC))
     for surface in ("window", "sidebar", "base", "raised", "selection", "nav", "hover"):
         out += [(f"category dot {c} on {surface}", c, t[surface], GRAPHIC) for c in CATEGORY_COLORS]
@@ -62,16 +65,42 @@ def test_every_text_and_background_pair_is_readable(name):
     assert not failing, f"{name}: " + "; ".join(failing)
 
 
+def chroma(colour):
+    """How coloured a colour is: the spread of its red, green and blue (0 for a grey)."""
+    rgb = [int(colour.lstrip("#")[i:i + 2], 16) for i in (0, 2, 4)]
+    return max(rgb) - min(rgb)
+
+
+@pytest.mark.parametrize("name", sorted(THEMES))
+def test_teal_only_where_the_owner_allows_it_and_large_surfaces_are_neutral(name):
+    import re
+
+    from classifile.app.widgets import style_sheet
+
+    t = THEMES[name]
+    for role in ("window", "sidebar", "base", "raised", "inset", "hover", "pressed", "notice", "bulk", "toast",
+                 "divider", "control", "disabled_fill"):
+        assert chroma(t[role]) <= 12, f"{name}: {role} {t[role]} is not a neutral grey"
+    assert chroma(t["selection"]) <= 24 and t["selection"] == t["nav"]        # a faint tint, with the bar
+    assert t["primary"] == "#0F766E" and t["primary_hover"] == "#115E59"      # the same in both themes
+    for block in style_sheet(t).split("}"):
+        selector, _, body = block.partition("{")
+        if t["accent"] in body:                 # focus outlines and selection bars only
+            assert re.search(r"focus|selected|nav:checked|inspected|#primary", selector), selector.strip()
+        if ":hover" in selector:
+            assert t["accent"] not in body and t["selection"] not in body, selector.strip()   # hover is grey
+
+
 def test_the_themes_are_complete_and_the_style_sheet_takes_nothing_from_the_system():
     from classifile.app.widgets import style_sheet
 
     assert set(THEMES["light"]) == set(THEMES["dark"])                 # every role in both themes
-    assert len(set(CATEGORY_COLORS)) == 8
+    assert len(set(CATEGORY_COLORS)) == 8 and all(chroma(c) <= 128 for c in CATEGORY_COLORS)   # muted
     for name, t in THEMES.items():
         sheet = style_sheet(t)
         assert "palette(" not in sheet and "rgba(" not in sheet, name  # no system palette, no grey mixes
         assert sheet.count("white") == 2, name                         # only the two dark overlays
-    assert THEMES["light"]["on_primary"] == "#FFFFFF"                  # white text on light primary buttons only
+        assert t["on_primary"] == "#FFFFFF"                             # and the primary buttons' label
 
 
 def test_switching_the_theme_rebuilds_the_style_sheet_the_palette_and_the_icons(app, make_org):

@@ -241,6 +241,26 @@
   gone); `tools.check_ui` checks both themes through the setting.
 - Screenshots of the main pages in both themes: `data\render-light-*.png` and `data\render-dark-*.png` (local).
 
+**Calmer colours (2026-10-14, the owner's request)**
+- **Dark theme is neutral charcoal**, with no teal in the backgrounds: #1C1E21 page, #18191C sidebar, #212428
+  lists, #272A2F panels, #33373D lines, #E6E8EB and #A0A6AD text.
+- **Primary buttons** are #0F766E with white text in both themes. #2DD4BF is gone.
+- **Selection** is a faint teal tint (#223234 in dark) with a 2 px bar (#2B9C8E in dark).
+- **Status colours** are muted: amber #D29922, green #57AB5A, red #EA756F. #E5534B was under 4.5:1 on panels and
+  the selection.
+- **Rules for both themes, now tested in `tests/test_theme.py`:**
+  - Teal only on the primary button, the selection bar, the focus outline and links.
+  - Large surfaces and lines are neutral grey; hover is a grey change.
+  - Ticked boxes, toggles, accent buttons, tags, menus and the drop overlay are neutral.
+- **Category dots:** 8 muted colours, 8 px.
+- **Values changed where a check failed:**
+  - outlines #82868C (light) and #777A7F (dark), since #7D8796 and #737A83 had a blue tint;
+  - the light toast #26292E;
+  - the overlays #16181B, since #111827 was navy;
+  - links in dark #38A899, to reach 4.5:1 on panels.
+- A primary button is told by its white label; its fill against the page is no longer held to 3:1.
+- Screenshots of both themes: `data\theme-calm\` (local).
+
 ## Development results so far
 
 These counts describe development data only. They are not accuracy estimates.

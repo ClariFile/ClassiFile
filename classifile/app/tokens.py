@@ -7,7 +7,8 @@ Sizes are logical pixels (Qt scales them with the display); durations are millis
 # style sheet and the Qt palette are built from the theme in use (widgets.use_theme), so nothing comes from the
 # system palette and nothing mixes greys over it. tests/test_theme.py checks the contrast of every pair: text at
 # least 4.5:1, icons and control borders at least 3:1. Dividers between rows and panels are decorative lines and
-# are not held to 3:1.
+# are not held to 3:1. Teal appears only on the primary button, the selection bar, the focus outline and links;
+# everything else is neutral grey, and hover is a grey change.
 THEMES = {
     "light": {
         "window": "#F6F7F9",        # the page behind everything
@@ -19,58 +20,65 @@ THEMES = {
         "secondary": "#4B5563",     # captions, counts, reasons
         "disabled": "#6B7280",
         "divider": "#D9DEE5",       # lines between rows and panels (decorative)
-        "control": "#7D8796",       # the outline of buttons, fields and ticks
-        "accent": "#0F766E",        # focus, selection bar, links, ticks
-        "primary": "#0F766E",       # primary buttons
+        "control": "#82868C",       # the outline of buttons, fields and ticks (neutral grey)
+        "tick": "#4B5563",          # a ticked box: neutral, like every control
+        "accent": "#0F766E",        # teal: the selection bar and the focus outline
+        "link": "#0F766E",          # teal links in text
+        "primary": "#0F766E",       # primary buttons, the one filled teal
         "primary_hover": "#115E59",
         "on_primary": "#FFFFFF",
-        "selection": "#E0F2EF",     # the inspected row, selected list items, pressed toggles
+        "selection": "#E0F2EF",     # the inspected row and selected items: a faint teal tint, with the bar
         "nav": "#E0F2EF",           # the current view in the sidebar
-        "hover": "#EAEEF2",
+        "hover": "#EAEEF2",         # a light grey change, never teal
+        "pressed": "#E2E6EB",       # a toggle that is on
         "notice": "#E8EDF2",
-        "bulk": "#E0F2EF",          # the bar for several selected documents
+        "bulk": "#E8EDF2",          # the bar for several selected documents
         "disabled_fill": "#E5E7EB",
-        "toast": "#1F2937",
+        "toast": "#26292E",
         "on_toast": "#F9FAFB",
         "amber": "#AA4F09",         # waiting
         "red": "#B91C1C",           # errors
         "green": "#14793A",         # approved
     },
-    "dark": {
-        "window": "#0B1215",
-        "sidebar": "#0F1A1D",
-        "base": "#142226",
-        "raised": "#1A2B30",
-        "inset": "#1A2B30",
-        "text": "#F1F5F4",
-        "secondary": "#A7B6B4",
-        "disabled": "#7C8E8C",
-        "divider": "#2A3D42",
-        "control": "#5F7E85",
-        "accent": "#2DD4BF",
-        "primary": "#2DD4BF",
-        "primary_hover": "#5EEAD4",
-        "on_primary": "#042F2E",
-        "selection": "#0D3532",
-        "nav": "#0D3532",
-        "hover": "#1C3036",
-        "notice": "#1C3036",
-        "bulk": "#0D3532",
-        "disabled_fill": "#22363B",
-        "toast": "#E2ECEA",
-        "on_toast": "#0B1215",
-        "amber": "#F59E0B",
-        "red": "#F87171",
-        "green": "#4ADE80",
+    "dark": {                       # neutral charcoal: no tint in the backgrounds
+        "window": "#1C1E21",
+        "sidebar": "#18191C",
+        "base": "#212428",
+        "raised": "#272A2F",
+        "inset": "#272A2F",
+        "text": "#E6E8EB",
+        "secondary": "#A0A6AD",
+        "disabled": "#7A8087",
+        "divider": "#33373D",
+        "control": "#777A7F",
+        "tick": "#A0A6AD",
+        "accent": "#2B9C8E",
+        "link": "#38A899",          # the bar's teal, a step lighter: 4.5:1 on the raised panels and the selection
+        "primary": "#0F766E",
+        "primary_hover": "#115E59",
+        "on_primary": "#FFFFFF",
+        "selection": "#223234",     # about 12% of the bar's teal over the list
+        "nav": "#223234",
+        "hover": "#2A2E33",
+        "pressed": "#33373D",
+        "notice": "#272A2F",
+        "bulk": "#272A2F",
+        "disabled_fill": "#2E3238",
+        "toast": "#3A3F46",
+        "on_toast": "#E6E8EB",
+        "amber": "#D29922",
+        "red": "#EA756F",           # #E5534B lightened: it was under 4.5:1 on the raised panels and the selection
+        "green": "#57AB5A",
     },
 }
-WHITE = "white"             # only on the dark overlays (and, in the light theme, primary buttons)
-OVERLAY = "#111827"         # the drop and full-preview overlays: dark in both themes
+WHITE = "white"             # only on the dark overlays (primary buttons take on_primary, white in both themes)
+OVERLAY = "#16181B"         # the drop and full-preview overlays: dark neutral charcoal in both themes
+OVERLAY_LINE = "#9CA3AF"    # the drop overlay's dashed outline: grey, not glowing
 VIOLET = "#6C47FF"          # reserved for SummarEase; unused until it exists
 # The format glyph beside a file name, and a category's dot: the same in both themes, readable on every surface
 TYPE_COLOR = {".pdf": "#9A7878", ".pptx": "#977B5C", ".docx": "#6C81A0", ".odt": "#618872"}
 UNKNOWN_TYPE = "#79808F"
-CATEGORY_COLORS = ("#307BF6", "#DD530C", "#149342", "#E04188", "#A758EE", "#088BAA", "#AE731D", "#758193")
+CATEGORY_COLORS = ("#BB6868", "#9E7947", "#83833B", "#41904E", "#3F8C85", "#5583B2", "#8276C1", "#B75EB7")   # muted
 
 # -- spacing --------------------------------------------------------------------------------------------------
 PAD = 24        # main content padding
@@ -81,7 +89,7 @@ RELATED = 8     # between related controls; label to field; icon to label
 TIGHT = 4       # inside small things: list padding, tags
 HAIR = 1        # borders and lines
 NAV_PAD = 10    # above and below a view's name in the sidebar; left of a category's name
-BAR = 3         # the selection bar at the left of a row; the drop overlay's dashes
+BAR = 2         # the selection bar at the left of a row; the drop overlay's dashes
 
 # -- text -----------------------------------------------------------------------------------------------------
 FONT = "Segoe UI"

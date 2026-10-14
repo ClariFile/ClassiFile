@@ -254,6 +254,12 @@ Run at the end of every phase that touches the window.
 
 ---
 
+## 12. Calmer colours (2026-10-14)
+
+Dark mode is neutral charcoal. Teal appears only on the primary button (#0F766E in both themes), the selection bar,
+the focus outline and links. Everything else is grey, and hover is a grey change. `tests/test_theme.py` enforces
+these rules.
+
 ## 11. Colour redesign (2026-10-14)
 
 Section 4's colour row is replaced by two complete themes in `classifile/app/tokens.py` (THEMES["light"] and
