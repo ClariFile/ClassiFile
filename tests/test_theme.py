@@ -123,3 +123,37 @@ def test_switching_the_theme_rebuilds_the_style_sheet_the_palette_and_the_icons(
         widgets.category_color("same id") in CATEGORY_COLORS                      # one colour per category, always
     w.set_appearance("system")
     w.close()
+
+
+def test_every_settings_option_shows_and_keeps_what_was_picked_at_once(app, make_org, monkeypatch):
+    from PySide6.QtGui import QStyleHints
+
+    from classifile.app.main import SETTINGS, MainWindow
+
+    original = QStyleHints.setColorScheme
+
+    def like_windows(hints, scheme):         # on Windows the change redraws the window at once (not off-screen)
+        original(hints, scheme)
+        hints.colorSchemeChanged.emit(scheme)
+
+    monkeypatch.setattr(QStyleHints, "setColorScheme", like_windows)
+    w = MainWindow(make_org(), ask_output_root=False)
+    w.show()
+    w.show_view(SETTINGS)
+    for combo, stored in ((w.appearance, lambda: w.org.catalog.get_setting("appearance")),
+                          (w.motion, lambda: w.org.catalog.get_setting("motion")),
+                          (w.auto_level, w.org.auto_level),
+                          (w.auto_scope, lambda: w.org.catalog.get_setting("auto_scope", "all"))):
+        for i in [*range(1, combo.count()), 0]:                       # every option, one pick each
+            combo.setCurrentIndex(i)
+            combo.activated.emit(i)
+            app.processEvents()
+            assert combo.currentIndex() == i and stored() == combo.itemData(i), combo.accessibleName()
+    for tick, stored in ((w.auto_folders, w.org.auto_folders),
+                         (w.close_toggle, lambda: w.org.catalog.get_setting("close_notice") != "off")):
+        for _ in range(2):                                            # on, then off: one click each
+            tick.click()
+            app.processEvents()
+            assert tick.isChecked() == stored(), tick.text()
+    w.set_appearance("system", save=True)
+    w.close()

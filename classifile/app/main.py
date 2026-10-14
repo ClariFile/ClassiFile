@@ -1362,9 +1362,9 @@ class MainWindow(QWidget):
         """Light, dark, or as Windows is set: the theme is applied whole (apply_theme)."""
         scheme = next((s for n, _, s in APPEARANCES if n == name), Qt.ColorScheme.Unknown)
         self.appearance_name = name
-        QApplication.styleHints().setColorScheme(scheme)    # the title bar and Windows' own drawing follow
-        if save:
+        if save:        # first: changing the scheme redraws the window at once, and Settings shows what is saved
             self.org.catalog.set_setting("appearance", name)
+        QApplication.styleHints().setColorScheme(scheme)    # the title bar and Windows' own drawing follow
         if hasattr(self, "stack"):
             self.apply_theme()
 
