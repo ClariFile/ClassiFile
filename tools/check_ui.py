@@ -195,7 +195,23 @@ def run(base):
     if bar.value() != at:
         found.append(f"a refresh moved the sidebar from {at} to {bar.value()}")
     results.append(("60 categories: the sidebar scrolls and keeps its place", found, ""))
-    results.append(("\"Find category…\" filters the sidebar", None, "not built yet (phase 5)"))
+    found = [] if w.find_category.isVisible() else ["no find field above the 60 categories"]
+    view, total = w.view, w.cat_sorted.rowCount()
+    w.find_category.setText("Zz one")
+    pump()
+    if w.cat_sorted.rowCount() != 1:
+        found.append(f"typing left {w.cat_sorted.rowCount()} categories, not 1")
+    if w.view != view:
+        found.append("typing changed the open view")
+    w.find_category.setText("no category is called this")
+    pump()
+    if not w.cats_none.isVisible():
+        found.append("no \"No category matches\" line when nothing matches")
+    w.find_category.clear()
+    pump()
+    if w.cat_sorted.rowCount() != total or w.cats_none.isVisible():
+        found.append("clearing did not bring every category back")
+    results.append(("\"Find category…\" filters the sidebar", found, ""))
 
     # -- Details ten times quickly ------------------------------------------------------------------------------------------
     w.show_view(ALL)
@@ -326,8 +342,8 @@ def run(base):
     if area.value() != at:
         found.append(f"the page scrolled from {at} to {area.value()}")
     results.append((f"Typing in a card while {IMPORTS} documents import: text, panel, cursor and scroll stay", found, ""))
-    found, real = [], widgets.reduced_motion
-    widgets.reduced_motion = lambda: True
+    found = []
+    widgets.set_motion("reduce")                # Settings, "Motion": Reduce motion
     try:
         w.resize(1536, 864)
         w.show_view(DECIDE)
@@ -343,10 +359,16 @@ def run(base):
         if item.expanded.maximumHeight() != widgets.QWIDGETSIZE_MAX:
             found.append("a row's choices still unfold")
         item.toggle_expanded()
+        w.file_docs(w.decision.items[0].ids, "Reduce motion check")   # a filed row: gone at once, not folding
+        pump(lambda: not w.filing)
+        layout = w.decision.list
+        if any(layout.itemAt(i).widget() and layout.itemAt(i).widget().property("leaving")
+               for i in range(layout.count())):
+            found.append("a filed row still folds away")
     finally:
-        widgets.reduced_motion = real
-    results.append(("Reduce motion: details and a row's choices change at once", found,
-                    "Windows' Animation effects setting is simulated here; the app reads it from Windows"))
+        widgets.set_motion("system")
+    results.append(("Reduce motion: details, a row's choices and a filed row change at once", found,
+                    "set in Settings here; following Windows, the app reads its Animation effects setting"))
     # -- light and dark: the same layout checks with each palette ---------------------------------------------------
     from tools.render_window import dark_palette
     found, light = [], app.palette()

@@ -190,6 +190,11 @@ MIGRATIONS = [
         at TEXT NOT NULL
     );
     """,
+    # v10: automatic new folders and automatic matching updates (decision record 2.6)
+    """
+    ALTER TABLE categories ADD COLUMN app_named INTEGER NOT NULL DEFAULT 0;  -- created and named by the app, until renamed
+    ALTER TABLE matchers ADD COLUMN trigger TEXT;   -- who started the update: user | automatic (NULL before v10)
+    """,
 ]
 
 
@@ -342,7 +347,7 @@ class Catalog:
             " JOIN snapshots s ON s.document_id = d.id WHERE d.id = ?", doc_id)
 
     _FILED = ("SELECT d.*, s.sha256, s.file_name, s.imported_at, s.source_path, c.id AS category_id,"
-              " c.name AS category, m.provenance, m.auto_json, m.role, (SELECT group_concat(category_id)"
+              " c.name AS category, c.app_named, m.provenance, m.auto_json, m.role, (SELECT group_concat(category_id)"
               " FROM memberships WHERE document_id = d.id AND role = 'secondary' AND status = 'active') AS also_ids,"
               " p.path AS copy_path,"
               " p.status AS copy_status, p.updated_at AS filed_at FROM documents d"
@@ -372,7 +377,7 @@ class Catalog:
         filed = self.all(self._FILED + "WHERE d.status = 'filed' AND m.role = 'primary' ORDER BY s.file_name, d.id")
         ids = {d["id"] for d in filed}
         rest = [dict(d) | {"category_id": None, "category": None, "copy_path": None, "copy_status": None,
-                           "filed_at": None, "provenance": None, "auto_json": None}
+                           "filed_at": None, "provenance": None, "auto_json": None, "app_named": 0}
                 for d in self.documents(None) if d["id"] not in ids]
         return sorted([dict(d) | {"also": set(d["also_ids"].split(",")) if d["also_ids"] else set()}
                        for d in filed] + rest, key=lambda d: (d["file_name"].casefold(), d["id"]))
@@ -385,7 +390,7 @@ class Catalog:
         d = self.one("SELECT d.*, s.sha256, s.file_name, s.imported_at, s.source_path FROM documents d"
                      " JOIN snapshots s ON s.document_id = d.id WHERE d.id = ?", doc_id)
         return d and dict(d) | {"category_id": None, "category": None, "copy_path": None, "copy_status": None,
-                                "filed_at": None, "provenance": None, "auto_json": None}
+                                "filed_at": None, "provenance": None, "auto_json": None, "app_named": 0}
 
     def waiting_documents(self):
         """Every document that is not filed, each with its stored analysis as JSON text (or None): one query."""
@@ -450,18 +455,28 @@ class Catalog:
             " AND m.provenance IN ('user-confirmed', 'user-corrected') AND d.status = 'filed'"
             " AND c.deleted_at IS NULL"))
 
-    def add_matcher(self, bundle, found, keep):
+    def add_matcher(self, bundle, found, keep, trigger="user"):
         """Store a trained model as the next version. keep: it becomes the active one (the one before stays as
-        "previous"); otherwise it is recorded as rejected and the active one stays. Returns the version."""
+        "previous"); otherwise it is recorded as rejected and the active one stays. trigger: "user" (Update
+        matching) or "automatic" (A7, record 2.6). Returns the version."""
         with self.lock, self.db:
             if keep:
                 self.db.execute("UPDATE matchers SET status = 'previous' WHERE status = 'active'")
             return self.db.execute(
-                "INSERT INTO matchers (created_at, status, documents, categories, check_json, bundle_json)"
-                " VALUES (?, ?, ?, ?, ?, ?)",
+                "INSERT INTO matchers (created_at, status, documents, categories, check_json, bundle_json, trigger)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (now(), "active" if keep else "rejected", sum(bundle["documents"].values()),
                  len(bundle["documents"]),
-                 json.dumps(found) if found else None, json.dumps(bundle))).lastrowid
+                 json.dumps(found) if found else None, json.dumps(bundle), trigger)).lastrowid
+
+    def latest_matcher(self):
+        """The last version trained, whatever became of it (kept or rejected), or None."""
+        return self.one("SELECT * FROM matchers ORDER BY version DESC LIMIT 1")
+
+    def matcher_log(self, n=5):
+        """The last n versions, newest first, without their bundles: what Settings lists."""
+        return self.all("SELECT version, created_at, status, documents, categories, check_json, trigger"
+                        " FROM matchers ORDER BY version DESC LIMIT ?", n)
 
     def active_matcher(self):
         """The model in use (version, created_at, documents, categories, bundle_json), or None."""
@@ -483,7 +498,8 @@ class Catalog:
             " WHERE c.deleted_at IS NULL GROUP BY m.category_id ORDER BY MAX(m.id) DESC LIMIT ?", n)]
 
     def rename_category(self, cat_id, name, key, folder_name):
-        self.run("UPDATE categories SET name = ?, name_key = ?, folder_name = ? WHERE id = ?",
+        """The user's name: a folder the app named is no longer marked as such."""
+        self.run("UPDATE categories SET name = ?, name_key = ?, folder_name = ?, app_named = 0 WHERE id = ?",
                  name, key, folder_name, cat_id)
 
     def delete_category(self, cat_id):
@@ -503,10 +519,11 @@ class Catalog:
         return self.one("SELECT * FROM categories WHERE name_key = ?", key)
 
     def add_category(self, name, key, folder_name, level="user-defined", created_by="user", description=None):
+        """created_by "machine": an automatic new folder, marked as named by the app until the user renames it."""
         cat_id = str(uuid.uuid4())
-        self.run("INSERT INTO categories (id, name, name_key, folder_name, description, level, created_by, created_at)"
-                 " VALUES (?, ?, ?, ?, ?, ?, ?, ?)", cat_id, name, key, folder_name, description, level, created_by,
-                 now())
+        self.run("INSERT INTO categories (id, name, name_key, folder_name, description, level, created_by, created_at,"
+                 " app_named) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", cat_id, name, key, folder_name, description, level,
+                 created_by, now(), int(created_by == "machine"))
         return cat_id
 
     def folder_taken(self, folder_name):

@@ -13,6 +13,10 @@ least two. For each held-out category the report says whether its documents come
   nothing to group  fewer than two of its documents are unmatched (the rest were taken for existing categories).
 It then shows the groups, with their shared key words and the names suggested for their documents.
 --compare prints the counts for several levels of similarity instead; --out also saves the report (created new).
+--folders replays automatic new folders (B2, record 2.6) instead: every group at classifile.matching.FOLDER_LEVEL
+becomes a folder, named by classifile.matching.group_name. Per held-out category it counts the folders created,
+folders mixing subjects, folders made only of documents of a category the app already has (a second folder for a
+known subject), and whether the held-out subject comes back in one folder or is split over several.
 The output shows category names, suggested names and words from documents: keep it out of tracked files.
 Counts describe development data. data/validation and data/final-eval are never read.
 """
@@ -22,7 +26,8 @@ from collections import Counter
 from pathlib import Path
 
 from classifile.catalog.db import default_data_dir
-from classifile.matching import GOOD_MATCH, GROUP_LEVEL, Centroids, fit_idf, lead, shared_words, similar_groups, vector
+from classifile.analysis.candidates import name_key
+from classifile.matching import FOLDER_LEVEL, GOOD_MATCH, GROUP_LEVEL, group_name, Centroids, fit_idf, lead, shared_words, similar_groups, vector
 from tools.match_eval import csv_families, families, load
 
 
@@ -99,11 +104,71 @@ def report(docs, rows, level, out=print):
             out(f"      suggested names: {'; '.join(n for n, _ in names.most_common(3)) or '(none)'}")
 
 
+def replay(docs, fam, level=FOLDER_LEVEL):
+    """Automatic new folders, each category held out in turn: one row per category with the folders the app would
+    create, each {"own", "others", "kind", "name", "named"}. kind: "new subject" (only the held-out category's
+    documents), "mixed" (several categories), "known subject" (only documents of one category the app has).
+    named: "repeated" (suggested for several of its documents), "best" or None (no free name: stays a question)."""
+    rows = []
+    for r in evaluate(docs, fam, level):
+        taken = {name_key(d["category"]) for d in docs if d["category"] != r["category"]}
+        folders = []
+        for g in r["groups"]:
+            members = g["own"] + g["others"]
+            cats = {docs[i]["category"] for i in members}
+            kind = "mixed" if len(cats) > 1 else "new subject" if g["own"] else "known subject"
+            name = group_name([docs[i]["suggested"] for i in members], taken)
+            repeated = name and sum(name_key(name) in {name_key(s["name"]) for s in docs[i]["suggested"]}
+                                    for i in members) > 1
+            folders.append(g | {"kind": kind, "name": name, "named": name and ("repeated" if repeated else "best")})
+        rows.append(r | {"folders": folders})
+    return rows
+
+
+def report_replay(docs, rows, level, out=print):
+    out(f"Automatic new folders at a similarity of {level}: {len(docs)} development documents, "
+        f"{len(rows)} categories, each held out in turn")
+    out("\nPer held-out category: documents / unmatched | folders: new subject, mixed, known subject | "
+        "the held-out subject comes back as")
+    known_groups = set()
+    for r in rows:
+        kinds = Counter(f["kind"] for f in r["folders"])
+        own = [f for f in r["folders"] if f["own"]]
+        shape = ("nothing to group" if r["unmatched"] < 2 else "no folder" if not own
+                 else "one folder" if len(own) == 1 else f"split over {len(own)} folders")
+        alone = r["unmatched"] - sum(len(f["own"]) for f in own)
+        known_groups |= {frozenset(f["others"]) for f in r["folders"] if f["kind"] == "known subject"}
+        out(f"  {r['documents']:3} / {r['unmatched']:2}  {r['category'][:34]:34} | {kinds['new subject']}, "
+            f"{kinds['mixed']}, {kinds['known subject']} | {shape}" + (f", {alone} left waiting" if alone and own else ""))
+    allf = [f for r in rows for f in r["folders"]]
+    kinds = Counter(f["kind"] for f in allf)
+    own = [len([f for f in r["folders"] if f["own"]]) for r in rows]
+    out(f"\nTotal over the {len(rows)} rounds: {len(allf)} folders created: {kinds['new subject']} of the held-out "
+        f"subject only, {kinds['mixed']} mixing subjects, {kinds['known subject']} of a subject the app already has "
+        f"({len(known_groups)} distinct; the same documents are unmatched in most rounds)")
+    out(f"Held-out subjects: {sum(n == 1 for n in own)} back as one folder, {sum(n > 1 for n in own)} split over "
+        f"several, {sum(n == 0 and r['unmatched'] >= 2 for n, r in zip(own, rows))} with no folder, "
+        f"{sum(r['unmatched'] < 2 for r in rows)} with fewer than two unmatched documents")
+    named = Counter(f["named"] for f in allf)
+    same = sum(bool(f["name"]) and name_key(f["name"]) == name_key(r["category"]) for r in rows for f in r["folders"] if f["kind"] == "new subject")
+    out(f"Names: {named['repeated']} repeated across the folder's documents, {named['best']} the best suggestion, "
+        f"{named[None]} with no free name (would stay a question); {same} of the {kinds['new subject']} new-subject "
+        f"folders named as the owner's folder")
+    out("\nThe folders (held-out category: kind, documents, name, key words)")
+    for r in rows:
+        for f in r["folders"]:
+            other = Counter(docs[i]["category"] for i in f["others"])
+            out(f"  {r['category'][:30]}: {f['kind']}, {len(f['own'])} own"
+                + (f" + {', '.join(f'{n} {c}' for c, n in other.items())}" if other else "")
+                + f" | {f['name'] or '(no free name)'} ({f['named']}) | {', '.join(f['words']) or '(none shared)'}")
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--families", nargs="*", default=[], type=Path, help="CSVs with sha256 and family_id")
     ap.add_argument("--level", type=float, default=GROUP_LEVEL)
     ap.add_argument("--compare", nargs="*", type=float, help="print the counts at these levels instead")
+    ap.add_argument("--folders", action="store_true", help="replay automatic new folders instead (record 2.6)")
     ap.add_argument("--out", type=Path, help="also save the report here (never overwritten)")
     ap.add_argument("--catalog", type=Path, default=default_data_dir() / "catalog.sqlite3")
     a = ap.parse_args(argv)
@@ -122,7 +187,11 @@ def main(argv=None):
     if a.compare:
         return 0
     lines = []
-    report(docs, evaluate(docs, fam, a.level), a.level, lines.append)
+    if a.folders:
+        level = FOLDER_LEVEL if a.level == GROUP_LEVEL else a.level
+        report_replay(docs, replay(docs, fam, level), level, lines.append)
+    else:
+        report(docs, evaluate(docs, fam, a.level), a.level, lines.append)
     print("\n".join(lines))
     if a.out:
         with open(a.out, "x", encoding="utf-8") as f:

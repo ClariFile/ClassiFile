@@ -254,6 +254,20 @@ Run at the end of every phase that touches the window.
 
 ---
 
+## 10. Phases 4 and 5 as built (2026-10-14)
+
+- **Phase 4 (motion).**
+  - Settings, "Motion": Follow Windows (default), Reduce motion, Full motion.
+  - The details panel, a row's choices and the toast were already animated. A filed row now folds away in 150 ms
+    while the rows around it keep their places.
+  - Rapid clicks never queue (checked: Details ten times). With reduced motion every change is instant (checked by
+    `tools.check_ui`, now through the setting).
+- **Phase 5.**
+  - "Retry" on a document that couldn't be read: the original is read again.
+  - "Find category…" above the sidebar's list from 11 categories. It filters by name, says "No category matches …"
+    when nothing does, and never changes the open view.
+  - The first-use, empty, nothing-found and missing-original states were written in phases 1 to 3.
+
 ## 9. Phase 1 as built (2026-10-12)
 
 **What changed**

@@ -12,7 +12,8 @@ from classifile.analysis.candidates import name_key, top_names
 from classifile.app.reasons import reason_text, similar_reason
 from classifile.app.widgets import (
     BAR, BUTTON_TEXT_MAX, CHOICES_MAX, FILE_ICON, GROUP, LIST_MAX, NAME_FIELD_MAX, RELATED, TEXT_MIN, TIGHT,
-    CategoryPicker, ElidedLabel, ListRow, box, format_icon, restyle, scroll_area_of, unfold, wrappable, wrapped,
+    CategoryPicker, ElidedLabel, ListRow, box, collapse, format_icon, restyle, scroll_area_of, unfold, wrappable,
+    wrapped,
 )
 
 TOP = 3
@@ -91,7 +92,8 @@ class DecisionItem(ListRow):
         self.group = len(docs) > 1
         top = top_names(first["suggestions"], TOP) if first["status"] == "needs_decision" else []
         self.best = top[0]["name"] if top else ""
-        # [(category name, documents it was compared with)]: the existing categories that match best, if any do
+        # [(category name, documents it was compared with, words shared with them)]: the existing categories that
+        # match best, if any do
         self.matches = first.get("matches") or []
         if self.matches:
             self.best = self.matches[0][0]
@@ -128,13 +130,13 @@ class DecisionItem(ListRow):
         self.primary.clicked.connect(self.primary_action)
         # The second and third matching categories: one click each (decision record B2), as quiet links that wrap.
         self.others = QLabel("Or file in: " + " · ".join(
-            f'<a href="{n}">{html.escape(name)}</a>' for n, (name, _) in enumerate(self.matches) if n))
+            f'<a href="{n}">{html.escape(m[0])}</a>' for n, m in enumerate(self.matches) if n))
         self.others.setObjectName("secondary")
         wrapped(self.others)
         self.others.setTextFormat(Qt.RichText)
         self.others.setTextInteractionFlags(Qt.LinksAccessibleByMouse | Qt.LinksAccessibleByKeyboard)
-        self.others.setToolTip("\n".join(f"File in '{name}'. {similar_reason(n, name)}."
-                                         for name, n in self.matches[1:]))
+        self.others.setToolTip("\n".join(f"File in '{name}'. {similar_reason(n, name, words)}."
+                                         for name, n, words in self.matches[1:]))
         self.others.setAccessibleName("Or file in another matching category")
         self.others.linkActivated.connect(lambda n: self.c.file_docs(self.ids, self.matches[int(n)][0]))
         self.choose = QPushButton("Choose another…")
@@ -195,7 +197,7 @@ class DecisionItem(ListRow):
         categories = controller.categories_by_key() if categories is None else categories
         existing = categories.get(name_key(self.best)) if self.best else None
         self.search_text = " ".join([d["file_name"] for d in docs] + [existing["name"] if existing else self.best]
-                                    + [name for name, _ in self.matches]).casefold()   # what the search looks at
+                                    + [m[0] for m in self.matches]).casefold()   # what the search looks at
         self._configure(first, top, existing, bool(categories))
 
     # -- what the item asks ------------------------------------------------------------------------------------
@@ -215,7 +217,11 @@ class DecisionItem(ListRow):
             self._say(self.line, "⚠ This document couldn't be read: "
                       f"{wrappable(first['status_reason'] or 'unknown reason')}.")
             self.line.setObjectName("error")
-            self._only(self.remove)
+            self.primary.setText("Retry")
+            self.primary.setToolTip("Read the original file again")
+            self.primary.clicked.disconnect()
+            self.primary.clicked.connect(lambda: self.c.retry_docs(self.ids))
+            self._only(self.primary, self.remove)
         elif first["missing"]:
             self._say(self.line, "⚠ The original file has moved. Locate it to file this document.")
             self.line.setObjectName("warning")
@@ -230,7 +236,8 @@ class DecisionItem(ListRow):
                 found += ("  ·  " if found else "") + "Only one suggestion found"
             self.names.setVisible(self.group)
             if self.matches:    # decided from the content; new names stay under "Choose another…" (A0)
-                self._suggest("Suggested category:", self.best, similar_reason(self.matches[0][1], self.best))
+                self._suggest("Suggested category:", self.best, similar_reason(self.matches[0][1], self.best,
+                                                                               self.matches[0][2]))
                 self.others.setVisible(len(self.matches) > 1)
                 self.primary.setText(f"File in {shorten(self.best)}")
                 self.primary.setToolTip(f"File in '{self.best}'")
@@ -337,7 +344,7 @@ class DecisionItem(ListRow):
         offered = [] if self.rejected else top + (rest if self.show_all else [])
         cats, recent = self.c.picker_choices()
         ids = {name_key(name): i for i, name, _ in cats}
-        first = [ids[name_key(name)] for name, _ in self.matches if name_key(name) in ids]   # the matches lead
+        first = [ids[name_key(m[0])] for m in self.matches if name_key(m[0]) in ids]   # the matches lead
         self.picker.set_choices(cats, first + [i for i in recent if i not in first], suggestions=[
             (s["name"], reason_text(s["evidence"], self.docs[0]["unit"])) for s in offered])
         self.more_button.setText("Fewer" if self.show_all else f"More ({len(rest)})")
@@ -588,14 +595,13 @@ class DecisionPage(QWidget):
         if refocus:
             focus.clearFocus()  # hiding the focused row hands focus down the list, and the page scrolls after it
         for gone in old.values():
-            self.list.removeWidget(gone)
-            gone.hide()
-            gone.deleteLater()
+            gone.setProperty("leaving", True)       # folds away where it is (instant with reduced motion)
+            collapse(gone, lambda g=gone: (self.list.removeWidget(g), g.hide(), g.deleteLater()))
         for n, item in enumerate(items):
             item.number.setText(f"{n + 1}.")
-            if self.list.itemAt(n).widget() is not item:
+            if self.list.itemAt(self._slot(n)).widget() is not item:
                 self.list.removeWidget(item)
-                self.list.insertWidget(n, item)
+                self.list.insertWidget(self._slot(n), item)
                 item.setVisible(self._matches(item))  # now, not after the next layout pass
         if version != self.version:
             for item in kept:
@@ -606,6 +612,18 @@ class DecisionPage(QWidget):
         if shown and (refocus or (enter and at is None)):
             target = items[min(at or 0, len(items) - 1)]
             (target if target in shown else shown[0]).setFocus()  # where the user was, not back at the top
+
+    def _slot(self, n):
+        """The place in the list of the n-th row, counting past rows that are folding away."""
+        at = seen = 0
+        while at < self.list.count() - 1:
+            w = self.list.itemAt(at).widget()
+            if not (w is not None and w.property("leaving")):
+                if seen == n:
+                    break
+                seen += 1
+            at += 1
+        return at
 
     def set_inspected(self, doc_id):
         """The document whose details are open beside the page (None: closed): its row is marked."""

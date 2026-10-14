@@ -150,9 +150,9 @@ class CategoryModel(RowsModel):
 
     def cell(self, r, column, role):
         if role == Qt.DisplayRole:
-            return r["name"] if column == 0 else str(r["count"])
+            return r["name"] if column == 0 else f"New · {r['count']}" if r.get("new") else str(r["count"])
         if role == Qt.ToolTipRole:
-            return r["name"]
+            return r["name"] + ("\nNew (named by ClassiFile). Right-click to rename it." if r.get("new") else "")
         if role == Qt.TextAlignmentRole and column == 1:
             return int(Qt.AlignRight | Qt.AlignVCenter)
         if role == Qt.ForegroundRole and column == 1:
@@ -163,7 +163,7 @@ class CategoryModel(RowsModel):
 
 
 def sorted_by_name(model):
-    """A filter over the categories: A to Z, ignoring case. (The sidebar's find field will narrow it later.)"""
+    """A filter over the categories: A to Z, ignoring case. The sidebar's find field narrows it by name."""
     proxy = QSortFilterProxyModel(model)
     proxy.setSourceModel(model)
     proxy.setSortCaseSensitivity(Qt.CaseInsensitive)

@@ -7,6 +7,8 @@ import math
 import re
 from collections import Counter
 
+from classifile.analysis.candidates import name_key
+
 REPRESENTATION = "words-tfidf-1"   # bump when terms(), fit_idf() or vector() change: stored models are refitted
 # Words of two or more characters starting with a letter; a trailing + or # is kept (C++ and C# are not C).
 # Numbers alone are left out: page, lecture and invoice numbers say nothing about the subject.
@@ -71,6 +73,8 @@ AUTO_DEFAULT = "strict"
 AUTO_MIN_CONFIRMED = 3      # no automatic filing into a category with fewer documents the user confirmed
 NEAR_TEXT = 0.9     # documents this similar count as versions of one another (a format twin, a revision)
 GROUP_LEVEL = 0.15  # [Default] unmatched waiting documents this alike on average form a group (B2); see tools.group_eval
+FOLDER_LEVEL = 0.20  # groups this alike become a folder by themselves (B2 "Automatic new folders", record 2.6)
+AUTO_UPDATE_EVERY = 10  # matching updates by itself after this many new confirmations or moves (A7, record 2.6)
 CHECK_FOLDS = 5
 
 
@@ -110,6 +114,16 @@ class Matcher:
         """rank() for a document whose terms() are at hand."""
         x = vector(counts, self.bundle["idf"])
         return sorted(self.model.scores(x).items(), key=lambda kv: (-kv[1], kv[0])) if x else []
+
+    def key_words(self, counts, category, n=4):
+        """The words a document (its terms()) shares most with a category, heaviest first: the reason a card
+        gives. Words found in more than a third of the training documents ("the", a template's standing words)
+        say nothing about a subject and are left out (docs/ACCURACY_ROUND.md, section 5)."""
+        idf, centroid = self.bundle["idf"], self.model.centroids.get(category, {})
+        total = sum(self.bundle["documents"].values())
+        floor = math.log((1 + total) / (1 + total / 3)) + 1
+        shared = {t: x * centroid[t] for t, x in vector(counts, idf).items() if t in centroid and idf[t] >= floor}
+        return [t for t, _ in sorted(shared.items(), key=lambda kv: (-kv[1], kv[0]))[:n]]
 
     def good(self, ranked):
         """Is the best of these a good match (else: abstain, and suggest a new name)?"""
@@ -177,3 +191,19 @@ def shared_words(vectors, n=6):
             weight[t] += x
             seen[t] += 1
     return [t for t, _ in sorted(weight.items(), key=lambda kv: (-kv[1], kv[0])) if seen[t] >= need][:n]
+
+
+def group_name(suggested, taken):
+    """The name for a folder the app creates for a group (B2, record 2.6): a name suggested for several of the
+    group's documents (for the most documents first), otherwise the best suggested name. suggested: per document,
+    its top suggestions ({"name", "score"}), best first; taken: name_key()s of the existing categories, never
+    reused or merged into (B1). None when no name is free: the group stays a question."""
+    docs, score, name = Counter(), Counter(), {}
+    for mine in suggested:
+        for s in {name_key(s["name"]): s for s in mine}.values():
+            k = name_key(s["name"])
+            docs[k] += 1
+            score[k] = max(score[k], s["score"])
+            name.setdefault(k, s["name"])
+    ranked = sorted(docs, key=lambda k: (-(docs[k] > 1) * docs[k], -score[k], k))
+    return next((name[k] for k in ranked if k not in taken), None)

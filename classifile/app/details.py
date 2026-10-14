@@ -7,7 +7,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea, QVBoxLayout, QWidget
 
 from classifile.analysis.candidates import name_key, top_names
-from classifile.app.reasons import reason_text, similar_reason
+from classifile.app.reasons import new_folder_reason, reason_text, similar_reason
 from classifile.app.widgets import (
     GROUP, PANEL, RELATED, TIGHT, Collapsible, ElidedLabel, Preview, box, wrappable, wrapped,
 )
@@ -163,7 +163,8 @@ class DetailsPanel(QFrame):
         self.same_name.setVisible(copy == d["file_name"])
         self.copy_name.set(copy if copy != d["file_name"] else None)
         if filed:
-            self.category.set(d["category"], "Filed in")
+            self.category.set(d["category"] + (" · New (named by ClassiFile)" if d.get("app_named") else ""),
+                              "Filed in")
             self.also.set(", ".join(name for _, name in self.c.org.catalog.secondary_categories(doc_id)))
             state = review_state(d)
             if d.get("filed_at"):
@@ -208,9 +209,11 @@ class DetailsPanel(QFrame):
 
     def _why(self, d, waiting):
         if d["status"] == "filed":
-            auto = json.loads(d.get("auto_json") or "{}").get("documents")
-            if auto:
-                return f"Filed automatically. {similar_reason(auto, d['category'])}."
+            auto = json.loads(d.get("auto_json") or "{}")
+            if auto.get("new_folder"):
+                return f"Filed automatically in a new folder. {new_folder_reason(auto.get('words', []))}."
+            if auto.get("documents"):
+                return f"Filed automatically. {similar_reason(auto['documents'], d['category'], auto.get('words', ()))}."
             analysis = self.c.org.catalog.analysis(d["id"]) or {}
             match = next((s for s in analysis.get("suggestions", [])
                           if name_key(s["name"]) == name_key(d["category"] or "")), None)
@@ -219,7 +222,7 @@ class DetailsPanel(QFrame):
                     else f"You chose “{d['category']}”.")
         if not waiting:
             return ""
-        lines = [f"{similar_reason(n, name)}." for name, n in waiting.get("matches") or ()]
+        lines = [f"{similar_reason(n, name, words)}." for name, n, words in waiting.get("matches") or ()]
         lines += [f"{s['name']}: {reason_text(s['evidence'], waiting['unit']) or 'no page reference'}"
                   for s in top_names(waiting["suggestions"])]
         return "\n".join(lines)

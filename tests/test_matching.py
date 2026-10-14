@@ -98,8 +98,10 @@ def test_update_matching_is_versioned_and_keeps_the_previous_version_if_the_new_
 
     first = org.update_matching()
     assert first == {"outcome": "updated", "version": 1, "documents": 6, "categories": 2, "check": None}
-    assert org.matches(waiting, set(cats.values()))[0] == (cats["Networks"], 3)   # best first, with its documents
-    assert cats["Networks"] not in dict(org.matches(waiting, {cats["Algebra"]}))   # a deleted one is never offered
+    best = org.matches(waiting, set(cats.values()))[0]
+    assert best[:2] == (cats["Networks"], 3)                                # best first, with its documents
+    assert 2 <= len(best[2]) <= 4 and set(best[2]) <= set(SUBJECTS["Networks"].split())   # and the words shared
+    assert cats["Networks"] not in [m[0] for m in org.matches(waiting, {cats["Algebra"]})]   # a deleted one: never
     assert org.update_matching()["outcome"] == "up to date" and org.catalog.active_matcher()["version"] == 1
     status = org.matching_status()
     assert (status["version"], status["documents"], status["categories"], status["since"]) == (1, 6, 2, 0)
@@ -235,7 +237,9 @@ def test_automatic_filing_only_when_clear_and_never_as_the_users_label(make_org,
     assert org.file_automatically(clear) == cats["Networks"]
     row = org.catalog.document_row(clear)
     assert (row["status"], row["category"], row["provenance"]) == ("filed", "Networks", "machine-assigned")
-    assert json.loads(row["auto_json"]) == {"version": 1, "level": 0.10, "documents": 3}
+    auto = json.loads(row["auto_json"])
+    assert {k: auto[k] for k in ("version", "level", "documents")} == {"version": 1, "level": 0.10, "documents": 3}
+    assert 2 <= len(auto["words"]) <= 4 and set(auto["words"]) <= set(SUBJECTS["Networks"].split())   # the reason
     assert (org.output_root / "Networks" / "networks-7.pdf").samefile(row["copy_path"])   # a verified copy as usual
     assert clear not in org.catalog.explicit_labels()                  # not the user's label:
     assert org.matching_status()["since"] == 0 and org.update_matching()["outcome"] == "up to date"   # never trains
@@ -286,6 +290,17 @@ def test_group_eval_says_whether_a_held_out_category_comes_back_as_one_group():
     lines = []
     group_eval.report(docs, rows, matching.GROUP_LEVEL, lines.append)
     assert "3 kept together" in "\n".join(lines) and "key words: " in "\n".join(lines)
+
+    for d in docs:      # automatic new folders replayed: each held-out subject comes back as one named folder
+        d["suggested"] = [{"name": f"{d['category']} notes", "score": 5}, {"name": d["names"][0], "score": 9}]
+    rows = group_eval.replay(docs, list(range(len(docs))))
+    assert [[(f["kind"], f["named"], f["name"]) for f in r["folders"]] for r in rows] == [
+        [("new subject", "repeated", f"{r['category']} notes")] for r in rows]
+    lines = []
+    group_eval.report_replay(docs, rows, matching.FOLDER_LEVEL, lines.append)
+    text = "\n".join(lines)
+    assert "3 folders created: 3 of the held-out subject only, 0 mixing subjects, 0 of a subject" in text
+    assert "3 back as one folder, 0 split over several" in text
 
 
 def test_looks_right_selected_categories_and_new_subject_groups(make_org, tmp_path):
@@ -364,3 +379,73 @@ def test_accuracy_round_variants_change_one_thing_and_are_measured_the_same_way(
     lines = []
     ar.report(docs, fam, ["in use", "head x2"], lines.append)
     assert "%" not in "\n".join(lines) and "Categories with fewer than 5 documents" in "\n".join(lines)
+
+
+def test_group_name_prefers_a_name_shared_by_the_group_and_never_reuses_a_category():
+    s = lambda *pairs: [{"name": n, "score": score} for n, score in pairs]
+    group = [s(("Sonnets", 5), ("Week 1", 9)), s(("sonnets", 3), ("Imagery", 7))]
+    assert matching.group_name(group, set()) == "Sonnets"                  # suggested for both documents
+    assert matching.group_name([s(("Week 1", 9)), s(("Imagery", 7))], set()) == "Week 1"   # else the best one
+    assert matching.group_name(group, {"sonnets"}) == "Week 1"           # an existing category is never reused
+    assert matching.group_name(group, {"sonnets", "week 1", "imagery"}) is None   # nothing free: a question
+
+
+def test_automatic_new_folders_only_when_switched_on_in_automatic_mode(make_org, tmp_path):
+    org, src = make_org(), tmp_path / "src"
+    for n in range(3):
+        _add(org, src, "Algebra", n)
+        _add(org, src, "Networks", n)
+    org.update_matching()
+    cats = {c["name"]: c["id"] for c in org.catalog.categories()}
+    poems = [_add(org, src, "Poetry", n, False) for n in range(3)]     # a subject no category matches
+    _pdf(src / "zoo.pdf", "zebra giraffe antelope savanna migration herd", 1)
+    zoo = org.record(src / "zoo.pdf", *read_and_analyze(src / "zoo.pdf"))[0]
+    waiting = poems + [zoo]
+    assert not org.auto_folders() and org.create_folders(waiting) == []   # off until the user turns it on
+    org.set_auto_folders(True)
+    org.set_auto_scope({cats["Algebra"]})
+    assert org.folder_groups(waiting) == []                            # selected-category mode asks first (A5)
+    org.set_auto_scope(None)
+    org.set_auto_level("off")
+    assert org.folder_groups(waiting) == []                            # automatic mode only
+    org.set_auto_level("strict")
+    assert org.folder_groups([poems[0], zoo]) == []                    # a single unmatched document waits
+
+    (cat_id, filed), = org.create_folders(waiting)
+    assert sorted(filed) == sorted(poems) and org.catalog.document(zoo)["status"] == "needs_decision"
+    cat = org.catalog.category(cat_id)
+    assert (cat["created_by"], cat["app_named"]) == ("machine", 1) and cat["name"] not in cats
+    assert (org.output_root / cat["folder_name"]).is_dir()             # the normal verified copies
+    row = org.catalog.document_row(poems[0])
+    auto = json.loads(row["auto_json"])
+    assert row["provenance"] == "machine-assigned" and auto["new_folder"] and set(auto["words"]) <= set(
+        SUBJECTS["Poetry"].split())
+    assert not set(poems) & set(org.catalog.explicit_labels())        # it learns nothing until the user confirms
+    assert org.create_folders([zoo]) == []                             # nothing left to group
+    org.rename_category(cat_id, "Poems")
+    assert org.catalog.category(cat_id)["app_named"] == 0              # the user's name now
+    assert [r[0] for r in org.catalog.all("SELECT value FROM setting_changes WHERE key = 'auto_folders'")] == ["on"]
+
+
+def test_matching_updates_by_itself_after_enough_confirmations(make_org, tmp_path, monkeypatch):
+    monkeypatch.setattr(matching, "AUTO_UPDATE_EVERY", 3)
+    org, src = make_org(), tmp_path / "src"
+    for n in range(2):
+        _add(org, src, "Algebra", n)
+        _add(org, src, "Networks", n)
+    assert not org.update_due()                                        # no model yet: the user starts it
+    org.update_matching()
+    _add(org, src, "Algebra", 3)
+    _add(org, src, "Networks", 4)
+    assert not org.update_due()
+    _add(org, src, "Networks", 5)
+    assert org.update_due()                                            # the third confirmation since
+    assert org.update_matching("automatic")["outcome"] == "updated"
+    log = org.catalog.matcher_log()
+    assert [(r["version"], r["trigger"], r["status"]) for r in log] == [(2, "automatic", "active"),
+                                                                        (1, "user", "previous")]
+    monkeypatch.setattr(matching, "check", lambda *a: {"documents": 3, "new": 0, "previous": 3})
+    for n in range(6, 9):
+        _add(org, src, "Algebra", n)
+    assert org.update_matching("automatic")["outcome"] == "kept previous"
+    assert not org.update_due()                                        # a rejected version is not retried at once

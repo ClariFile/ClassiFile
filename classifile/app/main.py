@@ -31,7 +31,7 @@ from classifile.app.models import DOC, SORTS, CategoryModel, DocumentFilter, Doc
 from classifile.app.widgets import (
     CHECKLIST_MAX, DATE_COLUMN_MIN, DETAILS_MAX, DETAILS_MIN, DETAILS_WIDTH, FILE_ICON, GROUP, LIST_MIN, MIN_WINDOW,
     MOTION_STANDARD, NARROW, PAD, RELATED, SEARCH_MAX, SECTION, SIDEBAR_WIDTH, STYLE, SUPPORTED, TOAST, TOAST_LONG,
-    WIDE, WINDOW, box, motion, slide_away,
+    WIDE, WINDOW, box, motion, set_motion, slide_away,
     DropOverlay, ElidedLabel, Notices, PickerDialog, PreviewOverlay, Toast, wrappable,
 )
 from classifile.copies.engine import CopyError
@@ -49,6 +49,8 @@ READ_WORKERS = min(4, os.cpu_count() or 2)  # documents read (and OCR'd) at once
 WAITING = ("needs_decision", "pending", "failed")
 APPEARANCES = (("system", "Follow Windows", Qt.ColorScheme.Unknown), ("light", "Light", Qt.ColorScheme.Light),
                ("dark", "Dark", Qt.ColorScheme.Dark))
+MOTIONS = (("system", "Follow Windows"), ("reduce", "Reduce motion"), ("full", "Full motion"))
+FIND_CATEGORY_FROM = 11     # "Find category…" above the sidebar's list from this many categories
 SEARCH_HINTS = {ALL: "Search all documents…", RECENT: "Search recently added…", DECIDE: "Search these documents…",
                 AUTO: "Search these documents…"}
 
@@ -86,6 +88,9 @@ class MainWindow(QWidget):
         self.auto_batch = []        # (doc_id, category id) the app has just filed by itself, until it says so
         self.auto_running = 0       # automatic filings under way
         self.failure = None         # (doc ids, sentence): stays as a notice until those documents are resolved
+        self.run = None             # the import under way: what it read, filed and created, for one summary
+        self.updating = False       # matching is updating by itself in the background
+        self.update_note = None     # the note at the top after matching updated by itself (A7, record 2.6)
         self.feedback = {}          # doc_id -> reason ("" = none given): the suggested names were set aside
         self.moving = 0             # moves and renames under way (they copy files, so they run off this thread)
         self.picker_dialog = None
@@ -107,6 +112,7 @@ class MainWindow(QWidget):
         self.list_style = QStyleFactory.create("Fusion")  # one selection bar (Windows 11 adds a second)
         self.setStyleSheet(STYLE)
         self.set_appearance(self.org.catalog.get_setting("appearance", "system"))
+        set_motion(self.org.catalog.get_setting("motion", "system"))
         self.setAcceptDrops(True)
         self.setMinimumSize(*MIN_WINDOW)
         self.resize(*WINDOW)
@@ -362,6 +368,18 @@ class MainWindow(QWidget):
         self.cats.activated.connect(self._category_clicked)   # Enter
         self.cats.setContextMenuPolicy(Qt.CustomContextMenu)
         self.cats.customContextMenuRequested.connect(self._category_menu_at)
+        self.find_category = QLineEdit()          # only with many categories (docs/UI_PROPOSAL.md, phase 5)
+        self.find_category.setPlaceholderText("Find category…")
+        self.find_category.setAccessibleName("Find category")
+        self.find_category.setClearButtonEnabled(True)
+        self.find_category.textChanged.connect(lambda text: self.cat_sorted.setFilterFixedString(text.strip()))
+        self.find_category.hide()
+        self.cats_none = QLabel()                 # nothing matches what was typed
+        self.cats_none.setObjectName("secondary")
+        self.cats_none.setWordWrap(True)
+        self.cats_none.setContentsMargins(GROUP, 0, GROUP, 0)
+        self.cats_none.hide()
+        self.find_category.textChanged.connect(lambda *_: self._show_found_categories())
         self.cats_empty = QLabel("No categories yet. Press + to create one, or file a document.")
         self.cats_empty.setObjectName("secondary")
         self.cats_empty.setWordWrap(True)
@@ -377,7 +395,11 @@ class MainWindow(QWidget):
         for key in (ALL, DECIDE, AUTO, RECENT):
             v.addWidget(self.nav[key])
         v.addLayout(cat_head)
+        find = box(QHBoxLayout(), (GROUP, 0, GROUP, RELATED))
+        find.addWidget(self.find_category)
+        v.addLayout(find)
         v.addWidget(self.cats_empty)
+        v.addWidget(self.cats_none)
         v.addWidget(self.cats, 1)
         v.addWidget(settings)
         return side
@@ -494,6 +516,15 @@ class MainWindow(QWidget):
         look_row = box(QHBoxLayout(), spacing=GROUP)
         look_row.addWidget(QLabel("Light or dark"), 1)
         look_row.addWidget(self.appearance)
+        self.motion = QComboBox()                 # Reduce motion: every change instant
+        self.motion.setView(QListView())
+        self.motion.setAccessibleName("Motion")
+        for name, words in MOTIONS:
+            self.motion.addItem(words, name)
+        self.motion.activated.connect(lambda *_: self.set_motion(self.motion.currentData()))
+        motion_row = box(QHBoxLayout(), spacing=GROUP)
+        motion_row.addWidget(QLabel("Motion: panels that slide and rows that fold away"), 1)
+        motion_row.addWidget(self.motion)
         behaviour = QLabel("WHEN CLOSING")
         behaviour.setObjectName("section")
         self.close_toggle = QCheckBox("Ask before closing when documents are waiting")
@@ -511,6 +542,20 @@ class MainWindow(QWidget):
         match_row = box(QHBoxLayout(), spacing=GROUP)
         match_row.addWidget(self.matching_label, 1)
         match_row.addWidget(self.matching_button, 0, Qt.AlignTop)
+        self.matching_log = QLabel()              # the last versions: when, by whom, what the check found
+        self.matching_log.setObjectName("secondary")
+        self.matching_log.setWordWrap(True)
+        self.matching_log.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        self.auto_folders = QCheckBox("Create new folders by itself")
+        self.auto_folders.setToolTip("Off until you turn it on")
+        self.auto_folders.toggled.connect(self.set_auto_folders)
+        folders_text = QLabel("When at least two waiting documents match none of your categories and clearly share a "
+                              "subject, ClassiFile creates a folder for them and names it. You can rename it with one "
+                              "click in Filed automatically. A single document always waits for you, and in "
+                              "\u201cOnly the ones I tick\u201d mode ClassiFile asks first.")
+        folders_text.setObjectName("secondary")
+        folders_text.setWordWrap(True)
+        folders_text.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         self.auto_level = QComboBox()             # the level of automatic filing; every change is recorded
         self.auto_level.setView(QListView())
         for name, words in AUTO_LEVELS:
@@ -554,13 +599,18 @@ class MainWindow(QWidget):
         v.addSpacing(SECTION)
         v.addWidget(look)
         v.addLayout(look_row)
+        v.addLayout(motion_row)
         v.addSpacing(SECTION)
         v.addWidget(matching)
         v.addLayout(match_row)
+        v.addWidget(self.matching_log)
         v.addSpacing(GROUP)
         v.addLayout(auto_row)
         v.addLayout(scope_row)
         v.addWidget(self.auto_ticks)
+        v.addSpacing(GROUP)
+        v.addWidget(self.auto_folders)
+        v.addWidget(folders_text)
         v.addSpacing(SECTION)
         v.addWidget(about)
         v.addWidget(about_text)
@@ -575,6 +625,8 @@ class MainWindow(QWidget):
             if self.view[0] == AUTO:
                 self.auto_page.leave()
         self.view, self.since = (key, category), recent_since()
+        if key == SETTINGS:
+            self.update_note = None             # the log is in view
         if key in self.nav:
             self.nav[key].setChecked(True)
         else:
@@ -622,7 +674,7 @@ class MainWindow(QWidget):
             d = dict(d)
             del d["analysis_json"]
             ready = d["status"] == "needs_decision" and not missing
-            matches = [(names[c], n) for c, n in self.org.matches(d["id"], names)] if ready and matching else []
+            matches = [(names[c], n, w) for c, n, w in self.org.matches(d["id"], names)] if ready and matching else []
             docs.append(d | {"missing": missing, "suggestions": analysis.get("suggestions", []),
                              "unit": analysis.get("unit", "page"), "matches": matches,
                              "abstained": ready and matching and not matches})
@@ -683,6 +735,7 @@ class MainWindow(QWidget):
         filed_by_app = [r for r in self.doc_rows if r["status"] == "filed" and (
             r["provenance"] == "machine-assigned" or r["id"] in reviewed)]
         self.auto_page.show_docs(filed_by_app)
+        self.auto_page.show_folders(self._named_folders(cats))
         awaiting = self.auto_page.awaiting()
         self.auto_count.setText(str(awaiting) if awaiting else "")
         rows = [d["id"] for d in waiting] if key == DECIDE else [r["id"] for r in filed_by_app] if key == AUTO else []
@@ -696,6 +749,10 @@ class MainWindow(QWidget):
             self.auto_level.setCurrentIndex(self.auto_level.findData(self.org.auto_level()))
             self.appearance.setCurrentIndex(self.appearance.findData(
                 self.org.catalog.get_setting("appearance", "system")))
+            self.motion.setCurrentIndex(self.motion.findData(self.org.catalog.get_setting("motion", "system")))
+            self.auto_folders.blockSignals(True)
+            self.auto_folders.setChecked(self.org.auto_folders())
+            self.auto_folders.blockSignals(False)
             self._show_scope(cats)
             self.close_toggle.blockSignals(True)
             self.close_toggle.setChecked(self.org.catalog.get_setting("close_notice") != "off")
@@ -773,9 +830,31 @@ class MainWindow(QWidget):
         """The sidebar's categories with their counts, from two queries, updated in place. Returns the categories."""
         counts = self.org.catalog.category_counts()
         cats = self.org.catalog.categories()
-        self.cat_model.sync([{"key": c["id"], "name": c["name"], "count": counts.get(c["id"], 0)} for c in cats])
+        self.cat_model.sync([{"key": c["id"], "name": c["name"], "count": counts.get(c["id"], 0),
+                              "new": bool(c["app_named"])} for c in cats])
         self.cats_empty.setVisible(not cats)
+        many = len(cats) >= FIND_CATEGORY_FROM
+        if not many and self.find_category.text():
+            self.find_category.clear()          # no hidden text ever filters the list
+        self.find_category.setVisible(many)
+        self._show_found_categories()
         return cats
+
+    def _show_found_categories(self):
+        """The sidebar's find field: "No category matches …" when nothing does; the view open stays open."""
+        q = self.find_category.text().strip()
+        none = bool(q) and not self.cat_sorted.rowCount()
+        self.cats_none.setText(f"No category matches \u201c{q}\u201d." if none else "")
+        self.cats_none.setVisible(none)
+
+    def _named_folders(self, cats):
+        """[(category id, name, documents, key words)] of the folders the app created and named by itself."""
+        out = []
+        for c in sorted((c for c in cats if c["app_named"]), key=lambda c: c["created_at"], reverse=True):
+            mine = [r for r in self.doc_rows if r.get("category_id") == c["id"]]
+            words = next((json.loads(r["auto_json"]).get("words", []) for r in mine if r.get("auto_json")), [])
+            out.append((c["id"], c["name"], len(mine), words))
+        return out
 
     def _select_category(self):
         row = self.cat_model.at.get(self.view[1]) if self.view[0] == "category" else None
@@ -827,6 +906,8 @@ class MainWindow(QWidget):
             n = len(missing)
             notices.append(("warning", f"{n} document{'s have' if n > 1 else ' has'} moved since it was added. "
                             "Locate the original to file it.", "Review", self.review))
+        if self.update_note:
+            notices.append(("info", self.update_note, "OK", self._dismiss_update_note))
         ready = len(waiting) - len(unreadable)
         if ready and self.view[0] != DECIDE:    # on the auto-filed page a quiet line: that page is for reviewing
             notices.append(("quiet" if self.view[0] == AUTO else "info",
@@ -1048,6 +1129,8 @@ class MainWindow(QWidget):
             if reason:
                 refused.append(f"{Path(p).name} ({reason})")
             elif p not in self.inflight:
+                if self.run is None:
+                    self.run = {"docs": [], "auto": set(), "unread": 0}
                 self.inflight[p] = "queued"
                 self.read_total += 1
                 self.pool.submit(self._read_job, p)
@@ -1086,17 +1169,22 @@ class MainWindow(QWidget):
         if self.read_results:
             QTimer.singleShot(0, self._record_next)
         self.inflight.pop(path, None)
+        run = self.run if self.run is not None else {"docs": [], "auto": set(), "unread": 0}
         if isinstance(out, Exception):
             self.toast.show_message(f"{Path(path).name} couldn't be read.")
+            run["unread"] += 1
         else:
             doc_id, note = self.org.record(path, *out)
             if doc_id is None:
                 self.toast.show_message(f"{Path(path).name} couldn't be read ({note}).")
+                run["unread"] += 1
             elif note == "already imported":
                 self.toast.show_message(f"{Path(path).name} is already in ClassiFile.")
             else:
+                run["docs"].append(doc_id)
                 self.file_automatically([doc_id])   # a clear match is filed without a question (A0)
         self.refresh(recheck=False)  # once per document; what the user is doing in the window stays
+        self._run_step()
 
     # -- filing -----------------------------------------------------------------------------------------------
     def file_docs(self, ids, name, feedback=None):
@@ -1171,6 +1259,7 @@ class MainWindow(QWidget):
         self.batch = []
         if ok:
             self.recheck_waiting()
+            self.update_if_due()
         self.refresh()
 
     # -- automatic filing (decision record A0, B2) ------------------------------------------------------------
@@ -1193,7 +1282,10 @@ class MainWindow(QWidget):
     def _auto_done(self, doc_id, cat_id):
         self.filing.pop(doc_id, None)
         self.auto_running -= 1
-        if cat_id and not isinstance(cat_id, Exception):
+        filed = cat_id and not isinstance(cat_id, Exception)
+        if filed and self.run is not None and doc_id in self.run["docs"]:
+            self.run["auto"].add(doc_id)        # said in the import's summary
+        elif filed:
             self.auto_batch.append((doc_id, cat_id))
         if self.auto_batch and not self.auto_running:      # said once, when all of them are done
             ids, cats = [d for d, _ in self.auto_batch], {c for _, c in self.auto_batch}
@@ -1203,6 +1295,61 @@ class MainWindow(QWidget):
                                     lambda: self.show_view(AUTO))
             self.auto_batch = []
         self.refresh(recheck=False)
+        self._run_step()
+
+    # -- after an import: new folders, then one summary (decision record B2, 2.6) -----------------------------
+    def _run_step(self):
+        """Once every document of the import is read and the clear matches are filed: the folders the app creates
+        by itself (when switched on), then one line that says what happened."""
+        run = self.run
+        if run is None or self.inflight or self.read_results or self.auto_running or run.get("creating"):
+            return
+        if "folders" not in run:
+            ids = [d["id"] for d in self.waiting() if d["status"] == "needs_decision" and d["id"] not in self.filing]
+            if not self.org.auto_folders() or len(ids) < 2:
+                run["folders"] = []
+            else:
+                run["creating"] = True
+
+                def done(result):
+                    self.moving -= 1
+                    run["creating"] = False
+                    run["folders"] = [] if isinstance(result, Exception) else result
+                    self.refresh(recheck=False)
+                    self._run_step()
+
+                self._background(lambda: self.org.create_folders(ids), done)
+                return
+        self.run = None
+        self.import_summary(run)
+
+    def import_summary(self, run):
+        """ "Filed 12 automatically · 1 new folder · 3 need you", with Review."""
+        status = {d: (self.org.catalog.document(d) or {"status": ""})["status"] for d in run["docs"]}
+        in_folders = sum(len(ids) for _, ids in run["folders"])
+        filed, folders = len(run["auto"]) + in_folders, len(run["folders"])
+        need = sum(s == "needs_decision" for s in status.values())
+        unread = run["unread"] + sum(s in ("failed", "pending") for s in status.values())
+        parts = ([f"Filed {filed} automatically"] if filed else []) + (
+            [f"{folders} new folder{'s' if folders != 1 else ''}"] if folders else []) + (
+            [f"{need} need{'s' if need == 1 else ''} you"] if need else []) + (
+            [f"{unread} couldn't be read"] if unread else [])
+        if parts:
+            target = DECIDE if need or unread else AUTO
+            self.toast.show_message(" · ".join(parts), "Review", lambda: self.show_view(target), ms=TOAST_LONG)
+
+    def set_motion(self, name):
+        """Settings, "Motion": follow Windows, reduce (every change instant) or keep motion."""
+        self.org.catalog.set_setting("motion", name)
+        set_motion(name)
+
+    def set_auto_folders(self, on):
+        """Settings: automatic new folders on or off (recorded); waiting documents are looked at again."""
+        self.org.set_auto_folders(on)
+        self._show_mode()
+        if on and self.run is None:
+            self.run = {"docs": [], "auto": set(), "unread": 0}
+            self._run_step()
 
     def set_appearance(self, name, save=False):
         """Light, dark, or as Windows is set. Colours come from the palette, so nothing else changes."""
@@ -1260,6 +1407,8 @@ class MainWindow(QWidget):
             text = "Filing into all categories"
         else:
             text = f"Filing into {len(scope)} selected categor{'y' if len(scope) == 1 else 'ies'}"
+        if scope is None and self.org.auto_level() != "off" and self.org.auto_folders():
+            text += " · new folders on"
         self.mode_label.setText(text)
 
     def looks_right(self, ids):
@@ -1267,8 +1416,9 @@ class MainWindow(QWidget):
         n = self.org.confirm(ids)
         if n:
             self.toast.show_message(f"Confirmed {n} document{'s' if n != 1 else ''}. ClassiFile learns from "
-                                    f"{'them' if n != 1 else 'it'} at the next Update matching.")
+                                    f"{'them' if n != 1 else 'it'}.")
             self.recheck_waiting()
+            self.update_if_due()
         self.refresh()
 
     def also_docs(self, ids):
@@ -1440,6 +1590,17 @@ class MainWindow(QWidget):
                     + (f"{since} document{'s' if since != 1 else ''} filed or moved since." if since
                        else "Nothing was filed or moved since."))
         self.matching_label.setText(text)
+        lines = []
+        for r in self.org.catalog.matcher_log():
+            found = json.loads(r["check_json"]) if r["check_json"] else None
+            who = "by itself" if r["trigger"] == "automatic" else "by you"
+            what = {"active": "in use", "previous": "replaced"}.get(r["status"], "not kept: it did worse")
+            check = (f"; on {found['documents']} documents filed since, your category first for {found['new']} "
+                     f"(the version before: {found['previous']})" if found and found["documents"] else "")
+            lines.append(f"Version {r['version']} · {short_date(r['created_at'])} · {who} · {r['documents']} "
+                         f"documents · {what}{check}")
+        self.matching_log.setText("\n".join(lines))
+        self.matching_log.setVisible(bool(lines))
 
     def update_matching(self):
         self.matching_button.setEnabled(False)
@@ -1471,6 +1632,39 @@ class MainWindow(QWidget):
             self.refresh()
 
         self._background(self.org.update_matching, done)
+
+    def update_if_due(self):
+        """Learning by itself (A7, record 2.6): after every 10 confirmations or moves, matching updates in the
+        background with its usual check; the previous version stays if the new one does worse."""
+        if self.updating or not self.org.update_due():
+            return
+        self.updating = True
+
+        def done(result):
+            self.moving -= 1
+            self.updating = False
+            if isinstance(result, Exception) or result["outcome"] == "up to date":
+                return                          # too little to learn from yet: tried again at the next one
+            if result["outcome"] == "updated":
+                self.update_note = (f"Matching updated by itself: version {result['version']}, learned from "
+                                    f"{result['documents']} documents in {result['categories']} categories.")
+            else:
+                self.update_note = (f"Matching tried a new version by itself and kept version {result['version']}, "
+                                    "which did better.")
+            self.recheck_waiting()
+            self.refresh()
+
+        self._background(lambda: self.org.update_matching("automatic"), done)
+
+    def _dismiss_update_note(self):
+        self.update_note = None
+        self.refresh()
+
+    def retry_docs(self, ids):
+        """Read documents that couldn't be read again, from their originals."""
+        docs = [d for d in (self.org.catalog.document(i) for i in ids) if d and d["status"] in ("failed", "pending")]
+        if docs:
+            self.import_paths([d["source_path"] for d in docs])
 
     def _background(self, job, done):
         """Run job() off this thread, then done(result or the exception) in the window."""
@@ -1528,6 +1722,8 @@ class MainWindow(QWidget):
                 text += f" {len(problems)} couldn't be moved. {problems[0]}"
             self.toast.show_message(text, ms=TOAST_LONG if edited or problems else TOAST)
             self.recheck_waiting()
+            if moved:
+                self.update_if_due()
             self.refresh(select_docs=[])
             counts = self.org.catalog.category_counts()
             empty = [c for c in sources if not counts.get(c)]

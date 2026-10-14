@@ -93,6 +93,7 @@ PREVIEW_KEEP = 8        # drawn pages kept, so paging back draws nothing
 MOTION_STANDARD = 180   # the details panel sliding in and out
 MOTION_QUICK = 120      # a row's choices opening
 MOTION_PANEL = 200      # the toast
+MOTION_LEAVE = 150      # a filed row folding away
 PREVIEW_SETTLE = 150    # after the last resize step, before the page is drawn again at its new size
 TOAST = 5000            # how long a message stays
 TOAST_LONG = 10000      # a message that says something went wrong, or more than one thing

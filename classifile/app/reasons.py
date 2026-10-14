@@ -3,9 +3,17 @@
 FIRST_TEXT = {"page": "on the cover", "slide": "on the title slide", "block": "at the start"}
 
 
-def similar_reason(count, category):
-    """Why a category matches a document: the documents of it the matcher compared with. Never a score."""
-    return f"Similar to {count} document{'s' if count != 1 else ''} in {category}"
+def similar_reason(count, category, words=()):
+    """Why a category matches a document: the documents of it the matcher compared with, and the words the
+    document shares most with them (2 to 4; fewer say too little to show). Never a score."""
+    shared = f" ({', '.join(words[:4])})" if len(words) >= 2 else ""
+    return f"Similar to {count} document{'s' if count != 1 else ''} in {category}{shared}"
+
+
+def new_folder_reason(words):
+    """Why the app created a folder by itself for a group of documents (decision record B2, 2.6)."""
+    shared = f": they share {', '.join(words[:4])}" if words else ""
+    return f"No folder matched these documents, and they share a subject{shared}"
 
 
 def _join(parts):

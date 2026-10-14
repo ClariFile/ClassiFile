@@ -45,8 +45,8 @@ BANDS = ((1, 3, "1 to 3"), (4, 9, "4 to 9"), (10, 10 ** 9, "10 or more"))   # ex
 
 
 def load(catalog_path):
-    """[{id, sha, file_name, category, terms, names}] for the documents whose category the owner chose (names: the
-    category names suggested for the document, best first)."""
+    """[{id, sha, file_name, category, terms, names, suggested}] for the documents whose category the owner chose
+    (names: the category names suggested for the document, best first; suggested: the same with their scores)."""
     with tempfile.TemporaryDirectory(prefix="classifile-eval-") as tmp:
         shutil.copyfile(catalog_path, Path(tmp) / "catalog.sqlite3")
         cat = Catalog(Path(tmp) / "catalog.sqlite3")
@@ -54,11 +54,12 @@ def load(catalog_path):
             labels, texts = cat.explicit_labels(), cat.texts()
             cats = {c["id"]: c["name"] for c in cat.categories()}
             files = {r["document_id"]: r for r in cat.all("SELECT document_id, sha256, file_name FROM snapshots")}
-            names = {d: [s["name"] for s in top_names((cat.analysis(d) or {}).get("suggestions", []))] for d in labels}
+            suggested = {d: top_names((cat.analysis(d) or {}).get("suggestions", [])) for d in labels}
         finally:
             cat.close()
     return [{"id": d, "sha": files[d]["sha256"], "file_name": files[d]["file_name"], "category": cats[labels[d]],
-             "terms": terms(texts.get(d, "")), "names": names[d]} for d in sorted(labels)]
+             "terms": terms(texts.get(d, "")), "names": [s["name"] for s in suggested[d]], "suggested": suggested[d]}
+            for d in sorted(labels)]
 
 
 def csv_families(paths):

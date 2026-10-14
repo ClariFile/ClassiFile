@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 
 from classifile import matching
-from classifile.analysis.candidates import analyze, name_key
+from classifile.analysis.candidates import analyze, name_key, top_names
 from classifile.analysis.summary import summarize
 import json
 
@@ -39,6 +39,7 @@ class Organizer:
         self._matcher = False       # False: not loaded yet; None: no usable model; else (version row, Matcher)
         self._ranked = {}           # doc_id -> its categories ranked by the model in use
         self._counts = {}           # doc_id -> matching.terms() of its stored text
+        self._words = {}            # (model version, doc_id, category id) -> the key words a card gives
         self._groups = (None, [])   # the last new_subject_groups() question and its answer
 
     @property
@@ -128,13 +129,14 @@ class Organizer:
         if known:
             doc_id = known["document_id"]
             # A failed read (e.g. a timeout) is retried by importing the same bytes again; a failed copy is not.
-            if self.catalog.document(doc_id)["status"] == "failed" and not self.catalog.active_primary(doc_id):
+            if self.catalog.document(doc_id)["status"] in ("failed", "pending") and not self.catalog.active_primary(doc_id):
                 self.catalog.replace_extraction(doc_id, result, analysis, summary)
                 return doc_id, "read again"
             return doc_id, "already imported"
         return self.catalog.add_document(result, Path(path).resolve(), analysis, summary), None
 
-    def create_category(self, name):
+    def create_category(self, name, by="user"):
+        """by "machine": an automatic new folder (B2, record 2.6), marked as named by the app until renamed."""
         name = " ".join(name.split())
         if not name:
             raise ValueError("category name is empty")
@@ -145,7 +147,7 @@ class Organizer:
         while self.catalog.folder_taken(folder):
             folder = f"{base} ({n})"
             n += 1
-        return self.catalog.add_category(name, name_key(name), folder)
+        return self.catalog.add_category(name, name_key(name), folder, created_by=by)
 
     def file(self, doc_id, cat_id, provenance="user-confirmed", auto=None):
         """Primary placement plus verified copy: the user's choice, unless file_automatically() says otherwise.
@@ -348,13 +350,23 @@ class Organizer:
 
     def matches(self, doc_id, live):
         """The existing categories that fit a waiting document best: up to three (category id, documents of that
-        category the model was trained on), best first. Empty when there is no model, or when no category is a
-        good match: the abstention baseline (E4). live: ids of the categories that exist now."""
+        category the model was trained on, the words the document shares most with it), best first. Empty when
+        there is no model, or when no category is a good match: the abstention baseline (E4). live: ids of the
+        categories that exist now."""
         if not self.matcher():
             return []
         _, model = self.matcher()
         ranked = self._rank(doc_id, live)
-        return [(c, model.bundle["documents"][c]) for c, _ in ranked[:3]] if model.good(ranked) else []
+        return [(c, model.bundle["documents"][c], self.key_words(doc_id, c))
+                for c, _ in ranked[:3]] if model.good(ranked) else []
+
+    def key_words(self, doc_id, cat_id):
+        """The words a document shares most with a category, for the model in use (there must be one)."""
+        row, model = self.matcher()
+        key = (row["version"], doc_id, cat_id)
+        if key not in self._words:
+            self._words[key] = model.key_words(self._terms(doc_id), cat_id)
+        return self._words[key]
 
     def _rank(self, doc_id, live):
         """The existing categories ranked for a document by the model in use (there must be one)."""
@@ -425,7 +437,8 @@ class Organizer:
             return None                                 # a selection cannot manufacture confidence (B1)
         if list(self.catalog.explicit_labels().values()).count(best) < matching.AUTO_MIN_CONFIRMED:
             return None
-        return best, {"version": row["version"], "level": level, "documents": model.bundle["documents"][best]}
+        return best, {"version": row["version"], "level": level, "documents": model.bundle["documents"][best],
+                      "words": self.key_words(doc_id, best)}
 
     def file_automatically(self, doc_id):
         """File a waiting document by itself when its match is clear (auto_choice): the normal verified copy,
@@ -436,6 +449,65 @@ class Organizer:
             return None
         self.file(doc_id, choice[0], provenance="machine-assigned", auto=choice[1])
         return choice[0]
+
+    # -- automatic new folders (decision record A4, B2, record 2.6) --------------------------------------------
+    def auto_folders(self):
+        """Automatic new folders are switched on (off until the user has seen the development replay)."""
+        return self.catalog.get_setting("auto_folders", "off") == "on"
+
+    def set_auto_folders(self, on):
+        """Switch automatic new folders on or off; the change is kept on record."""
+        if ("on" if on else "off") != self.catalog.get_setting("auto_folders", "off"):
+            self.catalog.change_setting("auto_folders", "on" if on else "off")
+
+    def folder_groups(self, doc_ids):
+        """The folders the app would create by itself among these waiting documents: [(ids, key words, name)].
+        Only in automatic mode (a level other than Off, all categories: selected-category mode asks first, A5)
+        with automatic new folders switched on. Only documents no existing category matches, in groups of at
+        least two at matching.FOLDER_LEVEL; a single document waits. A group with no free name stays a question:
+        a name equal to an existing category is never reused or merged into (B1)."""
+        if not (self.auto_folders() and self.auto_level() != "off" and self.auto_scope() is None and self.matcher()):
+            return []
+        cats = self.catalog.categories()
+        live = {c["id"] for c in cats}
+        unmatched = [d for d in doc_ids if (self.catalog.document(d) or {"status": ""})["status"] == "needs_decision"
+                     and not self.original_missing(d) and not self.matches(d, live)]
+        if len(unmatched) < 2:
+            return []
+        model = self.matcher()[1]
+        vectors = matching.group_vectors({d: self._terms(d) for d in unmatched}, model.bundle)
+        taken, out = {c["name_key"] for c in cats}, []
+        for ids in matching.similar_groups(vectors, matching.FOLDER_LEVEL):
+            name = matching.group_name([top_names((self.catalog.analysis(d) or {}).get("suggestions", []))
+                                        for d in ids], taken)
+            if name:
+                taken.add(name_key(name))
+                out.append((ids, matching.shared_words([vectors[d] for d in ids]), name))
+        return out
+
+    def create_folders(self, doc_ids):
+        """Create the folder_groups() folders and file their documents there: the normal verified copies,
+        machine-assigned (they never train the matcher until the user confirms them). Returns [(category id,
+        filed ids)]. A folder whose copies all fail is removed again; its documents keep waiting."""
+        made = []
+        for ids, words, name in self.folder_groups(doc_ids):
+            try:
+                cat_id = self.create_category(name, by="machine")
+            except ValueError:
+                continue
+            auto = {"version": self.matcher()[0]["version"], "new_folder": True, "words": words}
+            filed = []
+            for d in ids:
+                try:
+                    self.file(d, cat_id, provenance="machine-assigned", auto=auto)
+                    filed.append(d)
+                except (CopyError, ValueError):
+                    pass
+            if filed:
+                made.append((cat_id, filed))
+            else:
+                self.discard_unused_category(cat_id)
+        return made
 
     def matching_status(self):
         """{"version", "created_at", "documents", "categories", "since"} for the model in use (since: documents
@@ -448,9 +520,20 @@ class Organizer:
         return {k: row[k] for k in ("version", "created_at", "documents", "categories")} | {
             "since": sum(trained.get(d) != c for d, c in labels.items())}
 
-    def update_matching(self):
-        """Retrain on the documents the user filed, deliberately (A7): the new version is checked against the one
-        in use and replaces it unless it does worse; either way it is recorded with what the check found.
+    def update_due(self):
+        """Matching updates by itself (A7, record 2.6) once this many confirmations or moves were made since the
+        last version was trained, kept or not: a rejected version is not retried at every filing."""
+        last = self.catalog.latest_matcher()
+        if last is None:
+            return False
+        trained = json.loads(last["bundle_json"])["training"]
+        labels = self.catalog.explicit_labels()
+        return sum(trained.get(d) != c for d, c in labels.items()) >= matching.AUTO_UPDATE_EVERY
+
+    def update_matching(self, trigger="user"):
+        """Retrain on the documents the user filed (A7), on request or by itself (trigger "automatic"): the new
+        version is checked against the one in use and replaces it unless it does worse; either way it is recorded
+        with what the check found.
         Returns {"outcome": "updated" | "kept previous" | "up to date", "version", "documents", "categories",
         "check"}. Raises ValueError with a plain reason when there is too little to learn from."""
         texts, labels = self.catalog.texts(), self.catalog.explicit_labels()
@@ -464,7 +547,7 @@ class Organizer:
         bundle = matching.train(texts, labels)
         found = matching.check(texts, labels, current[1].bundle) if current else None
         keep = found is None or found["new"] >= found["previous"]
-        version = self.catalog.add_matcher(bundle, found, keep)
+        version = self.catalog.add_matcher(bundle, found, keep, trigger)
         self._matcher = False
         return {"outcome": "updated" if keep else "kept previous",
                 "version": version if keep else current[0]["version"],

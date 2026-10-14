@@ -1,6 +1,6 @@
 # ClassiFile status
 
-2026-10-14 · decision record version 2.5
+2026-10-14 · decision record version 2.6
 
 ## Done
 
@@ -195,6 +195,25 @@
 - Matching version 3 (116 documents, 12 categories) is in use; on the 33 it puts the owner's category first for 32,
   version 2 for 28. A copy of the catalog from before is kept beside it.
 
+**More automation, interface phases 4 and 5 (2026-10-14; record 2.6, the owner's correction and decisions)**
+- The record (2.6): in automatic mode the app may create a folder for a group of at least 2 unmatched waiting
+  documents at 0.20 (A4, B2); matching also updates by itself after every 10 confirmations or moves (A7).
+- **Automatic new folders, built and off** until the owner has read the replay and turns them on.
+  - The replay (`tools.group_eval --folders`) found 21 folders over 12 rounds: 0 mixing subjects, and 1 subject
+    split (into 7).
+  - It also found 10 second folders for subjects the app already has: 2 distinct pairs.
+  - Report: `docs/AUTO_FOLDERS.md`.
+- The levels on the owner's 33-file run, each file asked of a model trained without it: Strict 28 filed, 0 wrong,
+  5 waiting; Balanced the same; Lenient 31, 0, 2. Strict stays.
+- **Learning by itself**, with the usual check; the versions are logged in Settings, and a note shows each update.
+- **Cards** give 2 to 4 shared key words as the reason.
+- **After each import**, one summary line.
+- **Phase 4:** Settings, "Motion"; a filed row folds away (instant with reduced motion).
+- **Phase 5:** Retry for unreadable documents; "Find category…" from 11 categories.
+- `tools.check_ui` checks "Find category…" and Reduce motion now; all pass at 100%, 125% and 150%.
+- Catalog schema 10 (a mark for folders the app named; who started each matching update).
+- 268 automated tests.
+
 ## Development results so far
 
 These counts describe development data only. They are not accuracy estimates.
@@ -333,10 +352,10 @@ These counts describe development data only. They are not accuracy estimates.
 
 ## Next
 
-1. The owner's decision on the key-word reason for the cards (`docs/ACCURACY_ROUND.md`, section 5); the
-   combination is withdrawn (section 9).
+1. The owner reads `docs/AUTO_FOLDERS.md` and decides:
+   - whether to turn automatic new folders on;
+   - whether to require 3 documents per automatic folder (this would avoid the duplicate pairs the replay found);
+   - the level for automatic filing.
    The owner tries CP4 and the new interface in the app.
-2. The rest of interface phase 4 (motion elsewhere; Reduce motion is done for details and decision rows) and 5 (retry for unreadable documents, "Find category…", the
-   written states) of `docs/UI_PROPOSAL.md`, on the owner's go-ahead.
-3. CP5 quality gate and freeze (`data\final-eval` stays untouched until then). SummarEase is a separate
+2. CP5 quality gate and freeze (`data\final-eval` stays untouched until then). SummarEase is a separate
    project.

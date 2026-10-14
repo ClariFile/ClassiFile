@@ -2,13 +2,15 @@
 status. A click on a row inspects it (details open beside the list; that confirms nothing). "Looks right" records
 the user's confirmation, for one document or for all the ticked ones; Move to… is the correction. A row the user
 has just reviewed stays where it is, with its new status, until the page is left, so no row slides under the
-mouse."""
+mouse. Folders the app created and named by itself (decision record B2, 2.6) are listed above the documents, with
+their key words and a one-click Rename, until the user renames them."""
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox, QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea, QSizePolicy, QVBoxLayout, QWidget,
 )
 
 from classifile.app.decision import cap_width
+from classifile.app.reasons import new_folder_reason
 from classifile.app.widgets import (
     BAR, COLUMNS_MIN, FILE_ICON, GROUP, RELATED, STATUS_COLUMN, TIGHT, ElidedLabel, ListRow, box, format_icon,
     status_icon,
@@ -81,11 +83,11 @@ class AutoItem(ListRow):
 
     def fill(self, doc):
         """Show the document as the catalog has it now; the row itself (tick, focus) stays."""
-        state = (doc["category"], doc["provenance"])
+        state = (doc["category"], doc["provenance"], doc.get("app_named"))
         if state == self.state:
             return
         self.state = state
-        self.category.setText(doc["category"])
+        self.category.setText(doc["category"] + (" · New" if doc.get("app_named") else ""))
         word, icon = REVIEW.get(doc["provenance"], ("Filed by you", "filed"))
         self.status_word.setText(word)
         self.status_icon.setPixmap(status_icon(icon).pixmap(16, 16))
@@ -125,12 +127,55 @@ class AutoItem(ListRow):
             super().keyPressEvent(e)
 
 
+class FolderItem(QFrame):
+    """A folder the app created and named by itself: its name, marked as such, how many documents it holds, the
+    words they share, and Rename… (one click; the folder keeps its documents)."""
+
+    def __init__(self, cat_id, controller):
+        super().__init__()
+        self.cat_id, self.state = cat_id, None
+        self.setObjectName("row")
+        self.name = ElidedLabel(object_name="strong")
+        tag = QLabel("New (named by ClassiFile)")
+        tag.setObjectName("secondary")
+        self.about = QLabel()
+        self.about.setObjectName("secondary")
+        self.about.setWordWrap(True)
+        self.rename = QPushButton("Rename…")
+        self.rename.setObjectName("accent")
+        self.rename.setToolTip("Give this folder your own name. Its documents stay in it.")
+        self.rename.clicked.connect(lambda: controller.rename_category(self.cat_id))
+        top = box(QHBoxLayout(), spacing=RELATED)
+        top.addWidget(self.name, 1)
+        top.addWidget(tag)
+        text = box(QVBoxLayout(), spacing=TIGHT)
+        text.addLayout(top)
+        text.addWidget(self.about)
+        h = box(QHBoxLayout(self), (RELATED, RELATED, RELATED, RELATED), GROUP)
+        h.addLayout(text, 1)
+        h.addWidget(self.rename, 0, Qt.AlignVCenter)
+
+    def fill(self, name, count, words):
+        if (name, count, words) != self.state:
+            self.state = (name, count, words)
+            self.name.setText(name)
+            self.rename.setAccessibleName(f"Rename {name}")
+            self.about.setText(f"{count} document{'s' if count != 1 else ''} · {new_folder_reason(words)}.")
+
+
 class AutoPage(QWidget):
     def __init__(self, controller):
         super().__init__()
         self.c, self.items, self.query, self.inspected, self.narrow = controller, [], "", None, False
         self.reviewed = set()                   # reviewed on this page since it was opened: they stay in view
         self.order = {}                         # doc_id -> when it was first listed: rows keep their places
+        self.folders = []                       # FolderItems: the folders the app named, until renamed
+        self.folder_box = QWidget()
+        folder_caption = QLabel("NEW FOLDERS")
+        folder_caption.setObjectName("section")
+        self.folder_list = box(QVBoxLayout(self.folder_box), (0, 0, GROUP, GROUP), TIGHT)
+        self.folder_list.addWidget(folder_caption)
+        self.folder_box.hide()
         self.all = QCheckBox("Select all")
         self.all.clicked.connect(lambda on: [i.tick.setChecked(on) for i in self.items if not i.reviewed])
         self.count = QLabel()
@@ -183,6 +228,7 @@ class AutoPage(QWidget):
         self.top.addWidget(self.bar)
         self.top.addWidget(self.header)
         v = box(QVBoxLayout(self), spacing=0)
+        v.addWidget(self.folder_box)
         v.addLayout(self.top)
         v.addWidget(scroll, 1)
         v.addWidget(self.empty)
@@ -244,11 +290,28 @@ class AutoPage(QWidget):
                 self.list.insertWidget(n, item)
                 item.setVisible(self._matches(item))
         self.items = items
-        self.empty.setVisible(not items)
+        self.empty.setVisible(not items and not self.folders)
         for w in (self.bar, self.header):
             w.setVisible(bool(items))
         self.header.setVisible(bool(items) and not self.narrow)
         self._ticks_changed()
+
+    def show_folders(self, folders):
+        """folders: [(category id, name, documents, key words)] of the folders the app named, newest first."""
+        old = {f.cat_id: f for f in self.folders}
+        self.folders = []
+        for n, (cat_id, name, count, words) in enumerate(folders):
+            item = old.pop(cat_id, None) or FolderItem(cat_id, self.c)
+            item.fill(name, count, tuple(words))
+            if self.folder_list.indexOf(item) != n + 1:
+                self.folder_list.insertWidget(n + 1, item)
+            self.folders.append(item)
+        for gone in old.values():
+            self.folder_list.removeWidget(gone)
+            gone.hide()
+            gone.deleteLater()
+        self.folder_box.setVisible(bool(self.folders))
+        self.empty.setVisible(not self.items and not self.folders)
 
     def set_inspected(self, doc_id):
         if doc_id != self.inspected:

@@ -144,8 +144,19 @@ def restyle(widget):
     widget.style().polish(widget)
 
 
+MOTION = {"preference": "system"}   # Settings: "system" (follow Windows), "reduce" or "full"
+
+
+def set_motion(preference):
+    """Settings, "Motion": follow Windows, or reduce or keep motion whatever Windows says."""
+    MOTION["preference"] = preference if preference in ("reduce", "full") else "system"
+
+
 def reduced_motion():
-    """Windows' "Animation effects" is off (Settings > Accessibility > Visual effects): every change is instant."""
+    """Every change is instant: Settings says so, or (following Windows) its "Animation effects" is off
+    (Settings > Accessibility > Visual effects)."""
+    if MOTION["preference"] != "system":
+        return MOTION["preference"] == "reduce"
     if sys.platform != "win32":
         return False
     import ctypes
@@ -172,6 +183,24 @@ def unfold(widget, then=None):
     grow.setEasingCurve(QEasingCurve.OutCubic)
     grow.finished.connect(lambda: (widget.setMaximumHeight(QWIDGETSIZE_MAX), then and then()))
     grow.start(QPropertyAnimation.DeleteWhenStopped)
+
+
+def collapse(widget, then):
+    """A row that has gone (a document filed): it folds to nothing over a moment, then then(). Instant with
+    reduced motion. It takes no clicks or focus meanwhile."""
+    duration = motion(MOTION_LEAVE)
+    if not duration or not widget.isVisible():
+        return then()
+    widget.setAttribute(Qt.WA_TransparentForMouseEvents)   # not disabled: that would move the focus along
+    for w in [widget] + widget.findChildren(QWidget):
+        w.setFocusPolicy(Qt.NoFocus)
+    fold = QPropertyAnimation(widget, b"maximumHeight", widget)
+    fold.setDuration(duration)
+    fold.setStartValue(widget.height())
+    fold.setEndValue(0)
+    fold.setEasingCurve(QEasingCurve.InCubic)
+    fold.finished.connect(then)
+    fold.start(QPropertyAnimation.DeleteWhenStopped)
 
 
 def slide_away(widget, parent):

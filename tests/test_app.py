@@ -302,7 +302,7 @@ def test_failed_filing_leaves_nothing_half_done_and_the_error_stays(app, samples
                                   f"{original.name} couldn't be filed. {expected}", "Review")
     assert w.org.catalog.categories() == [] and _cats(w) == {}      # no empty category left
     assert len(w.waiting()) == 1 and not (w.org.output_root / "Course Notes").exists()
-    assert not w.toast.isVisible()
+    assert not w.toast.label.text().startswith("Filed")            # only the import's summary was said
     w.show_view(ALL)
     w.refresh()
     assert w.notices.items[0][0] == "error"                        # errors stay until resolved
@@ -1049,15 +1049,16 @@ def test_cards_offer_the_best_matching_categories_once_matching_is_updated(app, 
 
     w.review()
     item, other = _item(w, known), _item(w, "unknown.pdf")
-    assert item.matches[0] == ("Networks", 3) and len(item.matches) == 3   # ranked, the best first
+    assert item.matches[0][:2] == ("Networks", 3) and len(item.matches) == 3   # ranked, the best first
     assert _said(item) == "Suggested category: Networks" and item.primary.text() == "File in Networks"
-    assert item.reason.full == "Similar to 3 documents in Networks"
+    words = item.reason.full.removeprefix("Similar to 3 documents in Networks (").removesuffix(")").split(", ")
+    assert 2 <= len(words) <= 4 and set(words) <= set(SUBJECTS["Networks"].split())   # the words it shares
     assert item.others.isVisible() and item.others.text().count("<a ") == 2   # the other two: quiet, one click
     shown = " ".join([item.reason.full, item.others.text(), item.others.toolTip(), item.primary.text()])
     assert "%" not in shown and not any(a.isdigit() and b == "." for a, b in zip(shown, shown[1:]))  # no scores
     assert item.choose.isVisible() and not item.expanded.isVisible()       # new names only under "Choose another…"
     item.choose.click()
-    assert _rows_of(item.picker)[:3] == [f"{name} · {n}" for name, n in item.matches]   # the matches lead
+    assert _rows_of(item.picker)[:3] == [f"{name} · {n}" for name, n, _ in item.matches]   # the matches lead
     item.toggle_expanded()
     assert not other.matches and not other.others.isVisible()              # no category fits: a new name instead
     assert _said(other).startswith("Suggested new category: ")
@@ -1100,13 +1101,15 @@ def test_a_clear_match_is_filed_automatically_and_listed_with_its_reason(app, ma
 
     w, rec = _window(make_org, [src / "clear.pdf", src / "small.pdf", src / "torn.pdf"])
     _pump(app, lambda: not w.inflight and not w.filing and not w.auto_running)
-    assert w.toast.label.text() == "Filed clear.pdf automatically in Networks" and w.toast.action.text() == "Show"
+    assert w.toast.label.text() == "Filed 1 automatically · 2 need you" and w.toast.action.text() == "Review"
     assert sorted(d["file_name"] for d in w.waiting()) == ["small.pdf", "torn.pdf"]   # these two ask the user
     assert w.auto_count.text() == "1" and w.decide_count.text() == "2"
     row = next(r for r in range(w.filter.rowCount()) if _cell(w, r, 0) == "clear.pdf")
     assert _cell(w, row, 2) == "Filed automatically" and _cell(w, row, 1) == "Networks"   # not "Approved"
 
-    w.toast.action.click()                                         # Show: what the app filed by itself
+    w.toast.action.click()                                         # Review: the two that need the user
+    assert w.view[0] == "decide"
+    w.show_view(AUTO)                                              # what the app filed by itself
     assert w.view[0] == AUTO and w.stack.currentWidget() is w.auto_page
     assert w.page_title.full == "Filed automatically · 1" and w.toolbar.isVisible() and not w.sort.isVisible()
     item = w.auto_page.items[0]
@@ -1117,13 +1120,13 @@ def test_a_clear_match_is_filed_automatically_and_listed_with_its_reason(app, ma
     assert d.isVisible() and d.title.full == "clear.pdf" and item.inspected
     assert (d.category.caption.text(), d.category.value.text()) == ("Filed in", "Networks")
     assert d.state.value.text().startswith("Filed automatically · not reviewed yet")
-    assert d.why.text() == "Filed automatically. Similar to 3 documents in Networks."
+    assert d.why.text().startswith("Filed automatically. Similar to 3 documents in Networks (")   # with key words
     assert w.org.catalog.document_row(_doc(w, "clear.pdf"))["provenance"] == "machine-assigned"
     QTest.keyClick(item, Qt.Key_Escape)
     assert not d.isVisible() and item.hasFocus()
     w.review()
     small = _item(w, "small.pdf")
-    assert small.matches[0] == ("Poetry", 2) and small.primary.text() == "File in Poetry"   # waits, with the three
+    assert small.matches[0][:2] == ("Poetry", 2) and small.primary.text() == "File in Poetry"   # waits, with the three
 
     w.show_view(AUTO)
     w.auto_page.items[0].move.click()                              # one click to the picker: the user's correction
@@ -1452,4 +1455,118 @@ def test_reduced_motion_makes_every_change_instant(app, samples, make_org, monke
     assert not w.details.isVisible() and ghosts == []              # no picture of the panel slides away
     item.choose.click()
     assert item.expanded.isVisible() and item.expanded.maximumHeight() == widgets.QWIDGETSIZE_MAX
+    _close(w, rec)
+
+
+def test_new_folders_by_itself_with_one_summary_and_a_one_click_rename(app, make_org, tmp_path):
+    from classifile.app.main import AUTO
+    from test_matching import SUBJECTS, _add, _pdf
+
+    org, src = make_org(), tmp_path / "src"
+    for n in range(3):
+        _add(org, src, "Algebra", n)
+        _add(org, src, "Networks", n)
+    org.update_matching()
+    org.set_auto_folders(True)
+    poems = [src / f"poem-{n}.pdf" for n in range(3)]
+    for n, path in enumerate(poems):
+        _pdf(path, SUBJECTS["Poetry"], n)
+    _pdf(src / "clear.pdf", SUBJECTS["Networks"], 7)
+    _pdf(src / "zoo.pdf", "zebra giraffe antelope savanna migration herd", 1)
+    w, rec = _window(make_org, poems + [src / "clear.pdf", src / "zoo.pdf"])
+    _pump(app, lambda: w.run is None and not w.inflight and not w.moving)
+    assert w.toast.label.text() == "Filed 4 automatically · 1 new folder · 1 needs you"   # one line for the import
+    assert w.toast.action.text() == "Review" and w.mode_label.text().endswith("new folders on")
+    new = next(c for c in w.org.catalog.categories() if c["app_named"])
+    assert _cats(w)[new["name"]] == "New · 3"                          # marked in the sidebar
+    w.show_view(AUTO)
+    folder, = w.auto_page.folders
+    assert folder.isVisible() and folder.name.full == new["name"] and folder.about.text().startswith(
+        "3 documents · No folder matched these documents, and they share a subject: ")
+    rec_name = "Poems"
+    w.ask_new_name = lambda current: rec_name
+    folder.rename.click()                                              # one click, then the name
+    _pump(app, lambda: not w.moving)
+    assert w.org.catalog.category(new["id"])["name"] == "Poems" and not w.auto_page.folders
+    assert _cats(w)["Poems"] == "3"
+    _close(w, rec)
+
+
+def test_retry_find_category_motion_and_the_matching_log(app, make_org, tmp_path, monkeypatch):
+    from classifile import matching
+    from classifile.app import widgets
+    from classifile.app.main import SETTINGS
+    from test_matching import _add
+
+    org, src = make_org(), tmp_path / "src"
+    for n in range(2):
+        _add(org, src, "Algebra", n)
+        _add(org, src, "Networks", n)
+    org.update_matching()
+    for n in range(9):
+        org.create_category(f"Topic {n}")
+    broken = src / "broken.docx"
+    broken.write_bytes(b"PK not a zip")
+    w, rec = _window(make_org, [broken])
+    _pump(app, lambda: not w.inflight and w.run is None)
+    w.review()
+    item = _item(w, "broken.docx")
+    assert item.primary.text() == "Retry" and item.primary.isVisible()     # read again from the original
+    item.primary.click()
+    assert str(broken.resolve()) in w.inflight
+    _pump(app, lambda: not w.inflight and w.run is None)
+    assert [d["status"] for d in w.org.catalog.all_documents() if d["file_name"] == "broken.docx"] == ["failed"]
+
+    assert w.find_category.isVisible() and len(_cats(w)) == 11         # many categories: a find field
+    w.find_category.setText("netw")
+    assert list(_cats(w)) == ["Networks"] and w.view[0] == "decide"    # the open view stays
+    w.find_category.setText("nothing like it")
+    assert _cats(w) == {} and w.cats_none.isVisible()
+    w.find_category.clear()
+    assert len(_cats(w)) == 11 and not w.cats_none.isVisible()
+
+    w.show_view(SETTINGS)
+    w.motion.setCurrentIndex(w.motion.findData("reduce"))
+    w.motion.activated.emit(w.motion.currentIndex())
+    assert widgets.reduced_motion() and w.org.catalog.get_setting("motion") == "reduce"
+    assert w.matching_log.text().startswith("Version 1 · ") and "by you" in w.matching_log.text()
+
+    monkeypatch.setattr(matching, "AUTO_UPDATE_EVERY", 2)
+    _add(w.org, src, "Algebra", 5)
+    _add(w.org, src, "Networks", 6)
+    w.show_view("all")
+    w.update_if_due()                                                  # what filing, Looks right and moves call
+    _pump(app, lambda: not w.updating)
+    assert any(n.startswith("Matching updated by itself: version 2") for n in _notices(w))   # a note at the top
+    w.show_view(SETTINGS)
+    assert w.matching_log.text().startswith("Version 2 · ") and "by itself" in w.matching_log.text()
+    assert not w.update_note                                           # seen: the note goes
+    widgets.set_motion("system")
+    _close(w, rec)
+
+
+def test_a_filed_row_folds_away_and_goes_at_once_with_reduced_motion(app, samples, make_org):
+    from shiboken6 import isValid
+
+    from classifile.app import widgets
+    from classifile.app.main import SETTINGS
+
+    w, rec = _window(make_org, [samples / SAMPLE[s] for s in ("S1", "S2", "S3")])
+    _pump(app, lambda: not w.inflight)
+    for preference, folding in (("full", True), ("reduce", False)):
+        w.set_motion(preference)
+        w.review()
+        item = w.decision.items[0]
+        item.choose.click()
+        _pick(item.picker, f"Folder {preference}", "Create category")
+        item.confirm.click()
+        item = w.decision.row_of(item.ids[0])                          # its row while the copy is made
+        _pump(app, lambda: not w.filing)
+        there = lambda: isValid(item) and w.decision.list.indexOf(item) >= 0
+        assert there() == folding                                      # folding where it was, or gone at once
+        assert item not in w.decision.items and [i.number.text() for i in w.decision.items][:1] == ["1."]
+        _pump(app, lambda: not there())                                # and then it is gone
+    w.show_view(SETTINGS)
+    assert w.motion.currentData() == "reduce"
+    widgets.set_motion("system")
     _close(w, rec)
