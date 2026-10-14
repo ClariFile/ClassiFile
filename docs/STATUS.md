@@ -214,6 +214,33 @@
 - Catalog schema 10 (a mark for folders the app named; who started each matching update).
 - 268 automated tests.
 
+**The owner's decisions, and a colour redesign (2026-10-14; record 2.7)**
+- Automatic new folders are on for groups of at least 3 documents; pairs stay a question. Strict stays.
+  - Replay with the minimum: 3 folders, 0 mixed, 0 second folders for known subjects, 1 subject in 2 folders.
+- **Two complete themes** in `classifile/app/tokens.py`: every surface, text, line, accent and status colour, for
+  light and for dark.
+  - The cause of the white text in light mode: the style sheet mixed fixed colours with the system palette and grey
+    mixes, so text took Windows' colours when they disagreed with the chosen appearance.
+  - Now the style sheet and the Qt palette (the Fusion lists, native controls and dialogs included) are built from
+    the theme in use, and rebuilt, with every icon and row, whenever the appearance or Windows' setting changes.
+  - Hard-coded white is left only on the light theme's primary buttons and the dark overlays.
+- Each category has a dot in one of 8 colours, readable in both themes and the same for that category always
+  (from its id).
+- `tests/test_theme.py` computes the contrast of every pair in both themes: text at least 4.5:1; icons, control
+  borders and the selection and focus bars at least 3:1. Dividers are decorative and not held to 3:1.
+- Values changed from the owner's starting point where a check failed:
+  - light amber #AA4F09 and green #14793A (for tinted rows);
+  - dark selection #0D3532 (for the dots and the red text);
+  - control borders #7D8796 (light) and #5F7E85 (dark), since #D9DEE5 and #2A3D42 are under 3:1 and stay as
+    dividers;
+  - the format glyphs and dots, slightly brighter or darker so both themes pass.
+- Found by eye in the screenshots, and fixed:
+  - Settings cut its text on short windows; it scrolls now.
+  - The details panel showed the page colour behind its body in dark mode.
+- `tools.render_window --theme light|dark|both` renders with the app's themes (the hand-made dark palette is
+  gone); `tools.check_ui` checks both themes through the setting.
+- Screenshots of the main pages in both themes: `data\render-light-*.png` and `data\render-dark-*.png` (local).
+
 ## Development results so far
 
 These counts describe development data only. They are not accuracy estimates.
@@ -352,10 +379,7 @@ These counts describe development data only. They are not accuracy estimates.
 
 ## Next
 
-1. The owner reads `docs/AUTO_FOLDERS.md` and decides:
-   - whether to turn automatic new folders on;
-   - whether to require 3 documents per automatic folder (this would avoid the duplicate pairs the replay found);
-   - the level for automatic filing.
+1. The owner uses automatic new folders (at least 3 documents) and the new themes.
    The owner tries CP4 and the new interface in the app.
 2. CP5 quality gate and freeze (`data\final-eval` stays untouched until then). SummarEase is a separate
    project.

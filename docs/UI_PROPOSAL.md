@@ -254,6 +254,15 @@ Run at the end of every phase that touches the window.
 
 ---
 
+## 11. Colour redesign (2026-10-14)
+
+Section 4's colour row is replaced by two complete themes in `classifile/app/tokens.py` (THEMES["light"] and
+THEMES["dark"]).
+- The style sheet and the Qt palette are built from the theme in use and rebuilt whenever it changes; nothing
+  comes from the system palette or from grey mixes.
+- Categories have a dot in one of 8 colours.
+- `tests/test_theme.py` holds the contrast of every pair to 4.5:1 (text) and 3:1 (icons, control borders, bars).
+
 ## 10. Phases 4 and 5 as built (2026-10-14)
 
 - **Phase 4 (motion).**

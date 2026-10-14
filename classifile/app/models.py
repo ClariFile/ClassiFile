@@ -5,9 +5,9 @@ the rows that differ. Sorting, the current view (all, recent, one category) and 
 rows already loaded, so a search key or a change of view reads nothing from the catalog.
 """
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, QSize, QSortFilterProxyModel, Qt
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtGui import QColor
 
-from classifile.app.widgets import ROW, format_icon, status_icon, status_word
+from classifile.app.widgets import ROW, THEME, category_dot, format_icon, status_icon, status_word
 
 DOC = Qt.UserRole          # a document's id (None while it is still being read) or a category's id
 ALL, RECENT, CATEGORY = "all", "recent", "category"
@@ -37,6 +37,11 @@ class RowsModel(QAbstractTableModel):
     def get(self, key):
         i = self.at.get(key)
         return None if i is None else self.rows[i]
+
+    def redraw(self):
+        """The theme changed: every row is drawn again (icons and colours come from the theme in use)."""
+        if self.rows:
+            self.dataChanged.emit(self.index(0, 0), self.index(len(self.rows) - 1, len(self.HEADERS) - 1))
 
     def sync(self, rows):
         """Rows that are gone leave, changed ones are redrawn, new ones join at the end (the views sort)."""
@@ -70,6 +75,8 @@ class DocumentModel(RowsModel):
         if role == Qt.DisplayRole:
             return (r["file_name"], r["category"] or "—", status_word(status), r["date"])[column]
         if role == Qt.DecorationRole:
+            if column == 1:
+                return category_dot(r["category_id"]) if r.get("category_id") else None
             return format_icon(r["file_name"]) if column == 0 else status_icon(status) if column == 2 else None
         if role == Qt.ToolTipRole:
             return r["file_name"] if column == 0 else (r.get("status_reason") or None) if column == 2 else None
@@ -153,10 +160,12 @@ class CategoryModel(RowsModel):
             return r["name"] if column == 0 else f"New · {r['count']}" if r.get("new") else str(r["count"])
         if role == Qt.ToolTipRole:
             return r["name"] + ("\nNew (named by ClassiFile). Right-click to rename it." if r.get("new") else "")
+        if role == Qt.DecorationRole and column == 0:
+            return category_dot(r["key"])           # the category's own colour, the same everywhere
         if role == Qt.TextAlignmentRole and column == 1:
             return int(Qt.AlignRight | Qt.AlignVCenter)
         if role == Qt.ForegroundRole and column == 1:
-            return QGuiApplication.palette().placeholderText()   # quieter than the name
+            return QColor(THEME["secondary"])       # quieter than the name
         if role == DOC:
             return r["key"]
         return None

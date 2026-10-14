@@ -68,7 +68,7 @@ Run from the project folder (Windows, Python 3.11+; the venv uses 3.12).
 - The owner's grouping of development files, from the catalog (read-only): `.venv\Scripts\python -m tools.grouping <folder>...` (prints file and category names: keep the output local)
 - Inventory labels, one file at a time: `.venv\Scripts\python -m tools.label_inventory [data\inventory_incoming.csv] [--folder data\incoming]`
 - Labels again after a split (files shown from their split folders, for the owner): `.venv\Scripts\python -m tools.label_inventory --splits data\splits_incoming.csv [--only "<label>"]`
-- Window renders for layout checks: `.venv\Scripts\python -m tools.render_window [--size 1536x864] [--scale 1.25] [--out data]` (dark-theme PNGs: nine views, or five scaled views with `--scale`)
+- Window renders for layout checks: `.venv\Scripts\python -m tools.render_window [--size 1536x864] [--scale 1.25] [--out data] [--theme light|dark|both]` (PNGs per theme, `render-<theme>-*.png`: eleven views, or five scaled views with `--scale`)
 - OCR needs Tesseract (`C:\Program Files\Tesseract-OCR`, or `TESSDATA_PREFIX`). Tests run OCR only when marked `ocr`; others set `CLASSIFILE_OCR=off`.
 - Apply a split: `.venv\Scripts\python -m tools.apply_split data\splits.csv --from <folder>` (moves the files into `data\development`, `data\validation` and `data\final-eval`; all or nothing). A split made again: `... data\splits_2.csv --previous data\splits.csv` (only files that change folder are touched)
 - Matching (CP3). The model is updated on request (Settings, "Update matching") and by itself after every 10 confirmations or moves (record 2.6); versioned, and the previous version is kept if the new one does worse.

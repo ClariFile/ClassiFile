@@ -12,8 +12,8 @@ def similar_reason(count, category, words=()):
 
 def new_folder_reason(words):
     """Why the app created a folder by itself for a group of documents (decision record B2, 2.6)."""
-    shared = f": they share {', '.join(words[:4])}" if words else ""
-    return f"No folder matched these documents, and they share a subject{shared}"
+    shared = f"they share {', '.join(words[:4])}" if words else "they share a subject"
+    return f"No folder matched these documents, and {shared}"
 
 
 def _join(parts):

@@ -1360,7 +1360,7 @@ def test_sizes_colours_and_durations_are_named_once_in_the_token_module():
     import classifile.app as package
     from classifile.app import tokens
 
-    literal = re.compile(r"#[0-9A-Fa-f]{6}\b|rgba?\(|\b\d+px\b|setStyleSheet\((?!STYLE\))|setDuration\(\d|ms=\d")
+    literal = re.compile(r"#[0-9A-Fa-f]{6}\b|rgba?\(|\b\d+px\b|setStyleSheet\((?!STYLE\)|style_sheet\()|setDuration\(\d|ms=\d")
     for path in sorted(Path(package.__file__).parent.glob("*.py")):
         if path.name in ("tokens.py", "smoke.py"):                  # the tokens themselves; the CP0 smoke window
             continue
@@ -1482,7 +1482,7 @@ def test_new_folders_by_itself_with_one_summary_and_a_one_click_rename(app, make
     w.show_view(AUTO)
     folder, = w.auto_page.folders
     assert folder.isVisible() and folder.name.full == new["name"] and folder.about.text().startswith(
-        "3 documents · No folder matched these documents, and they share a subject: ")
+        "3 documents · No folder matched these documents, and they share ")
     rec_name = "Poems"
     w.ask_new_name = lambda current: rec_name
     folder.rename.click()                                              # one click, then the name

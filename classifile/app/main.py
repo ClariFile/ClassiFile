@@ -30,8 +30,8 @@ from classifile.app.details import DetailsPanel
 from classifile.app.models import DOC, SORTS, CategoryModel, DocumentFilter, DocumentModel, sorted_by_name
 from classifile.app.widgets import (
     CHECKLIST_MAX, DATE_COLUMN_MIN, DETAILS_MAX, DETAILS_MIN, DETAILS_WIDTH, FILE_ICON, GROUP, LIST_MIN, MIN_WINDOW,
-    MOTION_STANDARD, NARROW, PAD, RELATED, SEARCH_MAX, SECTION, SIDEBAR_WIDTH, STYLE, SUPPORTED, TOAST, TOAST_LONG,
-    WIDE, WINDOW, box, motion, set_motion, slide_away,
+    MOTION_STANDARD, NARROW, PAD, RELATED, SEARCH_MAX, SECTION, SIDEBAR_WIDTH, SUPPORTED, TOAST, TOAST_LONG,
+    WIDE, WINDOW, box, motion, qt_palette, set_motion, slide_away, style_sheet, use_theme,
     DropOverlay, ElidedLabel, Notices, PickerDialog, PreviewOverlay, Toast, wrappable,
 )
 from classifile.copies.engine import CopyError
@@ -110,13 +110,14 @@ class MainWindow(QWidget):
         self.bridge.file_done.connect(self._file_done)
         self.bridge.job_done.connect(lambda done, result: done(result))
         self.list_style = QStyleFactory.create("Fusion")  # one selection bar (Windows 11 adds a second)
-        self.setStyleSheet(STYLE)
         self.set_appearance(self.org.catalog.get_setting("appearance", "system"))
+        QApplication.styleHints().colorSchemeChanged.connect(lambda *_: self.apply_theme())   # Windows changed
         set_motion(self.org.catalog.get_setting("motion", "system"))
         self.setAcceptDrops(True)
         self.setMinimumSize(*MIN_WINDOW)
         self.resize(*WINDOW)
         self._build()
+        self.apply_theme()
         self.org.startup()
         self.refresh()
         if ask_output_root and self.org.output_root is None:
@@ -492,9 +493,13 @@ class MainWindow(QWidget):
         return page
 
     def _settings_page(self):
-        outer = QWidget()
+        outer = QScrollArea()                   # scrolls when the window is short, so nothing is cut
+        outer.setWidgetResizable(True)
+        outer.setFrameShape(QFrame.NoFrame)
         page = QWidget()                        # as wide as the page, like the others: text left, controls right
-        box(QHBoxLayout(outer)).addWidget(page)
+        page.setMinimumWidth(0)
+        page.setContentsMargins(0, 0, GROUP, 0) # room for the scroll bar
+        outer.setWidget(page)
         out = QLabel("OUTPUT FOLDER")
         out.setObjectName("section")
         self.root_label = QLabel()
@@ -549,8 +554,9 @@ class MainWindow(QWidget):
         self.auto_folders = QCheckBox("Create new folders by itself")
         self.auto_folders.setToolTip("Off until you turn it on")
         self.auto_folders.toggled.connect(self.set_auto_folders)
-        folders_text = QLabel("When at least two waiting documents match none of your categories and clearly share a "
-                              "subject, ClassiFile creates a folder for them and names it. You can rename it with one "
+        folders_text = QLabel("When at least three waiting documents match none of your categories and clearly share "
+                              "a subject, ClassiFile creates a folder for them and names it. Two alike stay a question "
+                              "for you. You can rename it with one "
                               "click in Filed automatically. A single document always waits for you, and in "
                               "\u201cOnly the ones I tick\u201d mode ClassiFile asks first.")
         folders_text.setObjectName("secondary")
@@ -1352,11 +1358,40 @@ class MainWindow(QWidget):
             self._run_step()
 
     def set_appearance(self, name, save=False):
-        """Light, dark, or as Windows is set. Colours come from the palette, so nothing else changes."""
+        """Light, dark, or as Windows is set: the theme is applied whole (apply_theme)."""
         scheme = next((s for n, _, s in APPEARANCES if n == name), Qt.ColorScheme.Unknown)
-        QApplication.styleHints().setColorScheme(scheme)
+        self.appearance_name = name
+        QApplication.styleHints().setColorScheme(scheme)    # the title bar and Windows' own drawing follow
         if save:
             self.org.catalog.set_setting("appearance", name)
+        if hasattr(self, "stack"):
+            self.apply_theme()
+
+    def apply_theme(self):
+        """Make the chosen theme the one in use, everywhere: the style sheet and the Qt palette are built again
+        from it (the Fusion lists and native controls use the palette), and every icon and row is drawn again, so
+        nothing keeps the old colours."""
+        name = getattr(self, "appearance_name", "system")
+        dark = name == "dark" or (name == "system" and
+                                  QApplication.styleHints().colorScheme() == Qt.ColorScheme.Dark)
+        if getattr(self, "theme_applied", None) == ("dark" if dark else "light"):
+            return
+        theme = use_theme("dark" if dark else "light")
+        self.theme_applied = theme["name"]
+        palette = qt_palette(theme)
+        QApplication.setPalette(palette)
+        self.list_style.polish(palette)
+        for view in (self.table, self.cats):
+            view.setPalette(palette)
+        self.setStyleSheet(style_sheet(theme))
+        self.docs.redraw()
+        self.cat_model.redraw()
+        for item in self.decision.items:        # rows draw their icons once: built again on the next refresh
+            item.state = None
+        for item in self.auto_page.items:
+            item.state = None
+        self.notices.show_notices([])
+        self.refresh(recheck=False)
 
     def recheck_waiting(self):
         """Look at the waiting documents again: the level, the selection or the model changed, or the user

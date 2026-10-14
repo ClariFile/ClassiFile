@@ -4,8 +4,8 @@
 run; they are not accuracy estimates. Categories are named by their size here; the report with their names, the
 folder names and the key words is local (`data\auto_folders_replay.txt`). `data\final-eval` was not read.
 
-**Automatic new folders are built and switched off.** They stay off until the owner has read section 1 and turns
-them on (Settings, "Create new folders by itself").
+**The owner's decision (record 2.7):** automatic new folders are on, for groups of at least 3 documents; groups of
+2 stay a question. Automatic filing stays at Strict. Section 4 has the replay with that minimum.
 
 ## 1. Replay of automatic new folders on development data
 
@@ -116,3 +116,18 @@ confirmed documents.
   - "Find category…" above the sidebar's list from 11 categories, with "No category matches …" when nothing does.
     The open view stays as it is.
   - The nothing-found states of the pages were there already.
+
+## 4. With at least 3 documents per folder (record 2.7)
+
+The same replay with the owner's minimum (`tools.group_eval --folders`, `--least 3` is the default now):
+
+- **Folders created:** 3 over the 12 rounds.
+- **Folders mixing subjects:** 0.
+- **Second folders for a subject the app already has:** 0. The pairs from section 1 stay questions.
+- **Subjects split:** 1. The 51-document subject comes back as 2 folders, with 24 of its documents left waiting
+  as questions.
+- **Fewer folders:** 3 of the 5 subjects that had a folder with pairs allowed now have none. Their documents wait,
+  and pairs among them are asked as one question (grouped at 0.15).
+
+These counts describe development data; they are not accuracy estimates.
+

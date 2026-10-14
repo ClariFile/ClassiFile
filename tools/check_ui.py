@@ -369,21 +369,21 @@ def run(base):
         widgets.set_motion("system")
     results.append(("Reduce motion: details, a row's choices and a filed row change at once", found,
                     "set in Settings here; following Windows, the app reads its Animation effects setting"))
-    # -- light and dark: the same layout checks with each palette ---------------------------------------------------
-    from tools.render_window import dark_palette
-    found, light = [], app.palette()
+    # -- light and dark: the same layout checks with each theme, set as in Settings ----------------------------------
+    from classifile.app.widgets import THEME
+    found = []
     w.resize(1536, 864)
-    for name, palette in (("dark", dark_palette()), ("light", light)):
-        app.setPalette(palette)
+    for name in ("dark", "light"):
+        w.set_appearance(name)
+        if THEME["name"] != name or app.palette().window().color().name().upper() != THEME["window"]:
+            found.append(f"{name}: the theme was not applied to the palette")
         for view in (ALL, DECIDE, SETTINGS):
             w.show_view(view)
             pump(timeout=0.25)
             found += [f"{name}, {view}: {problem}" for problem in layout_problems()]
-        ink, paper = (app.palette().windowText().color().lightness(), app.palette().window().color().lightness())
-        if abs(ink - paper) < 120:
-            found.append(f"{name}: the text does not stand out from its background")
-    results.append(("Light and dark palettes at 1536x864: nothing clipped, every button named, text stands out",
-                    found, "the palettes are set by hand: off-screen drawing cannot follow the system theme"))
+    w.set_appearance("system")
+    results.append(("Light and dark themes at 1536x864: nothing clipped, every button named, the theme applied",
+                    found, "contrast is checked by tests/test_theme.py"))
     w.close()
     w.org.catalog.close()
     return results

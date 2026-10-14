@@ -1,14 +1,13 @@
 """Offscreen renders of the main window for checking the layout, from copies of the development samples.
 
-Usage: python -m tools.render_window [--out data] [--size 1280x720] [--scale 1.25]
+Usage: python -m tools.render_window [--out data] [--size 1280x720] [--scale 1.25] [--theme light|dark|both]
 
-Saves render-empty.png, render-list.png, render-decision.png (with a missing original and a group item),
-render-decision-expanded.png, render-decision-details.png, render-dropdown-open.png, render-details.png, render-drop-overlay.png and render-1024x640.png at --size.
-With --scale: render-scale-<N>-list.png, -decision.png, -decision-expanded.png, -decision-details.png and -details.png at --size
-(logical pixels; the images are larger by the scale factor).
-Renders use the Windows 11 style with a dark palette modelled on Windows' dark theme (offscreen rendering cannot
-read the system theme, so colours are an approximation). Everything happens in a temporary folder with its own
-catalog; the samples are only copied.
+Saves, per theme (render-<theme>-...): empty, list, dropdown-open, decision (with a missing original and a group
+item), decision-expanded, decision-details, details, auto (Filed automatically), settings, drop-overlay and
+1024x640, at --size. With --scale: render-<theme>-scale-<N>-list.png, -decision.png, -decision-expanded.png,
+-decision-details.png and -details.png at --size (logical pixels; the images are larger by the scale factor).
+Renders use the Windows 11 style and the app's own themes (classifile.app.tokens.THEMES), set as the user would
+in Settings. Everything happens in a temporary folder with its own catalog; the samples are only copied.
 """
 import argparse
 import json
@@ -33,34 +32,18 @@ def sample_names():
         sys.exit(f"Renders need the sample PDFs and {FIXTURE_MAP} (see tests/conftest.py).")
 
 
-def dark_palette():
-    from PySide6.QtGui import QColor, QPalette
-    p = QPalette()
-    for role, colour in ((QPalette.Window, "#202020"), (QPalette.WindowText, "#FFFFFF"), (QPalette.Base, "#1C1C1C"),
-                         (QPalette.AlternateBase, "#2B2B2B"), (QPalette.Text, "#FFFFFF"), (QPalette.Button, "#2D2D2D"),
-                         (QPalette.ButtonText, "#FFFFFF"), (QPalette.Light, "#3C3C3C"), (QPalette.Midlight, "#353535"),
-                         (QPalette.Mid, "#4A4A4A"), (QPalette.Dark, "#141414"), (QPalette.Shadow, "#000000"),
-                         (QPalette.ToolTipBase, "#2B2B2B"), (QPalette.ToolTipText, "#FFFFFF"),
-                         (QPalette.PlaceholderText, "#A8A8A8"), (QPalette.Highlight, "#0D9488"),
-                         (QPalette.HighlightedText, "#FFFFFF"), (QPalette.Link, "#5EEAD4")):
-        p.setColor(role, QColor(colour))
-    for role in (QPalette.Text, QPalette.WindowText, QPalette.ButtonText):
-        p.setColor(QPalette.Disabled, role, QColor("#7A7A7A"))
-    return p
-
-
-def render(out, scale=None, size=(1280, 720)):
+def render(out, scale=None, size=(1280, 720), theme="dark"):
     from PySide6.QtCore import QMimeData, QPoint, Qt, QUrl
     from PySide6.QtGui import QDragEnterEvent, QFont, QFontDatabase, QPainter
     from classifile.app import make_app
-    from classifile.app.main import ALL, DECIDE, MainWindow
+    from PySide6.QtWidgets import QApplication
+    from classifile.app.main import ALL, AUTO, DECIDE, SETTINGS, MainWindow
     from classifile.catalog.db import Catalog
     from classifile.organizer import Organizer
 
     out.mkdir(parents=True, exist_ok=True)
-    app = make_app([])
+    app = QApplication.instance() or make_app([])
     app.setStyle("windows11")
-    app.setPalette(dark_palette())
     for name in ("segoeui.ttf", "seguisb.ttf", "seguisym.ttf", "SegoeIcons.ttf", "segmdl2.ttf"):
         font = Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts" / name
         if font.exists():  # the offscreen platform has no fonts of its own
@@ -83,11 +66,13 @@ def render(out, scale=None, size=(1280, 720)):
         org.set_output_root(work / "out")
         w = MainWindow(org, ask_output_root=False)
         w.ask_close = lambda n: ("close", False)
+        w.set_appearance(theme)
         w.resize(*size)
         w.show()
         pump()
+        start = f"render-{theme}-"
         if scale is None:
-            w.grab().save(str(out / "render-empty.png"))
+            w.grab().save(str(out / f"{start}empty.png"))
         deck, handout, lab = sample_names()
         for p in SAMPLES.glob("*.pdf"):
             shutil.copyfile(p, work / "src" / p.name)
@@ -106,7 +91,7 @@ def render(out, scale=None, size=(1280, 720)):
         w.toast.hide()
         w.refresh()
         pump()
-        prefix = f"render-scale-{int(scale * 100)}-" if scale is not None else "render-"
+        prefix = f"{start}scale-{int(scale * 100)}-" if scale is not None else start
         w.grab().save(str(out / f"{prefix}list.png"))
         w.sort.showPopup()  # the opened list is its own window: paint it onto the window image
         pump()
@@ -135,15 +120,20 @@ def render(out, scale=None, size=(1280, 720)):
             catalog.close()
             return out
         w.close_details()
+        for view, name in ((AUTO, "auto"), (SETTINGS, "settings")):
+            w.show_view(view)
+            pump()
+            w.grab().save(str(out / f"{prefix}{name}.png"))
+        w.show_view(ALL)
         mime = QMimeData()
         mime.setUrls([QUrl.fromLocalFile(str(work / "src" / handout)), QUrl.fromLocalFile(str(work / "notes.txt"))])
         w.dragEnterEvent(QDragEnterEvent(QPoint(400, 300), Qt.CopyAction, mime, Qt.LeftButton, Qt.NoModifier))
         pump()
-        w.grab().save(str(out / "render-drop-overlay.png"))
+        w.grab().save(str(out / f"{prefix}drop-overlay.png"))
         w.overlay.hide()
         w.resize(1024, 640)
         pump()
-        w.grab().save(str(out / "render-1024x640.png"))
+        w.grab().save(str(out / f"{prefix}1024x640.png"))
         w.close()
         catalog.close()
     return out
@@ -154,13 +144,15 @@ def main(argv=None):
     ap.add_argument("--out", type=Path, default=ROOT / "data")
     ap.add_argument("--scale", type=float, help="display scaling, e.g. 1.25 or 1.5")
     ap.add_argument("--size", default="1280x720", help="window size in logical pixels, e.g. 1536x864")
+    ap.add_argument("--theme", choices=("light", "dark", "both"), default="both")
     a = ap.parse_args(argv)
     size = tuple(int(v) for v in a.size.lower().split("x"))
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     os.environ.setdefault("CLASSIFILE_OCR", "off")
     if a.scale:
         os.environ["QT_SCALE_FACTOR"] = str(a.scale)  # must be set before the application starts
-    print(render(a.out.resolve(), a.scale, size))
+    for theme in ("light", "dark") if a.theme == "both" else (a.theme,):
+        print(render(a.out.resolve(), a.scale, size, theme))
 
 
 if __name__ == "__main__":

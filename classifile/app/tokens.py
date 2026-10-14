@@ -3,30 +3,74 @@ section 4). The style sheet and the widgets use these names; no other interface 
 Sizes are logical pixels (Qt scales them with the display); durations are milliseconds."""
 
 # -- colour ---------------------------------------------------------------------------------------------------
-# Everything not named here comes from the system palette, so light and dark both work.
-TEAL = "#0D9488"            # accent: selection bar, selection tint, focus
-PRIMARY = "#0F766E"         # primary buttons (white text)
-PRIMARY_HOVER = "#115E59"
-AMBER = "#D97706"           # waiting
-RED = "#DC2626"             # errors
-GREEN = "#16A34A"           # approved: filed in a category the user chose
-VIOLET = "#6C47FF"          # reserved for SummarEase; unused until it exists
-WHITE = "white"             # text on a primary button and on the dark overlays
-MUTED = "#9CA3AF"           # status icons for work under way
-UNKNOWN_TYPE = "#6B7280"    # the page glyph of a format without a colour of its own
+# Two complete themes: every surface, text, line, accent and status colour is named for light and for dark. The
+# style sheet and the Qt palette are built from the theme in use (widgets.use_theme), so nothing comes from the
+# system palette and nothing mixes greys over it. tests/test_theme.py checks the contrast of every pair: text at
+# least 4.5:1, icons and control borders at least 3:1. Dividers between rows and panels are decorative lines and
+# are not held to 3:1.
+THEMES = {
+    "light": {
+        "window": "#F6F7F9",        # the page behind everything
+        "sidebar": "#EEF1F4",
+        "base": "#FFFFFF",          # lists, rows, fields
+        "raised": "#FFFFFF",        # details, the choices panel, menus, dialogs
+        "inset": "#F6F7F9",         # a panel inside a row (the choices)
+        "text": "#111827",
+        "secondary": "#4B5563",     # captions, counts, reasons
+        "disabled": "#6B7280",
+        "divider": "#D9DEE5",       # lines between rows and panels (decorative)
+        "control": "#7D8796",       # the outline of buttons, fields and ticks
+        "accent": "#0F766E",        # focus, selection bar, links, ticks
+        "primary": "#0F766E",       # primary buttons
+        "primary_hover": "#115E59",
+        "on_primary": "#FFFFFF",
+        "selection": "#E0F2EF",     # the inspected row, selected list items, pressed toggles
+        "nav": "#E0F2EF",           # the current view in the sidebar
+        "hover": "#EAEEF2",
+        "notice": "#E8EDF2",
+        "bulk": "#E0F2EF",          # the bar for several selected documents
+        "disabled_fill": "#E5E7EB",
+        "toast": "#1F2937",
+        "on_toast": "#F9FAFB",
+        "amber": "#AA4F09",         # waiting
+        "red": "#B91C1C",           # errors
+        "green": "#14793A",         # approved
+    },
+    "dark": {
+        "window": "#0B1215",
+        "sidebar": "#0F1A1D",
+        "base": "#142226",
+        "raised": "#1A2B30",
+        "inset": "#1A2B30",
+        "text": "#F1F5F4",
+        "secondary": "#A7B6B4",
+        "disabled": "#7C8E8C",
+        "divider": "#2A3D42",
+        "control": "#5F7E85",
+        "accent": "#2DD4BF",
+        "primary": "#2DD4BF",
+        "primary_hover": "#5EEAD4",
+        "on_primary": "#042F2E",
+        "selection": "#0D3532",
+        "nav": "#0D3532",
+        "hover": "#1C3036",
+        "notice": "#1C3036",
+        "bulk": "#0D3532",
+        "disabled_fill": "#22363B",
+        "toast": "#E2ECEA",
+        "on_toast": "#0B1215",
+        "amber": "#F59E0B",
+        "red": "#F87171",
+        "green": "#4ADE80",
+    },
+}
+WHITE = "white"             # only on the dark overlays (and, in the light theme, primary buttons)
 OVERLAY = "#111827"         # the drop and full-preview overlays: dark in both themes
-TYPE_COLOR = {".pdf": "#8E6A6A", ".pptx": "#93785A", ".docx": "#5E7392", ".odt": "#5F8570"}  # muted, per format
-GREY = "127, 127, 127"      # the one grey, mixed over either theme at the strengths below
-BORDER = f"rgba({GREY}, 110)"       # control borders
-FIELD_BORDER = f"rgba({GREY}, 90)"  # fields and dropdown lists
-HAIRLINE = f"rgba({GREY}, 60)"      # separators between rows and panels
-ROW_LINE = f"rgba({GREY}, 40)"      # the lines between list rows; hover on buttons
-HOVER = f"rgba({GREY}, 30)"         # hover on rows and navigation
-TINT = f"rgba({GREY}, 28)"          # notices
-PANEL_TINT = f"rgba({GREY}, 18)"    # the choices panel
-TEAL_TINT = "rgba(13, 148, 136, 46)"    # selection and pressed toggles (TEAL, faint)
-TEAL_NAV = "rgba(13, 148, 136, 40)"     # the current view in the sidebar
-TEAL_BAR = "rgba(13, 148, 136, 30)"     # the bar for several selected documents
+VIOLET = "#6C47FF"          # reserved for SummarEase; unused until it exists
+# The format glyph beside a file name, and a category's dot: the same in both themes, readable on every surface
+TYPE_COLOR = {".pdf": "#9A7878", ".pptx": "#977B5C", ".docx": "#6C81A0", ".odt": "#618872"}
+UNKNOWN_TYPE = "#79808F"
+CATEGORY_COLORS = ("#307BF6", "#DD530C", "#149342", "#E04188", "#A758EE", "#088BAA", "#AE731D", "#758193")
 
 # -- spacing --------------------------------------------------------------------------------------------------
 PAD = 24        # main content padding

@@ -1,11 +1,12 @@
 """Small shared widgets and the visual style of the main window."""
 import sys
+import zlib
 from pathlib import Path
 
 from PySide6.QtCore import (
     QEasingCurve, QEvent, QPoint, QPointF, QPropertyAnimation, QRectF, QSize, Qt, QTimer, Signal,
 )
-from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
+from PySide6.QtGui import QColor, QIcon, QPainter, QPalette, QPen, QPixmap
 from PySide6.QtWidgets import (
     QDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QPushButton, QScrollArea,
     QSizePolicy, QToolButton, QVBoxLayout, QWidget,
@@ -31,28 +32,35 @@ def box(layout, margins=0, spacing=RELATED):
     layout.setSpacing(spacing)
     return layout
 
-STYLE = f"""
-QWidget {{ font-family: "{FONT}"; font-size: {TEXT_BODY}px; accent-color: {TEAL}; }}  /* ticks in ClassiFile teal */
+THEME = dict(THEMES["light"], name="light")    # the theme in use; use_theme() changes it in place
+
+
+def style_sheet(t):
+    """The window's style sheet for a theme (a THEMES entry): every colour comes from it, none from the system."""
+    return f"""
+QWidget {{ font-family: "{FONT}"; font-size: {TEXT_BODY}px; color: {t['text']}; accent-color: {t['accent']}; }}
 QLabel#pageTitle, QLabel#hero {{ font-size: {TEXT_TITLE}px; font-weight: {WEIGHT_STRONG}; }}
 QLabel#heading {{ font-size: {TEXT_HEADING}px; font-weight: {WEIGHT_STRONG}; }}
 QLabel#lead {{ font-size: {TEXT_HEADING}px; }}
 QLabel#strong {{ font-weight: {WEIGHT_STRONG}; }}
-QLabel#secondary, QLabel#processing {{ font-size: {TEXT_SECONDARY}px; color: palette(placeholder-text); }}
-QLabel#section {{ font-size: {TEXT_CAPTION}px; font-weight: {WEIGHT_STRONG}; color: palette(placeholder-text);
+QLabel#secondary, QLabel#processing {{ font-size: {TEXT_SECONDARY}px; color: {t['secondary']}; }}
+QLabel#section {{ font-size: {TEXT_CAPTION}px; font-weight: {WEIGHT_STRONG}; color: {t['secondary']};
                  letter-spacing: {SPACED}px; }}
 QLabel#brand {{ font-size: {TEXT_HEADING}px; font-weight: {WEIGHT_STRONG}; }}
-QPushButton {{ border: {HAIR}px solid {BORDER}; border-radius: {RADIUS_CONTROL}px; background: transparent;
-               padding: {RELATED - HAIR}px {GROUP - HAIR}px; min-height: {CONTROL_TEXT}px;
+QPushButton {{ border: {HAIR}px solid {t['control']}; border-radius: {RADIUS_CONTROL}px; background: transparent;
+               color: {t['text']}; padding: {RELATED - HAIR}px {GROUP - HAIR}px; min-height: {CONTROL_TEXT}px;
                max-height: {CONTROL_TEXT}px; }}
-QPushButton:hover, QToolButton#more:hover {{ background: {ROW_LINE}; }}
-QPushButton:checked {{ background: {TEAL_TINT}; border-color: {TEAL}; }}
-QPushButton:disabled {{ color: palette(placeholder-text); }}
-QPushButton#primary {{ background: {PRIMARY}; color: {WHITE}; border-color: {PRIMARY};
+QPushButton:hover, QToolButton#more:hover {{ background: {t['hover']}; }}
+QPushButton:checked {{ background: {t['selection']}; border-color: {t['accent']}; }}
+QPushButton:disabled {{ color: {t['disabled']}; }}
+QPushButton#primary {{ background: {t['primary']}; color: {t['on_primary']}; border-color: {t['primary']};
                        font-weight: {WEIGHT_STRONG}; }}
-QPushButton#primary:hover {{ background: {PRIMARY_HOVER}; border-color: {PRIMARY_HOVER}; }}
-QPushButton#primary:disabled {{ background: palette(mid); color: palette(window); border-color: palette(mid); }}
+QPushButton#primary:hover {{ background: {t['primary_hover']}; border-color: {t['primary_hover']}; }}
+QPushButton#primary:disabled {{ background: {t['disabled_fill']}; color: {t['disabled']};
+                                border-color: {t['disabled_fill']}; }}
+QToolButton {{ color: {t['text']}; }}
 QToolButton::menu-indicator {{ image: none; width: 0; }}
-QPushButton#link, QToolButton#link {{ border-color: transparent; color: palette(text);
+QPushButton#link, QToolButton#link {{ border-color: transparent; color: {t['text']};
                                       text-decoration: underline; padding: {RELATED - HAIR}px {RELATED - HAIR}px; }}
 QToolButton#disclosure {{ background: transparent; border: {HAIR}px solid transparent;
                           border-radius: {RADIUS_CONTROL}px; font-weight: {WEIGHT_STRONG};
@@ -64,79 +72,123 @@ QToolButton#more {{ border: {HAIR}px solid transparent; border-radius: {RADIUS_C
 QPushButton#icon {{ border-color: transparent; padding: {RELATED - HAIR}px 0; min-width: {CONTROL - 2 * HAIR}px;
                     max-width: {CONTROL - 2 * HAIR}px; }}
 QPushButton#quiet {{ border-color: transparent; }}
-QPushButton#quiet:checked, QPushButton#accent {{ border-color: {TEAL}; }}
+QPushButton#quiet:checked, QPushButton#accent {{ border-color: {t['accent']}; }}
 QPushButton#accent {{ font-weight: {WEIGHT_STRONG}; }}
 /* Focus changes only the border colour: every control keeps its size. */
 QPushButton:focus, QPushButton#link:focus, QPushButton#icon:focus, QPushButton#quiet:focus, QToolButton#more:focus,
-QToolButton#disclosure:focus, QLineEdit:focus, QComboBox:focus {{ outline: none; border-color: {TEAL}; }}
-QPushButton#accent:focus {{ border-color: palette(text); }}
-QPushButton#primary:focus {{ border-color: palette(text); }}
-QPushButton#nav {{ text-align: left; border: none; background: transparent;
+QToolButton#disclosure:focus, QLineEdit:focus, QComboBox:focus {{ outline: none; border-color: {t['accent']}; }}
+QPushButton#accent:focus {{ border-color: {t['text']}; }}
+QPushButton#primary:focus {{ border-color: {t['text']}; }}
+QPushButton#nav {{ text-align: left; border: none; background: transparent; color: {t['text']};
                    padding: {NAV_PAD}px {GROUP - BAR}px; border-left: {BAR}px solid transparent; border-radius: 0;
                    max-height: none; }}
-QLabel#count {{ font-size: {TEXT_SECONDARY}px; color: palette(placeholder-text); }}
-QPushButton#nav:checked {{ background: {TEAL_NAV}; border-left: {BAR}px solid {TEAL}; }}
-QPushButton#nav:hover {{ background: {HOVER}; }}
-QPushButton#nav:focus {{ background: {HOVER}; }}
+QLabel#count {{ font-size: {TEXT_SECONDARY}px; color: {t['secondary']}; }}
+QPushButton#nav:checked {{ background: {t['nav']}; border-left: {BAR}px solid {t['accent']}; }}
+QPushButton#nav:hover {{ background: {t['hover']}; }}
+QPushButton#nav:focus {{ background: {t['hover']}; }}
 /* The lists keep a border of one colour or none, so focus is seen and nothing moves. */
 QTreeView, QListWidget {{ border: {HAIR}px solid transparent; border-radius: {RADIUS_ROW}px;
-                          background: transparent; outline: none; }}
-QTreeView:focus, QListWidget:focus {{ border-color: {TEAL}; }}
-QTreeView::item {{ min-height: {ROW - 2 * HAIR}px; border-bottom: {HAIR}px solid {ROW_LINE};
-                     padding-left: {RELATED}px; }}
+                          background: {t['base']}; color: {t['text']}; outline: none; }}
+QTreeView#categories {{ background: transparent; }}
+QTreeView:focus, QListWidget:focus {{ border-color: {t['accent']}; }}
+QTreeView::item {{ min-height: {ROW - 2 * HAIR}px; border-bottom: {HAIR}px solid {t['divider']};
+                     padding-left: {RELATED}px; color: {t['text']}; }}
+QTreeView::item:hover, QListWidget::item:hover {{ background: {t['hover']}; }}
 QTreeView#categories::item {{ min-height: {CATEGORY_ROW}px; border-bottom: none;
                               border-left: {BAR}px solid transparent; padding-left: {NAV_PAD}px;
                               padding-right: {GROUP - TIGHT}px; }}
-QListWidget::item {{ padding: {RELATED - 2 * HAIR}px {RELATED}px; border-radius: {RADIUS_ROW}px; }}
-QListWidget::item:hover {{ background: {HOVER}; }}
-QFrame#choices {{ border: {HAIR}px solid {HAIRLINE}; border-radius: {RADIUS_PANEL}px; background: {PANEL_TINT}; }}
-QTreeView::item:selected, QListWidget::item:selected {{ background: {TEAL_TINT}; color: palette(text); }}
+QListWidget::item {{ padding: {RELATED - 2 * HAIR}px {RELATED}px; border-radius: {RADIUS_ROW}px; color: {t['text']}; }}
+QFrame#choices {{ border: {HAIR}px solid {t['divider']}; border-radius: {RADIUS_PANEL}px; background: {t['inset']}; }}
+QTreeView::item:selected, QListWidget::item:selected {{ background: {t['selection']}; color: {t['text']}; }}
 QListWidget::item:selected, QTreeView#categories::item:selected:first, QTreeView::item:selected:first {{
-    border-left: {BAR}px solid {TEAL}; }}
+    border-left: {BAR}px solid {t['accent']}; }}
 QTreeView::branch:selected {{ background: transparent; }}
-QHeaderView::section {{ background: transparent; border: none; border-bottom: {HAIR}px solid {HAIRLINE};
+QHeaderView, QHeaderView::section {{ background: {t['base']}; }}
+QHeaderView::section {{ border: none; border-bottom: {HAIR}px solid {t['divider']};
                         padding: {RELATED}px {RELATED}px; font-size: {TEXT_CAPTION}px;
-                        font-weight: {WEIGHT_STRONG}; color: palette(placeholder-text); }}
-QLineEdit, QComboBox {{ border: {HAIR}px solid {FIELD_BORDER}; border-radius: {RADIUS_CONTROL}px;
+                        font-weight: {WEIGHT_STRONG}; color: {t['secondary']}; }}
+QLineEdit, QComboBox {{ border: {HAIR}px solid {t['control']}; border-radius: {RADIUS_CONTROL}px;
                         padding: {RELATED - HAIR}px {RELATED}px; min-height: {CONTROL_TEXT}px;
-                        background: palette(base); }}
+                        background: {t['base']}; color: {t['text']};
+                        selection-background-color: {t['accent']}; selection-color: {t['on_primary']}; }}
 QComboBox {{ padding-left: {GROUP - TIGHT}px; padding-right: {CONTROL}px; }}
 QComboBox::drop-down {{ subcontrol-origin: padding; subcontrol-position: center right; width: {CONTROL - RELATED}px;
                         border: none; }}
 QComboBox::down-arrow {{ image: url({CHEVRON_DOWN}); width: {ICON}px; height: {ICON}px; }}
-QComboBox QAbstractItemView {{ background: palette(base); color: palette(text);
-                               border: {HAIR}px solid {FIELD_BORDER}; border-radius: {RADIUS_CONTROL}px;
-                               padding: {TIGHT}px; outline: none; selection-background-color: {TEAL_TINT};
-                               selection-color: palette(text); }}
+QComboBox QAbstractItemView {{ background: {t['raised']}; color: {t['text']};
+                               border: {HAIR}px solid {t['control']}; border-radius: {RADIUS_CONTROL}px;
+                               padding: {TIGHT}px; outline: none; selection-background-color: {t['selection']};
+                               selection-color: {t['text']}; }}
 QComboBox QAbstractItemView::item {{ min-height: {CATEGORY_ROW}px; padding: 0 {RELATED}px;
                                      border-radius: {RADIUS_ROW}px; }}
-QLineEdit[filled="true"] {{ border: {HAIR}px solid {TEAL}; font-weight: {WEIGHT_STRONG}; }}
-QFrame#notice {{ border-radius: {RADIUS_CONTROL}px; background: {TINT}; }}
-QFrame#toast {{ border-radius: {RADIUS_CONTROL}px; background: palette(text); }}
-QFrame#toast QLabel {{ color: palette(window); }}
-QFrame#toast QPushButton {{ color: palette(window); border: {HAIR}px solid palette(window);
+QMenu {{ background: {t['raised']}; color: {t['text']}; border: {HAIR}px solid {t['control']}; padding: {TIGHT}px; }}
+QMenu::item {{ padding: {RELATED - HAIR}px {GROUP}px; border-radius: {RADIUS_ROW}px; }}
+QMenu::item:selected {{ background: {t['selection']}; color: {t['text']}; }}
+QMenu::item:disabled {{ color: {t['disabled']}; }}
+QToolTip {{ background: {t['raised']}; color: {t['text']}; border: {HAIR}px solid {t['control']}; }}
+QCheckBox, QRadioButton {{ color: {t['text']}; }}
+QLineEdit[filled="true"] {{ border: {HAIR}px solid {t['accent']}; font-weight: {WEIGHT_STRONG}; }}
+QFrame#notice {{ border-radius: {RADIUS_CONTROL}px; background: {t['notice']}; }}
+QFrame#toast {{ border-radius: {RADIUS_CONTROL}px; background: {t['toast']}; }}
+QFrame#toast QLabel {{ color: {t['on_toast']}; }}
+QFrame#toast QPushButton {{ color: {t['on_toast']}; border: {HAIR}px solid {t['on_toast']};
                             background: transparent; }}
-QFrame#bulk {{ border-radius: {RADIUS_CONTROL}px; background: {TEAL_BAR}; }}
-/* Rows of the decision and auto-filed lists: hover is faint grey; the inspected row has the teal tint and bar;
-   a focused row has the bar alone. The bar is always there (transparent), so nothing moves. */
-QFrame#row {{ border: none; border-bottom: {HAIR}px solid {ROW_LINE}; border-left: {BAR}px solid transparent; }}
-QFrame#row:hover {{ background: {HOVER}; }}
-QFrame#row:focus {{ border-left-color: {TEAL}; }}
-QFrame#row[inspected="true"] {{ background: {TEAL_TINT}; border-left-color: {TEAL}; }}
-QFrame#details {{ border-left: {HAIR}px solid {HAIRLINE}; background: palette(window); }}
-QFrame#sidebar {{ border-right: {HAIR}px solid {HAIRLINE}; }}
-QLabel#card {{ background: palette(base); border-radius: {RADIUS_CONTROL}px; padding: {GROUP}px; }}
-QLabel#warning {{ color: {AMBER}; }}
-QLabel#error {{ color: {RED}; }}
+QFrame#bulk {{ border-radius: {RADIUS_CONTROL}px; background: {t['bulk']}; }}
+/* Rows of the decision and auto-filed lists: the list colour; hover is the hover colour;
+   the inspected row has the selection tint and bar; a focused row has the bar alone. The bar is always there
+   (transparent), so nothing moves. */
+QFrame#row {{ border: none; border-bottom: {HAIR}px solid {t['divider']}; border-left: {BAR}px solid transparent;
+              background: {t['base']}; }}
+QFrame#row:hover {{ background: {t['hover']}; }}
+QFrame#row:focus {{ border-left-color: {t['accent']}; }}
+QFrame#row[inspected="true"] {{ background: {t['selection']}; border-left-color: {t['accent']}; }}
+QScrollArea, QWidget#qt_scrollarea_viewport, QWidget#qt_scrollarea_viewport > QWidget {{ background: transparent; }}
+/* scroll areas and what they hold show the surface they sit on */
+QFrame#details {{ border-left: {HAIR}px solid {t['divider']}; background: {t['raised']}; }}
+QFrame#sidebar {{ border-right: {HAIR}px solid {t['divider']}; background: {t['sidebar']}; }}
+QLabel#card {{ background: {t['base']}; border-radius: {RADIUS_CONTROL}px; padding: {GROUP}px; }}
+QLabel#warning {{ color: {t['amber']}; }}
+QLabel#error {{ color: {t['red']}; }}
 QLabel#tagNew, QLabel#tagExisting {{ border-radius: {RADIUS_TAG}px; padding: {HAIR}px {RELATED}px;
                                      font-size: {TEXT_CAPTION}px; min-height: {TAG}px; max-height: {TAG}px; }}
-QLabel#tagNew {{ color: {AMBER}; border: {HAIR}px solid {AMBER}; }}
-QLabel#tagExisting {{ color: {TEAL}; border: {HAIR}px solid {TEAL}; }}
-QFrame#dropOverlay {{ background: {OVERLAY}; border: {BAR}px dashed {TEAL}; border-radius: {RADIUS_PANEL}px; }}
+QLabel#tagNew {{ color: {t['amber']}; border: {HAIR}px solid {t['amber']}; }}
+QLabel#tagExisting {{ color: {t['accent']}; border: {HAIR}px solid {t['accent']}; }}
+QFrame#dropOverlay {{ background: {OVERLAY}; border: {BAR}px dashed {t['accent']}; border-radius: {RADIUS_PANEL}px; }}
 QFrame#dropOverlay QLabel {{ color: {WHITE}; }}
 QFrame#previewOverlay {{ background: {OVERLAY}; }}
 QFrame#previewOverlay QLabel {{ color: {WHITE}; }}
 """
+
+
+STYLE = style_sheet(THEMES["light"])   # for the tools' own windows; the main window follows the theme in use
+
+PALETTE_ROLES = {   # what the Qt palette (and so the Fusion lists and native controls) takes from a theme
+    QPalette.Window: "window", QPalette.WindowText: "text", QPalette.Base: "base", QPalette.AlternateBase: "hover",
+    QPalette.Text: "text", QPalette.Button: "raised", QPalette.ButtonText: "text", QPalette.BrightText: "on_primary",
+    QPalette.PlaceholderText: "secondary", QPalette.Highlight: "accent", QPalette.HighlightedText: "on_primary",
+    QPalette.ToolTipBase: "raised", QPalette.ToolTipText: "text", QPalette.Link: "accent",
+    QPalette.LinkVisited: "accent", QPalette.Light: "raised", QPalette.Midlight: "divider", QPalette.Mid: "control",
+    QPalette.Dark: "control", QPalette.Shadow: "divider", QPalette.Accent: "accent",
+}
+
+
+def qt_palette(t):
+    """The Qt palette for a theme: what native drawing (ticks, scroll bars, the Fusion lists, dialogs) uses."""
+    p = QPalette()
+    for role, key in PALETTE_ROLES.items():
+        p.setColor(role, QColor(t[key]))
+    for role in (QPalette.Text, QPalette.WindowText, QPalette.ButtonText):
+        p.setColor(QPalette.Disabled, role, QColor(t["disabled"]))
+    return p
+
+
+def use_theme(name):
+    """Make "light" or "dark" the theme in use: the icons are drawn again from it. The caller applies
+    style_sheet(THEME) and qt_palette(THEME). Returns THEME."""
+    THEME.clear()
+    THEME.update(THEMES[name], name=name)
+    _ICONS.clear()
+    return THEME
 
 
 def restyle(widget):
@@ -304,24 +356,23 @@ def format_icon(file_name):
     return _ICONS[ext]
 
 
-STATUS = {  # an icon plus a word, never colour alone
-    # ponytail: every filed document was filed by the user's own choice so far. When automatic filing arrives
-    # (CP4), take this word from the membership's provenance: machine-assigned is not approved.
-    "filed": ("Approved", GREEN, "check"),
-    "auto": ("Filed automatically", TEAL, "check"),    # machine-assigned: not the user's approval
-    "needs_decision": ("Waiting", AMBER, "dot"),
-    "queued": ("Reading", MUTED, "ring"),
-    "reading": ("Reading", MUTED, "ring"),
-    "filing": ("Filing", MUTED, "ring"),
-    "failed": ("Failed", RED, "alert"),
-    "pending": ("Failed", RED, "alert"),
+STATUS = {  # an icon plus a word, never colour alone; the colour is a role of the theme in use
+    "filed": ("Approved", "green", "check"),
+    "auto": ("Filed automatically", "accent", "check"),    # machine-assigned: not the user's approval
+    "needs_decision": ("Waiting", "amber", "dot"),
+    "queued": ("Reading", "secondary", "ring"),
+    "reading": ("Reading", "secondary", "ring"),
+    "filing": ("Filing", "secondary", "ring"),
+    "failed": ("Failed", "red", "alert"),
+    "pending": ("Failed", "red", "alert"),
 }
 
 
 def status_icon(status):
     key = ("status", status)
     if key not in _ICONS:
-        _, colour, shape = STATUS.get(status, ("", MUTED, "ring"))
+        _, role, shape = STATUS.get(status, ("", "secondary", "ring"))
+        colour = THEME[role]
         pix = QPixmap(16, 16)
         pix.fill(Qt.transparent)
         p = QPainter(pix)
@@ -341,9 +392,32 @@ def status_icon(status):
             p.setPen(Qt.NoPen)
             p.setBrush(c)
             p.drawPolygon([QPointF(8, 2), QPointF(14.5, 14), QPointF(1.5, 14)])
-            p.setPen(QPen(QColor(WHITE), 1.6))
+            p.setPen(QPen(QColor(THEME["base"]), 1.6))   # the mark in the list's own colour
             p.drawLine(QPointF(8, 6.5), QPointF(8, 10))
             p.drawPoint(QPointF(8, 12.2))
+        p.end()
+        _ICONS[key] = QIcon(pix)
+    return _ICONS[key]
+
+
+def category_color(cat_id):
+    """A category's colour: one of CATEGORY_COLORS, the same for that category always (from its id, so a rename
+    keeps it), readable on every surface of both themes."""
+    return CATEGORY_COLORS[zlib.crc32(str(cat_id).encode()) % len(CATEGORY_COLORS)]
+
+
+def category_dot(cat_id):
+    """A small round dot in the category's colour, beside its name."""
+    colour = category_color(cat_id)
+    key = ("dot", colour)
+    if key not in _ICONS:
+        pix = QPixmap(ICON, ICON)
+        pix.fill(Qt.transparent)
+        p = QPainter(pix)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(colour))
+        p.drawEllipse(QRectF(ICON / 4, ICON / 4, ICON / 2, ICON / 2))
         p.end()
         _ICONS[key] = QIcon(pix)
     return _ICONS[key]
