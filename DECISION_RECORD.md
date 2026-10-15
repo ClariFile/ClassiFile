@@ -1,6 +1,6 @@
 # Decision Record — ClassiFile (Offline Document Organizer)
 
-Version 2.8 · 2026-10-15
+Version 2.9 · 2026-10-15
 
 **Names**
 - **ClariFile:** the suite.
@@ -32,7 +32,7 @@ Version 2.8 · 2026-10-15
 - **Suspected unread content:** a heuristic flag, recorded together with the rule that raised it.
 - **Decision states:** committed, provisional, pending, failed.
 - **"Needs your decision" queue:** a persistent list of open questions for the user.
-- **Label provenance:** machine-assigned, user-confirmed, or user-corrected.
+- **Label provenance:** machine-assigned, user-confirmed, user-corrected, or user-example (a file in the user's own organized folder, 2.9).
 - **Label status:** active, superseded, or excluded.
 - **Document family:** files that are versions or format twins of the same material (e.g., the PDF and PPTX of one lecture).
 - **Data splits:** development, validation, final evaluation. Always split by family.
@@ -89,6 +89,7 @@ Version 2.8 · 2026-10-15
 **A7 [Requirement] Learning**
 - Explicit confirmations and corrections are eligible supervised training examples by default.
 - Model updates are versioned and validated. Since 2.6 they also run by themselves in the background after every 10 new confirmations or moves, with the same check. Each update is logged in Settings and noted at the top of the window.
+- The first version is learned by itself too, once 10 confirmations or moves exist in at least two categories (2.9).
 - The check (2.8): a new version replaces the one in use only if, on the full evaluation (each family held out in turn, both versions answering the same questions), it files no more documents wrongly at the level in use and puts the user's category first no less often. Both results are logged in Settings.
 
 **A8 [Requirement] Originals**
@@ -104,6 +105,7 @@ Version 2.8 · 2026-10-15
 
 **A10 [Requirement] Interface**
 - Categories, categorized documents, minimal status, and decision prompts when necessary.
+- For people other than the owner (2.9): a first-run tour of 3–4 short steps, a Help page and an About page (what ClassiFile is, how it works, privacy, the ClariFile suite and SummarEase, the version, licences and credits, the source link). Every page uses the full window width while text keeps a readable line length; the same Details panel is on every page that lists documents; Settings keeps technical details (matching versions, logs, version numbers) in a collapsed Advanced section.
 - ClassiFile's scope is suggesting category names and filing documents. It offers no text viewing, copying or exporting; those belong to SummarEase (A11).
 
 **A11 [Requirement] Secondary summarizer: SummarEase (later project)**
@@ -176,7 +178,7 @@ Version 2.8 · 2026-10-15
   - Scores are never shown.
 - **[Decision] Automatic filing** (2.3; the operating point the user chose from development and validation results, Part E).
   - Level: Strict. A document is filed without a question when its best category leads the second-best by at least 0.10 (E4). The level is a setting; every change of it is recorded.
-  - No automatic filing into a category until it holds at least 3 documents the user confirmed. Until then its documents wait, with the three best categories.
+  - No automatic filing into a category until it holds at least 3 documents the user confirmed (examples from the user's own folders count, 2.9). Until then its documents wait, with the three best categories.
   - Automatically filed documents are machine-assigned and never train the matcher. Only the user's confirmations and moves do (A7).
   - A "Filed automatically" view lists what the app filed by itself, each with its reason and a one-click Move to….
   - "Looks right" in that view, for one document or many selected at once, records the user's confirmation: those documents become training examples (2.4). Moving a document stays the correction.
@@ -287,6 +289,11 @@ Version 2.8 · 2026-10-15
   - Only a category that holds no documents. Its folder is deleted only if it is empty.
   - When a move leaves categories empty, the user is asked once whether to delete them.
 - **[Decision]** No merge command and no aliases for now.
+- **[Decision] Learn from my existing folders** (2.9).
+  - The user picks a folder they organized. Its subfolders are shown as proposed categories with their document counts; the user can untick any (for example "New folder" or "Downloads") and rename them before learning. A name equal to an existing category adds to it.
+  - The files are read only: never moved, copied or changed, no app copy and no side files, unless the user later adds a file for filing; it is then a waiting document like any other, and its filed category takes over.
+  - They are the user's examples, with their own provenance (user-example): they train matching and count toward the 3 documents automatic filing needs, and they are never listed as documents.
+  - Settings lists the folders learned from; Forget deletes what ClassiFile stored for them. The files and the categories stay.
 - **[Decision] Remove from ClassiFile** (documents waiting for a decision only).
   - The original file is never touched, and no app copy exists yet for a waiting document.
   - Removing deletes the text, analysis and internal summary ClassiFile stored for that document.
@@ -540,3 +547,4 @@ Partial checkpoints are not the completed v1. Evaluation runs alongside developm
 - **2.6 (2026-10-14):** correction by the user: the 2.5 wording "ClassiFile never creates a folder by itself" was Claude's phrasing, not the user's rule. A4: in automatic mode the app may create a category when the evidence supports it; a single unmatched document still waits. B2: automatic new folders for groups of at least 2 unmatched waiting documents at an average similarity of 0.20 (0.15-only groups stay questions), named from a name repeated across the group or the best suggested name, never reused or merged by name (B1), marked "New (named by ClassiFile)" with Rename and listed in "Filed automatically"; off until the user has seen a held-out replay on development data. A7: matching also updates by itself after every 10 new confirmations or moves, with the existing check, logged in Settings and noted in the window. D/CP4 and C/E10 updated to match. Authorized by the user.
 - **2.7 (2026-10-14):** B2 and A4: automatic new folders need a group of at least 3 documents; groups of 2 stay a question for the user. The user switched automatic new folders on after the development replay (recorded in B2), and kept automatic filing at Strict. Authorized by the user.
 - **2.8 (2026-10-15):** wording the user approved before the CP5 freeze, so the record says what the code does. A7: the update check (a new version replaces the one in use only if, on the full evaluation, it files no more documents wrongly at the level in use and puts the user's category first no less often; both results logged in Settings). B4: one evaluation (`tools.evaluate`) for every number about matching, with the owner's family ids kept in the catalog. B2: "Check these" (Keep here is recorded; nothing is moved by itself). D/CP4: the documented policy (E1) is not built for v1; E5–E7 run on their defaults (also noted under E5–E7). Authorized by the user.
+- **2.9 (2026-10-15):** v1 scope for friends and family, authorized by the user. A7: the first matching version is learned by itself too. B5 and the glossary: "Learn from my existing folders", with the user-example provenance; examples count toward the 3 documents of automatic filing (B2). A10: a first-run tour, Help and About pages, full-width pages with readable text, the same Details panel on every page that lists documents, and an Advanced section in Settings. Photos (JPG, PNG), a household test set and Burmese are v1.1 (docs/LAUNCH.md). Authorized by the user.

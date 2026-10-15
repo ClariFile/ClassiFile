@@ -399,6 +399,24 @@
   same picture turned into a one-page PDF in memory reads through the existing OCR: a dense sample page rendered
   at 100–200 dpi gave back 290–295 of its 302 words. A clean rendering, not a phone photo.
 
+**v1 for friends and family (2026-10-15, record 2.9)**
+- **The first matching version is learned by itself** once 10 confirmations or moves exist in at least two
+  categories (it used to wait for "Update matching").
+- **Learn from my existing folders** (Settings, the start page, the tour, Help): the user picks an organized
+  folder; its subfolders are proposed as categories with document counts, to untick or rename; the files are read
+  in the worker processes and kept as examples (catalog schema 12: table `examples`, document status `example`).
+  They train matching and count toward the 3 documents automatic filing needs; they are never listed, copied or
+  moved. Settings lists the folders with Forget. Adding one of those files later makes it a normal waiting document.
+- **Help, About and a first-run tour** (four steps; it offers to learn from folders at the end). About: what
+  ClassiFile is, how it works, privacy, ClariFile and SummarEase, version 1.0.0-rc.1, licences and credits, the
+  source link.
+- **Interface:** every page uses the full window width (Needs your decision and Filed automatically stopped at
+  1120 px), with sentences kept to a readable 720 px; the Details button is on every page that lists documents;
+  Settings keeps matching versions, the log and version numbers in a collapsed Advanced section. Before and after:
+  `data\ui-width\` (local, made-up documents). `tools.check_ui` passes at 100%, 125% and 150%.
+- **README** for the public with screenshots of a made-up library (`docs/images`, from `tools.screenshots`), and
+  the user guide in `docs/guide/` (English; Burmese marked for the owner's review).
+
 ## Development results so far
 
 These counts describe development data only. They are not accuracy estimates.
@@ -565,11 +583,10 @@ threshold since. `data\final-eval` has never been read.
 
 ## Next
 
-1. The owner answers the last "Check these" document (version 6 is in use; one of the two is kept here) and runs
-   `tools.offline_check` once with networking switched off.
-2. The owner decides the friends-and-family gaps in `docs/LAUNCH.md` (section 5): which go into v1.
-3. CP5 quality gate and freeze (`data\final-eval` stays untouched until then). SummarEase is a separate
-   project.
+1. The owner reviews the Burmese guide, answers the last "Check these" document, and runs `tools.offline_check`
+   once with networking switched off.
+2. CP5: one final "Update matching", the freeze, and the final evaluation once (`data\final-eval` stays untouched
+   until then). Then the installer (docs/LAUNCH.md, section 2). SummarEase is a separate project.
 
 ## Changes to the decision record, approved by the owner (record 2.8, 2026-10-15)
 

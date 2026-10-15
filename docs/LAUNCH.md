@@ -58,7 +58,7 @@ blocker unless marked otherwise.
 - Checked on a clean Windows 11 machine: install, first run, import, OCR, filing, uninstall.
 - No other new features.
 
-## 3. A user README
+## 3. A user README (written 2026-10-15: `README.md`, and the guide in `docs/guide/`, English and Burmese)
 
 - Install and first run: choosing the output folder, adding documents.
 - How filing works:
@@ -85,7 +85,11 @@ blocker unless marked otherwise.
 - macOS and Linux installers.
 - A cloud or multi-device catalog.
 
-## 5. For people other than the owner (gap list, 2026-10-15; proposals waiting for the owner)
+## 5. For people other than the owner (gap list, 2026-10-15; decided by the owner the same day)
+
+Decided: the first matching model, "Learn from my existing folders", a first-run tour and Help page, the README
+and the guide are in v1 and built (record 2.9). The installer stays a v1 blocker (section 2). Key words per folder
+are not built. Photos, household documents and Burmese are v1.1 (section 6).
 
 Effort: S under a day, M a few days, L a week or more. Measurements are in `docs/STATUS.md` ("Toward friends and
 family"); they describe development data.
@@ -100,11 +104,23 @@ family"); they describe development data.
 | **Everyday documents** (bills, receipts, IDs, letters). No development data, so nothing can be claimed. Receipts are very short (little text: they wait or go wrong); monthly bills from one sender look like versions of one document; IDs are mostly photos (the row above). | M (collecting and labelling 30–50 of the owner's own) | medium | **v1:** say so in the README's limitations. **v1.1:** measure on a household set. |
 | **Installer and first-run guide** (sections 2 and 3). The first run should say: originals are never changed; choose the output folder; file about 10 documents (or learn from existing folders) before the app files by itself. Unsigned installers show a SmartScreen warning. | M–L | medium: bundling Tesseract and Qt; clean-machine test | **v1** (already a blocker). |
 
+## 6. v1.1 (decided 2026-10-15; not built)
+
+- **Phone photos and scans (JPG, PNG).** After the owner has collected about 20 real phone photos and scans: the
+  reader turns a picture into a one-page PDF in memory and reads it with the existing OCR; checked on those photos
+  (angle, shadow, blur, rotation), with HEIC (iPhone) said to be unreadable. The reader is shared with SummarEase,
+  so a new reader tag follows.
+- **A household test set.** 30–50 of the owner's own bills, receipts, IDs and letters, labelled, measured with
+  `tools.evaluate` before anything is claimed about everyday documents.
+- **Burmese.** The interface translated, and Burmese documents read and matched: syllable splitting, Zawgyi and
+  Unicode told apart, Burmese OCR (Tesseract's data is installed), name rules and the junk filter, with Burmese
+  development documents.
+
 ## Done when
 
 - [ ] Section 0 blockers done: record changes decided, matching updated, Check these answered, the full
       CP5 report command, the offline check.
 - [ ] Choices frozen in the record; final evaluation run once and reported.
 - [ ] Installer built and checked on a clean machine; licence notices included.
-- [ ] User README written.
+- [x] User README written (2026-10-15).
 - [ ] All tests pass, `tools.check_ui` passes, the privacy audit has 0 hits, and v1 is tagged.

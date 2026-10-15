@@ -81,6 +81,7 @@ Run from the project folder (Windows, Python 3.11+; the venv uses 3.12).
   - Grouping new subjects on development data: `.venv\Scripts\python -m tools.group_eval [--families <csv>...] [--level X] [--compare X...] [--out FILE]`; the replay of automatic new folders (record 2.6): `... --folders` (prints category names and words from documents: keep the output local)
   - File waiting development documents from the owner's labels: `.venv\Scripts\python -m tools.file_labels data\splits_incoming_2.csv` (development rows only; close the app first)
 - Offline check (functional gate): `.venv\Scripts\python -m tools.offline_check [FOLDER]` (copies the folder, default the six samples; the app end to end with network access refused in every Python process; also run it once with networking switched off)
+- Screenshots of a made-up library (README, layout checks): `.venv\Scripts\python -m tools.screenshots OUT [--size 1280x720] [--theme light|dark] [--views decide,auto,...]`
 - Interface timings on a made-up catalog: `.venv\Scripts\python -m tools.measure_ui [--json FILE]`
 - Interface acceptance checks (four window sizes, 100/125/150%): `.venv\Scripts\python -m tools.check_ui`
 - `data\final-eval\` is the held-out final evaluation: never open, read or test against it until the user says so. The tools refuse it.
