@@ -31,18 +31,18 @@ WAIT = 900          # seconds: only stops a hung run; OCR of the six samples tak
 GUARD = '''
 import os, socket
 _LOG = os.environ["CLASSIFILE_OFFLINE_LOG"]
-_LOCAL = ("127.", "::1", "localhost", "0.0.0.0", "")
+_LOCAL = ("127.", "::1", "localhost")
 
 
 def _host(args):
-    a = args[0] if args else ""
+    a = args[0] if args else None
     return str(a[0] if isinstance(a, tuple) else a)
 
 
 def _guard(name, real):
     def blocked(*args, **kw):
         host = _host(args[1:] if name.startswith("socket.") else args)
-        if host.startswith(_LOCAL):
+        if host.startswith(_LOCAL):          # this computer's own addresses only
             return real(*args, **kw)
         with open(_LOG, "a", encoding="utf-8") as f:
             f.write(name + "\\n")
@@ -67,12 +67,18 @@ def inner(folder):
     from classifile.organizer import Organizer
     from classifile.reader import sha256_file
 
-    try:
-        socket.create_connection(("192.0.2.1", 9), timeout=1)     # a documentation address: never routed anyway
+    if socket.create_connection.__name__ != "blocked":
         print("FAIL: the network guard is not active")
         return 1
-    except OSError:
-        pass
+    refused = False
+    try:
+        socket.create_connection(("192.0.2.1", 9), timeout=1)     # a documentation address: never routed anyway
+    except OSError as e:
+        refused = "refused by the offline check" in str(e)
+    if not refused:
+        print("FAIL: the network guard let a connection through")
+        return 1
+    open(os.environ["CLASSIFILE_OFFLINE_LOG"], "w").close()         # the guard's own test is not an attempt
     paths = sorted(str(p) for p in Path(folder).iterdir() if p.is_file())
     app = QApplication.instance() or make_app(sys.argv[:1])
     data = default_data_dir()
