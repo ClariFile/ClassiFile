@@ -558,3 +558,22 @@ def test_outcomes_false_positive_causes_and_what_became_of_automatic_placements(
     org.move(alg, cats["Networks"])                                        # the user corrects the app
     got = {x["doc"]: (x["result"], x["now"], x["version"]) for x in ev.real_use(org.catalog)}
     assert got == {net: ("Looks right", cats["Networks"], 1), alg: ("moved", cats["Networks"], 1)}
+
+
+def test_quality_gate_reports_every_part_e_item_and_never_overwrites(make_org, tmp_path, capsys):
+    from tools import quality_gate
+    org, src = make_org(), tmp_path / "src"
+    for subject in SUBJECTS:
+        for n in range(3):
+            _add(org, src, subject, n)
+    org.update_matching()
+    org.catalog.close()                                                  # as the app is closed for the report
+    report, catalog = tmp_path / "gate.txt", tmp_path / "data" / "catalog.sqlite3"
+    assert quality_gate.main(["--catalog", str(catalog), "--out", str(report)]) == 0
+    text = report.read_text(encoding="utf-8")
+    for item in ("incorrect assignments", "new subjects forced", "incorrect creations", "duplicate categories",
+                 "over-merging", "fragmentation", "pending rate", "documents resolved per decision",
+                 "later corrections", "Automatic new folders at a similarity", "Outcomes at strict"):
+        assert item in text
+    with pytest.raises(SystemExit):
+        quality_gate.main(["--catalog", str(catalog), "--out", str(report)])
