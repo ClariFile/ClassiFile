@@ -1,6 +1,7 @@
 import csv
 import json
 import math
+from collections import Counter
 
 import pymupdf
 import pytest
@@ -528,3 +529,32 @@ def test_check_these_asks_until_kept_or_moved_and_never_moves_by_itself(make_org
     _flag(org, algebra[0])
     assert org.to_check() == []                                           # back where it was kept
     assert (algebra[0], cats["Algebra"]) in org.catalog.kept_here()
+
+
+def test_outcomes_false_positive_causes_and_what_became_of_automatic_placements(make_org, tmp_path):
+    from tools import evaluate as ev
+    row = {"category": "X", "examples": 3, "confirmed": 3}
+    cases = [[("X", 0.5), ("Y", 0.1)], [("Y", 0.5), ("X", 0.1)], [("X", 0.3), ("Y", 0.25)], [("Y", 0.3), ("X", 0.25)]]
+    assert [evaluation.outcome(row | {"ranked": r}, 0.1) for r in cases] == ["right", "wrong", "missed", "wait"]
+    assert evaluation.outcome(row | {"ranked": []}, 0.1) == "wait"         # nothing readable: a correct wait
+
+    labels = {f"{s}{n}": s for s in ("Algebra", "Networks") for n in range(3)} | {"scan": "Algebra"}
+    counts = {d: matching.terms(SUBJECTS[d[:-1]]) for d in labels if d != "scan"}
+    ocr = " ".join([SUBJECTS["Networks"]] * 3)                             # a picture's words pull it elsewhere
+    counts["scan"] = matching.terms("matrix " + ocr)
+    m = {"labels": labels, "counts": counts, "parts": {"scan": ("matrix", ocr, [ocr])}, "line_docs": Counter()}
+    found = ev.causes(m, "scan", "Networks", {"scan"}, 0.03)
+    assert found[0].startswith("OCR text") and any(f.startswith("very little text") for f in found)
+
+    org, src = make_org(), tmp_path / "src"
+    for n in range(3):
+        _add(org, src, "Algebra", n)
+        _add(org, src, "Networks", n)
+    org.update_matching()
+    cats = {c["name"]: c["id"] for c in org.catalog.categories()}
+    net, alg = _add(org, src, "Networks", 7, False), _add(org, src, "Algebra", 8, False)
+    assert org.file_automatically(net) == cats["Networks"] and org.file_automatically(alg) == cats["Algebra"]
+    org.confirm([net])
+    org.move(alg, cats["Networks"])                                        # the user corrects the app
+    got = {x["doc"]: (x["result"], x["now"], x["version"]) for x in ev.real_use(org.catalog)}
+    assert got == {net: ("Looks right", cats["Networks"], 1), alg: ("moved", cats["Networks"], 1)}

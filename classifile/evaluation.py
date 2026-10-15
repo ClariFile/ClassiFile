@@ -99,6 +99,16 @@ def filed(row, level, rule=None):
             and row["confirmed"] >= matching.AUTO_MIN_CONFIRMED and (rule is None or rule(row)))
 
 
+def outcome(row, level):
+    """What happens to one document at this level: "right" (filed by itself in the user's category: a true
+    positive), "wrong" (filed by itself elsewhere: a false positive), "missed" (it waits although its first choice
+    is right: automation missed) or "wait" (it waits and its first choice is not right: a correct wait)."""
+    first = row["ranked"][0][0] if row["ranked"] else None
+    if filed(row, level):
+        return "right" if first == row["category"] else "wrong"
+    return "missed" if first == row["category"] else "wait"
+
+
 def summary(rows, level, rule=None):
     """{"documents", "known" (those whose category the fold had), "first", "top3" (of known), "right", "wrong",
     "waiting" (automatic filing at level; filing a document whose category the fold did not have is wrong)}."""
