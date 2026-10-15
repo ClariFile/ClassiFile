@@ -7,9 +7,9 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtCore import QMimeData, QPoint, Qt, QUrl  # noqa: E402
 from PySide6.QtGui import QDragEnterEvent, QDragLeaveEvent, QDropEvent, QKeySequence  # noqa: E402
 from PySide6.QtTest import QTest  # noqa: E402
-from PySide6.QtWidgets import QApplication, QLabel  # noqa: E402
+from PySide6.QtWidgets import QApplication, QLabel, QPushButton  # noqa: E402
 
-from classifile.app.main import ALL, DECIDE, DOC, RECENT, SETTINGS, MainWindow  # noqa: E402
+from classifile.app.main import ABOUT, ALL, DECIDE, DOC, HELP, RECENT, SETTINGS, MainWindow  # noqa: E402
 from classifile.app.widgets import LIST_MAX, RELATED, reduced_motion  # noqa: E402
 from classifile.app.reasons import reason_text  # noqa: E402
 from conftest import SAMPLE, EXPECT, source_state  # noqa: E402
@@ -138,7 +138,15 @@ def test_empty_state_and_settings(app, make_org):
     w.close_toggle.setChecked(False)
     assert w.org.catalog.get_setting("close_notice") == "off"
     texts = " ".join(lab.text() for lab in w.settings_page.findChildren(QLabel))
-    assert "Part of ClariFile" in texts and "Integrations" not in texts
+    assert "Integrations" not in texts and "Part of ClariFile" not in texts     # About has its own page
+    assert not w.advanced.content.isVisible()                                   # versions and logs: closed
+    w.advanced.toggle.click()
+    assert w.advanced.content.isVisible() and "catalog schema" in w.tech.text()
+    for key, page, words in ((HELP, w.help_page, "What never happens"), (ABOUT, w.about_page, "AGPL-3.0")):
+        w.nav[key].click()
+        assert w.stack.currentWidget() is page and not w.toolbar.isVisible()
+        assert any(words in t for t in page.texts)
+    assert "github.com/ClariFile/ClassiFile" in " ".join(w.about_page.texts)
     _close(w, rec)
 
 
@@ -1044,7 +1052,8 @@ def test_cards_offer_the_best_matching_categories_once_matching_is_updated(app, 
     assert not w.matching_button.isEnabled()                       # off the interface thread
     _pump(app, lambda: w.matching_button.isEnabled())
     assert w.toast.label.text() == "Matching updated (version 1): 9 documents in 3 categories."
-    assert w.matching_label.text().startswith("Version 1: learned from 9 documents in 3 categories on ")
+    assert w.matching_label.text().startswith("Learned from 9 documents in 3 categories on ")
+    assert "matching version 1" in w.tech.text()                      # the version: in Advanced
     assert w.matching_label.text().endswith("Nothing was filed or moved since.")
 
     w.review()
@@ -1598,4 +1607,54 @@ def test_check_these_on_the_decision_page_keep_here_and_move(app, make_org, tmp_
     assert w.toast.label.text() == "Kept where it is. ClassiFile won't ask about it again."
     assert [c.doc_id for c in w.decision.checks] == [algebra[1]] and w.decide_count.text() == "1"
     assert w.org.catalog.explicit_labels()[algebra[0]] == w.org.catalog.category_by_key("algebra")["id"]
+    _close(w, rec)
+
+
+def test_tour_steps_and_learning_from_existing_folders_in_the_window(app, make_org, tmp_path, monkeypatch):
+    from classifile.app.guide import TOUR, TourDialog
+    tour = TourDialog(None, learn=True)
+    assert tour.next.text() == "Next" and not tour.back.isVisibleTo(tour) and tour.skip.isVisibleTo(tour)
+    for _ in TOUR[1:]:
+        tour.go(1)
+    assert tour.next.text() == "Get started" and tour.learn.isVisibleTo(tour) and not tour.skip.isVisibleTo(tour)
+    tour.learn.click()
+    assert tour.learn_chosen and tour.result() == TourDialog.Accepted
+
+    import pymupdf
+    mine = tmp_path / "mine"
+    words = {"Algebra": "matrix vector eigenvalue determinant", "Networks": "router packet subnet ethernet",
+             "New folder": "anything at all here"}
+    for folder, text in words.items():
+        (mine / folder).mkdir(parents=True)
+        for n in range(3):
+            d = pymupdf.open()
+            d.new_page().insert_text((72, 72), f"{text} {text} part {n}", fontsize=11)
+            d.save(mine / folder / f"{n}.pdf")
+            d.close()
+    before = source_state(mine)
+    w, rec = _window(make_org)
+    asked = []
+    w.pick_folder = lambda title: str(mine)
+
+    def untick_and_rename(root, found):
+        asked.append([(sub.name, len(files)) for sub, files in found])
+        return [("Linear algebra" if sub.name == "Algebra" else sub.name, sub, files) for sub, files in found
+                if sub.name != "New folder"]                # the user unticks one and renames one
+    w.ask_learn = untick_and_rename
+    w.learn_folders()
+    assert asked == [[("Algebra", 3), ("Networks", 3), ("New folder", 3)]]
+    assert w.processing.isVisible() and "Learning from your folders" in w.processing.text()
+    _pump(app, lambda: w.learning is None and not w.moving)
+    assert sorted(_cats(w)) == ["Linear algebra", "Networks"]
+    assert w.stack.currentWidget() is w.empty_state                         # examples are never listed
+    assert source_state(mine) == before and not list(w.org.output_root.iterdir())
+    w.show_view(SETTINGS)
+    rows = [l.text() for l in w.learned.findChildren(QLabel)]
+    assert rows == ["Algebra → Linear algebra · 3 documents", "Networks → Networks · 3 documents"]
+    assert w.org.matcher() is not None                                      # learned from them at once
+    forget = [b for b in w.learned.findChildren(QPushButton) if b.text() == "Forget"]
+    forget[0].click()
+    assert [l.text() for l in w.learned.findChildren(QLabel)] == [
+        "Networks → Networks · 3 documents"]
+    assert source_state(mine) == before
     _close(w, rec)

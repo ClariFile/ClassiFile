@@ -206,6 +206,16 @@ MIGRATIONS = [
     -- the owner's document families (versions, format twins, parts of one lecture), by file bytes: held out together
     CREATE TABLE family_labels (sha256 TEXT PRIMARY KEY, family_id TEXT NOT NULL);
     """,
+    # v12: "Learn from my existing folders" (decision record 2.9): files in the user's own organized folders, read
+    # only and never copied, kept as the user's examples of a category (their own provenance: "user-example")
+    """
+    CREATE TABLE examples (
+        document_id TEXT PRIMARY KEY REFERENCES documents(id),
+        category_id TEXT NOT NULL REFERENCES categories(id),
+        folder TEXT NOT NULL,          -- the user's subfolder it was learned from
+        at TEXT NOT NULL
+    );
+    """,
 ]
 
 
@@ -295,12 +305,17 @@ class Catalog:
 
     STATUS_FOR_READ = {"ok": "needs_decision", "failed": "failed", "pending": "pending"}
 
-    def add_document(self, result, source_path, analysis, summary=None):
-        """Record a read result (any status) as a new document with one snapshot. Returns the document ID."""
+    def add_document(self, result, source_path, analysis, summary=None, example=None):
+        """Record a read result (any status) as a new document with one snapshot. Returns the document ID.
+        example: (category id, folder) to keep it as the user's example instead (status "example": never listed,
+        never filed, no copy)."""
         doc_id, t = str(uuid.uuid4()), now()
         with self.lock, self.db:
             self.db.execute("INSERT INTO documents VALUES (?, ?, ?, ?, ?)",
-                            (doc_id, self.STATUS_FOR_READ[result.status], result.reason, t, t))
+                            (doc_id, "example" if example else self.STATUS_FOR_READ[result.status], result.reason,
+                             t, t))
+            if example:
+                self.db.execute("INSERT INTO examples VALUES (?, ?, ?, ?)", (doc_id, *example, t))
             snap = self.db.execute(
                 "INSERT INTO snapshots (document_id, sha256, size, source_path, file_name, imported_at)"
                 " VALUES (?, ?, ?, ?, ?, ?)",
@@ -373,7 +388,7 @@ class Catalog:
         and filed time), or (category_id=None) every document that is not filed: the Inbox."""
         if category_id is None:
             return self.all("SELECT d.*, s.sha256, s.file_name, s.imported_at, s.source_path FROM documents d"
-                            " JOIN snapshots s ON s.document_id = d.id WHERE d.status != 'filed'"
+                            " JOIN snapshots s ON s.document_id = d.id WHERE d.status NOT IN ('filed', 'example')"
                             " ORDER BY s.file_name, d.id")
         return self.all(self._FILED + "WHERE m.category_id = ? AND d.status = 'filed' ORDER BY s.file_name, d.id",
                         category_id)
@@ -381,7 +396,8 @@ class Catalog:
     def recent_documents(self, since_iso):
         """Documents imported since the given time (ISO, UTC), newest first."""
         return self.all("SELECT d.*, s.sha256, s.file_name, s.imported_at FROM documents d JOIN snapshots s"
-                        " ON s.document_id = d.id WHERE s.imported_at >= ? ORDER BY s.imported_at DESC, d.id", since_iso)
+                        " ON s.document_id = d.id WHERE s.imported_at >= ? AND d.status != 'example'"
+                        " ORDER BY s.imported_at DESC, d.id", since_iso)
 
     def all_documents(self):
         """Every document: filed ones with their category, copy path and filed time; the rest without."""
@@ -407,7 +423,7 @@ class Catalog:
         """Every document that is not filed, each with its stored analysis as JSON text (or None): one query."""
         return self.all("SELECT d.*, s.sha256, s.file_name, s.imported_at, s.source_path, e.analysis_json"
                         " FROM documents d JOIN snapshots s ON s.document_id = d.id"
-                        " LEFT JOIN extractions e ON e.snapshot_id = s.id WHERE d.status != 'filed'"
+                        " LEFT JOIN extractions e ON e.snapshot_id = s.id WHERE d.status NOT IN ('filed', 'example')"
                         " ORDER BY s.file_name, d.id")
 
     def remove_document(self, doc_id):
@@ -434,7 +450,19 @@ class Catalog:
             self.db.execute("DELETE FROM moves WHERE document_id = ?", (doc_id,))
             self.db.execute("DELETE FROM suggestion_feedback WHERE document_id = ?", (doc_id,))
             self.db.execute("DELETE FROM kept_here WHERE document_id = ?", (doc_id,))
+            self.db.execute("DELETE FROM examples WHERE document_id = ?", (doc_id,))
             self.db.execute("DELETE FROM documents WHERE id = ?", (doc_id,))
+
+    def learned_folders(self):
+        """[(folder, category id, category name, documents)] the user's examples came from, by folder."""
+        return [tuple(r) for r in self.all(
+            "SELECT x.folder, c.id, c.name, COUNT(*) FROM examples x JOIN categories c ON c.id = x.category_id"
+            " WHERE c.deleted_at IS NULL GROUP BY x.folder, c.id ORDER BY x.folder COLLATE NOCASE")]
+
+    def example_documents(self, folder):
+        """Ids of the examples learned from one folder that are still examples (not imported for filing since)."""
+        return [r[0] for r in self.all("SELECT x.document_id FROM examples x JOIN documents d ON d.id = x.document_id"
+                                       " WHERE x.folder = ? AND d.status = 'example'", folder)]
 
     def analysis(self, doc_id):
         row = self.one("SELECT e.analysis_json FROM extractions e JOIN snapshots s ON e.snapshot_id = s.id"
@@ -460,8 +488,11 @@ class Catalog:
 
     def explicit_labels(self):
         """{document id: category id} for filed documents whose category the user chose or corrected (A7): the
-        latest explicit choice. Placements the app made by itself are no confirmation and are left out."""
-        return dict(self.all(
+        latest explicit choice. Placements the app made by itself are no confirmation and are left out. The user's
+        examples from their own folders count too (record 2.9); a document filed since takes its filed category."""
+        examples = dict(self.all("SELECT x.document_id, x.category_id FROM examples x JOIN categories c ON"
+                                 " c.id = x.category_id WHERE c.deleted_at IS NULL"))
+        return examples | dict(self.all(
             "SELECT m.document_id, m.category_id FROM memberships m JOIN documents d ON d.id = m.document_id"
             " JOIN categories c ON c.id = m.category_id WHERE m.role = 'primary' AND m.status = 'active'"
             " AND m.provenance IN ('user-confirmed', 'user-corrected') AND d.status = 'filed'"

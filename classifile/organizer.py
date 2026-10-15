@@ -128,12 +128,55 @@ class Organizer:
         known = self.catalog.snapshot_by_hash(result.sha256)
         if known:
             doc_id = known["document_id"]
+            if self.catalog.document(doc_id)["status"] == "example":   # learned from a folder; now to be filed
+                self.catalog.update_source_path(doc_id, Path(path).resolve())
+                self.catalog.set_document_status(doc_id, "needs_decision")
+                return doc_id, None
             # A failed read (e.g. a timeout) is retried by importing the same bytes again; a failed copy is not.
             if self.catalog.document(doc_id)["status"] in ("failed", "pending") and not self.catalog.active_primary(doc_id):
                 self.catalog.replace_extraction(doc_id, result, analysis, summary)
                 return doc_id, "read again"
             return doc_id, "already imported"
         return self.catalog.add_document(result, Path(path).resolve(), analysis, summary), None
+
+    # -- "Learn from my existing folders" (decision record 2.9) -------------------------------------------------
+    def scan_folder(self, root):
+        """The user's organized folder, as proposed categories: [(subfolder, [its supported files, in any folder
+        below it])], subfolders without one left out. Only the folder listing is read. Raises ValueError with a
+        plain reason."""
+        root, out = Path(root).resolve(), self.output_root
+        if out and root.is_relative_to(out):
+            raise ValueError("This is ClassiFile's output folder. Choose the folder where you keep your own documents.")
+        try:
+            subs = sorted((p for p in root.iterdir() if p.is_dir()), key=lambda p: (p.name.casefold(), p.name))
+            found = [(sub, sorted(p for p in sub.rglob("*") if p.suffix.lower() in READERS and p.is_file()
+                                  and not (out and p.resolve().is_relative_to(out)))) for sub in subs]
+        except OSError:
+            raise ValueError("ClassiFile couldn't read this folder.") from None
+        return [(sub, files) for sub, files in found if files]
+
+    def category_for(self, name):
+        """The category a learned folder goes to: an existing one of that name, otherwise a new one."""
+        existing = self.catalog.category_by_key(name_key(" ".join(name.split())))
+        return existing["id"] if existing else self.create_category(name)
+
+    def learn(self, path, result, analysis, summary, cat_id, folder):
+        """Keep a file read from the user's own folder as their example of a category (record 2.9): its text is
+        stored for learning; the file is never moved, copied or changed. Returns "learned", "known" (its bytes are
+        in ClassiFile already) or "unread"."""
+        if result.sha256 is None or result.status != "ok":
+            return "unread"
+        if self.catalog.snapshot_by_hash(result.sha256):
+            return "known"
+        self.catalog.add_document(result, Path(path).resolve(), analysis, summary, example=(cat_id, str(folder)))
+        return "learned"
+
+    def forget_folder(self, folder):
+        """Forget the examples learned from one of the user's folders: the text ClassiFile stored for them goes;
+        the files and the categories stay. Returns how many were forgotten."""
+        ids = self.catalog.example_documents(str(folder))
+        self.remove(ids)
+        return len(ids)
 
     def create_category(self, name, by="user"):
         """by "machine": an automatic new folder (B2, record 2.6), marked as named by the app until renamed."""

@@ -595,3 +595,45 @@ def test_cold_start_files_by_itself_only_after_three_confirmed_and_counts_each_s
     seeded = cold_start.simulate(order, texts, truth, seeds=order[:6])          # "Learn from my existing folders"
     assert len(seeded["steps"]) == 6 and seeded["before"] == {"Algebra": 0, "Networks": 0}
     assert cold_start.simulate(order, texts, truth) == run                      # no chance involved
+
+
+def test_learning_from_existing_folders_reads_only_and_counts_as_the_users_examples(make_org, tmp_path):
+    org, mine = make_org(), tmp_path / "mine"
+    for subject in ("Algebra", "Networks"):
+        for n in range(3):
+            (mine / subject / ("deep" if n == 2 else "")).mkdir(parents=True, exist_ok=True)
+            _pdf(mine / subject / ("deep" if n == 2 else "") / f"{subject}-{n}.pdf", SUBJECTS[subject], n)
+    (mine / "Empty").mkdir()
+    _pdf(mine / "loose.pdf", SUBJECTS["Poetry"], 0)                        # not in a subfolder: not proposed
+    before = {p: (p.read_bytes(), p.stat().st_mtime_ns) for p in mine.rglob("*") if p.is_file()}
+
+    found = org.scan_folder(mine)
+    assert [(sub.name, len(files)) for sub, files in found] == [("Algebra", 3), ("Networks", 3)]
+    with pytest.raises(ValueError):
+        org.scan_folder(org.output_root)                                   # ClassiFile's own copies: refused
+    results = []
+    for sub, files in found:
+        cat = org.category_for("Linear algebra" if sub.name == "Algebra" else sub.name)   # renamed by the user
+        results += [org.learn(p, *read_and_analyze(p), cat, sub) for p in files]
+    assert results == ["learned"] * 6
+    assert org.learn(found[0][1][0], *read_and_analyze(found[0][1][0]), cat, found[0][0]) == "known"
+    assert {p: (p.read_bytes(), p.stat().st_mtime_ns) for p in mine.rglob("*") if p.is_file()} == before
+    assert not list(org.output_root.iterdir())                             # nothing copied
+    cats = {c["name"]: c["id"] for c in org.catalog.categories()}
+    assert sorted(cats) == ["Linear algebra", "Networks"]
+    labels = org.catalog.explicit_labels()
+    assert sorted(Counter(labels.values()).values()) == [3, 3]            # the user's examples: they teach
+    assert org.catalog.all_documents() == [] and org.catalog.waiting_documents() == []   # never listed
+    assert [(f, n) for _, _, f, n in org.catalog.learned_folders()] == [("Linear algebra", 3), ("Networks", 3)]
+
+    org.update_matching()
+    net = _add(org, tmp_path / "src", "Networks", 7, False)
+    assert org.file_automatically(net) == cats["Networks"]                # 3 examples: enough to file by itself
+
+    alg = found[0][1][0]                                                   # the user now wants one of them filed
+    doc, note = org.record(alg, *read_and_analyze(alg))
+    assert note is None and org.catalog.document(doc)["status"] == "needs_decision"
+    assert org.forget_folder(found[0][0]) == 2                             # the two still kept as examples
+    assert org.catalog.document(doc)["status"] == "needs_decision"         # the waiting one stays
+    assert sorted(Counter(org.catalog.explicit_labels().values()).values()) == [1, 3]
+    assert {p: (p.read_bytes(), p.stat().st_mtime_ns) for p in mine.rglob("*") if p.is_file()} == before

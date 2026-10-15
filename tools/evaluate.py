@@ -83,7 +83,7 @@ def measure(org):
                       " AND provenance = 'machine-assigned'")[0]
     return {"names": names, "rows": rows, "unseen": unseen, "labels": labels, "counts": counts, "groups": groups,
             "level_name": org.auto_level(), "level": org.check_level(), "documents": sum(status.values()),
-            "waiting": status.get("needs_decision", 0), "machine": machine,
+            "waiting": status.get("needs_decision", 0), "machine": machine, "examples": status.get("example", 0),
             "model": dict(used[0]) | {"bundle_json": None} if used else None,
             "check": evaluation.mismatches(rows), "parts": dict(parts), "real": real_use(cat)}
 
@@ -250,7 +250,10 @@ def report(m, rules=False, out=print, outcomes=False, real=False):
         f"{matching.FOLDER_MIN}+ documents at {matching.FOLDER_LEVEL}; Check these: another folder ahead by "
         f">= {evaluation.CHECK_MARGIN}")
     out("\nWhat is counted")
-    out(f"  {m['documents']} documents in the catalog: {len(labels)} filed by the user (the truth and the training),"
+    examples = m.get("examples", 0)
+    out(f"  {m['documents']} documents in the catalog: {len(labels)} filed by the user"
+        + (f" or kept as examples from the user's folders ({examples} of them)" if examples else "")
+        + " (the truth and the training),"
         f" {m['machine']} filed by the app and not yet confirmed (left out: never the truth, A7), "
         f"{m['waiting']} waiting (left out)")
     out(f"  {len(labels)} documents in {fams} families, {len(set(labels.values()))} categories")

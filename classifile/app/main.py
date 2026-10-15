@@ -27,22 +27,27 @@ from classifile.app import app_icon, make_app
 from classifile.app.autofiled import AutoPage
 from classifile.app.decision import DecisionPage
 from classifile.app.details import DetailsPanel
+from classifile.app.guide import ABOUT as ABOUT_TEXT, HELP as HELP_TEXT, TourDialog, text_page
+from classifile.app.learn import LearnDialog
 from classifile.app.models import DOC, SORTS, CategoryModel, DocumentFilter, DocumentModel, sorted_by_name
 from classifile.app.widgets import (
     CHECKLIST_MAX, DATE_COLUMN_MIN, PANEL, TIGHT, DETAILS_MAX, DETAILS_MIN, DETAILS_WIDTH, FILE_ICON, GROUP, LIST_MIN, MIN_WINDOW,
     MOTION_STANDARD, NARROW, PAD, RELATED, SEARCH_MAX, SECTION, SIDEBAR_WIDTH, SUPPORTED, TOAST, TOAST_LONG,
     WIDE, WINDOW, box, motion, qt_palette, set_motion, slide_away, style_sheet, use_theme,
-    DropOverlay, ElidedLabel, Notices, PickerDialog, PreviewOverlay, Toast, wrappable,
+    Collapsible, DropOverlay, ElidedLabel, Notices, PickerDialog, PreviewOverlay, Toast, wrappable,
 )
 from classifile.copies.engine import CopyError
 from classifile.catalog.db import Catalog
+from classifile import __version__
 from classifile.matching import LEVELS
+from classifile.reader import RECORD_VERSION
 from classifile.organizer import Organizer, is_cloud_synced, read_and_analyze
 from classifile.worker import WorkerPool
 
-ALL, DECIDE, RECENT, SETTINGS, AUTO = "all", "decide", "recent", "settings", "auto"
+ALL, DECIDE, RECENT, SETTINGS, AUTO, HELP, ABOUT = "all", "decide", "recent", "settings", "auto", "help", "about"
 VIEW_TITLES = {ALL: "All documents", DECIDE: "Needs your decision", RECENT: "Recently added", SETTINGS: "Settings",
-               AUTO: "Filed automatically"}
+               AUTO: "Filed automatically", HELP: "Help", ABOUT: "About ClassiFile"}
+TEXT_PAGES = (SETTINGS, HELP, ABOUT)    # pages without documents: no search, no details
 AUTO_LEVELS = (("off", "Off: always ask me"), ("very strict", "Very strict"), ("strict", "Strict"),
                ("balanced", "Balanced"), ("lenient", "Lenient"))   # matching.LEVELS, as Settings words them
 RECENT_DAYS = 7
@@ -127,6 +132,7 @@ class MainWindow(QWidget):
         self.failure = None         # (doc ids, sentence): stays as a notice until those documents are resolved
         self.run = None             # the import under way: what it read, filed and created, for one summary
         self.updating = False       # matching is updating by itself in the background
+        self.learning = None        # "Learn from my existing folders" under way: its counts
         self.update_note = None     # the note at the top after matching updated by itself (A7, record 2.6)
         self.feedback = {}          # doc_id -> reason ("" = none given): the suggested names were set aside
         self.moving = 0             # moves and renames under way (they copy files, so they run off this thread)
@@ -158,8 +164,8 @@ class MainWindow(QWidget):
         self.apply_theme()
         self.org.startup()
         self.refresh()
-        if ask_output_root and self.org.output_root is None:
-            self.choose_output_root()
+        if ask_output_root:
+            QTimer.singleShot(0, self.first_run)    # once the window is on screen
 
     # -- settings stored in the catalog -----------------------------------------------------------------------
     def _setting(self, key, default):
@@ -225,6 +231,27 @@ class MainWindow(QWidget):
         box.setCheckBox(dont)
         box.exec()
         return ("close" if box.clickedButton() is close else "back"), dont.isChecked()
+
+    def ask_learn(self, root, found):
+        """The proposed categories of a folder, to untick or rename: [(name, subfolder, files)], or None."""
+        existing = {c["name_key"]: c["name"] for c in self.org.catalog.categories()}
+        dialog = LearnDialog(self, root, found, existing)
+        return dialog.chosen() if dialog.exec() == LearnDialog.Accepted else None
+
+    def show_tour(self):
+        """The first-run tour (and Help, "Show the tour"). Ends with an offer to learn from the user's folders."""
+        tour = TourDialog(self, learn=True)
+        tour.exec()
+        self.org.catalog.set_setting("tour_seen", "yes")
+        if tour.learn_chosen:
+            self.learn_folders()
+
+    def first_run(self):
+        """On the first start: the tour, then the output folder."""
+        if self.org.catalog.get_setting("tour_seen") != "yes":
+            self.show_tour()
+        if self.org.output_root is None:
+            self.choose_output_root()
 
     def ask_move(self, n):
         box = QMessageBox(self)
@@ -315,7 +342,18 @@ class MainWindow(QWidget):
         self.auto_page = AutoPage(self)
         self.settings_page = self._settings_page()
         self.no_match = self._no_match_page()
-        for page in (self.table, self.empty_state, self.decision, self.auto_page, self.settings_page, self.no_match):
+        tour = QPushButton("Show the tour again")
+        tour.clicked.connect(self.show_tour)
+        learn = QPushButton("Learn from my existing folders…")
+        learn.clicked.connect(self.learn_folders)
+        help_buttons = QWidget()
+        hb = box(QHBoxLayout(help_buttons), spacing=RELATED)
+        hb.addWidget(tour)
+        hb.addWidget(learn)
+        self.help_page = text_page("How ClassiFile works", HELP_TEXT, help_buttons)
+        self.about_page = text_page("About ClassiFile", ABOUT_TEXT)
+        for page in (self.table, self.empty_state, self.decision, self.auto_page, self.settings_page, self.no_match,
+                     self.help_page, self.about_page):
             self.stack.addWidget(page)
         self.details = DetailsPanel(self)
         self.details.setMinimumWidth(DETAILS_MIN)
@@ -423,6 +461,13 @@ class MainWindow(QWidget):
         self.cats_empty.setObjectName("secondary")
         self.cats_empty.setWordWrap(True)
         self.cats_empty.setContentsMargins(GROUP, 0, GROUP, 0)
+        for key, text in ((HELP, "Help"), (ABOUT, "About")):
+            b = QPushButton(text)
+            b.setObjectName("nav")
+            b.setCheckable(True)
+            b.clicked.connect(lambda _=False, k=key: self.show_view(k))
+            self.nav_group.addButton(b)
+            self.nav[key] = b
         settings = QPushButton("⚙  Settings")
         settings.setObjectName("nav")
         settings.setProperty("prominent", True)  # outlined and set apart: easy to find
@@ -443,6 +488,8 @@ class MainWindow(QWidget):
         v.addWidget(self.cats_none)
         v.addWidget(self.cats, 1)
         v.addSpacing(RELATED)
+        v.addWidget(self.nav[HELP])
+        v.addWidget(self.nav[ABOUT])
         v.addWidget(settings)
         return side
 
@@ -506,12 +553,19 @@ class MainWindow(QWidget):
         self.empty_add = QPushButton("Add documents")
         self.empty_add.setObjectName("primary")
         self.empty_add.clicked.connect(self.add_documents)
+        self.empty_learn = QPushButton("Learn from my existing folders…")
+        self.empty_learn.clicked.connect(self.learn_folders)
+        start = box(QHBoxLayout(), spacing=RELATED)
+        start.addStretch(1)
+        start.addWidget(self.empty_add)
+        start.addWidget(self.empty_learn)
+        start.addStretch(1)
         v = box(QVBoxLayout(page))
         v.addStretch(1)
         v.addWidget(title, 0, Qt.AlignCenter)
         v.addWidget(lines[0], 0, Qt.AlignCenter)
         v.addSpacing(SECTION - RELATED)
-        v.addWidget(self.empty_add, 0, Qt.AlignCenter)
+        v.addLayout(start)
         v.addSpacing(SECTION - RELATED)
         for label in lines[1:]:
             label.setObjectName("secondary")
@@ -577,9 +631,18 @@ class MainWindow(QWidget):
         self.matching_button.setToolTip("Learn again from the documents you filed. The new version is checked, and "
                                         "the previous one is kept if it did better.")
         self.matching_button.clicked.connect(self.update_matching)
+        self.learn_button = QPushButton("Learn from my existing folders…")
+        self.learn_button.setToolTip("Pick a folder you have already organized: its folders become categories and "
+                                     "their documents examples. Your files are only read.")
+        self.learn_button.clicked.connect(self.learn_folders)
         match_row = box(QHBoxLayout(), spacing=GROUP)
         match_row.addWidget(self.matching_label, 1)
-        match_row.addWidget(self.matching_button, 0, Qt.AlignTop)
+        learn_row = box(QHBoxLayout(), spacing=RELATED)
+        learn_row.addWidget(self.learn_button)
+        learn_row.addWidget(self.matching_button)
+        learn_row.addStretch(1)
+        self.learned = QWidget()                  # the folders learned from, each with Forget
+        self.learned_rows = box(QVBoxLayout(self.learned), spacing=TIGHT)
         self.matching_log = QLabel()              # the last versions: when, by whom, what the check found
         self.matching_log.setObjectName("secondary")
         self.matching_log.setWordWrap(True)
@@ -621,9 +684,19 @@ class MainWindow(QWidget):
         self.auto_ticks.setFrameShape(QFrame.NoFrame)
         self.auto_ticks.setMaximumHeight(CHECKLIST_MAX)
         self.scope_boxes = []
-        about_text = QLabel("ClassiFile organizes copies of your documents into categories; original files stay "
-                            "unchanged. Part of ClariFile.")
-        about_text.setWordWrap(True)
+        self.tech = QLabel()                      # versions and folders, for reporting a problem
+        self.tech.setObjectName("secondary")
+        self.tech.setWordWrap(True)
+        self.tech.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.tech.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        log_title = QLabel("Matching versions")
+        advanced_body = QWidget()
+        a = box(QVBoxLayout(advanced_body), (0, RELATED, 0, 0), RELATED)
+        a.addWidget(log_title)
+        a.addWidget(self.matching_log)
+        a.addSpacing(RELATED)
+        a.addWidget(self.tech)
+        self.advanced = Collapsible("Advanced", advanced_body)   # starts closed: details for reporting a problem
         # One titled panel per topic, the most used first: a heading, a plain sentence, then the controls.
         v = box(QVBoxLayout(page), spacing=GROUP)
         v.addWidget(settings_card(
@@ -631,14 +704,14 @@ class MainWindow(QWidget):
             "others and already holds 3 documents you confirmed. Stricter levels ask you more often and make fewer "
             "mistakes.", auto_row, scope_row, self.auto_ticks, self.auto_folders, folders_text))
         v.addWidget(settings_card(
-            "Learning", "ClassiFile learns from the documents you file, confirm or move. It updates by itself after "
-            "every 10 of them, and keeps the previous version if the new one does worse.",
-            match_row, self.matching_log))
+            "Learning", "ClassiFile learns from the documents you file, confirm or move, and from folders you have "
+            "already organized. It updates by itself after every 10 of them, and keeps the previous version if the "
+            "new one does worse.", match_row, learn_row, self.learned))
         v.addWidget(settings_card("Output folder", "Copies of your documents are filed here. The originals are "
                                   "never changed.", row))
         v.addWidget(settings_card("Appearance", "", look_row, motion_row))
         v.addWidget(settings_card("When closing", "", self.close_toggle))
-        v.addWidget(settings_card("About", "", about_text))
+        v.addWidget(self.advanced)
         v.addStretch(1)
         return outer
 
@@ -818,10 +891,10 @@ class MainWindow(QWidget):
             total = self.auto_page.awaiting()
             self.auto_page.set_query(q)
             shown = self.auto_page.shown_documents()
-        elif key != SETTINGS:
+        elif key not in TEXT_PAGES:
             total, shown = self.filter.total(), self.filter.rowCount()
         self.page_title.setText(title + (f" · {total}" if total else ""))
-        searchable = key != SETTINGS and not empty and (key not in (DECIDE, AUTO) or bool(shown or q))
+        searchable = key not in TEXT_PAGES and not empty and (key not in (DECIDE, AUTO) or bool(shown or q))
         self.toolbar.setVisible(searchable)
         for w in (self.sort, self.details_toggle):
             w.setVisible(key not in (DECIDE, AUTO))     # rows open their own details there
@@ -831,8 +904,8 @@ class MainWindow(QWidget):
             total = len(self.auto_page.items)
         self.result_count.setText(f"{shown} of {total}" if searching else "")
         self.result_count.setVisible(searching)
-        if key == SETTINGS:
-            page = self.settings_page
+        if key in TEXT_PAGES:
+            page = {SETTINGS: self.settings_page, HELP: self.help_page, ABOUT: self.about_page}[key]
         elif searching and not shown:
             self.no_match_text.setText(f"Nothing here matches “{q}”.")
             page = self.no_match
@@ -914,10 +987,13 @@ class MainWindow(QWidget):
         if self.inflight:
             done = max(0, self.read_total - len(self.inflight))
             self.processing.setText(f"Reading {min(done + 1, self.read_total)} of {self.read_total} documents…")
+        elif self.learning:
+            run = self.learning
+            self.processing.setText(f"Learning from your folders: {run['done']} of {run['total']}…")
         else:
             self.processing.setText("")
             self.read_total = 0
-        self.processing.setVisible(bool(self.inflight))
+        self.processing.setVisible(bool(self.inflight or self.learning))
 
     def _show_notices(self, waiting):
         notices = []
@@ -1007,7 +1083,7 @@ class MainWindow(QWidget):
                 self.inspected = doc_id
                 self.details.show_doc(doc_id)   # the list is not touched: it keeps its scroll position
             return self._place_details()
-        if self.view[0] == SETTINGS:
+        if self.view[0] in TEXT_PAGES:
             self.show_view(ALL)
         self.select_docs([doc_id])
         self.set_details_open(True)
@@ -1134,6 +1210,68 @@ class MainWindow(QWidget):
     def add_documents(self):
         self.import_paths(self.pick_files())
 
+    # -- "Learn from my existing folders" (decision record 2.9) -----------------------------------------------
+    def learn_folders(self):
+        """The user picks a folder they organized; its subfolders are proposed as categories, to untick or rename;
+        the files of the ones kept are read (never moved, copied or changed) and become the user's examples."""
+        if self.learning:
+            return
+        path = self.pick_folder("Choose a folder you have already organized")
+        if not path:
+            return
+        try:
+            found = self.org.scan_folder(path)
+        except ValueError as e:
+            self.toast.show_message(str(e), ms=TOAST_LONG)
+            return
+        if not found:
+            self.toast.show_message(f"No folder inside {Path(path).name} holds {SUPPORTED} documents.", ms=TOAST_LONG)
+            return
+        chosen = self.ask_learn(Path(path), found)
+        jobs = []
+        for name, folder, files in chosen or ():
+            try:
+                cat_id = self.org.category_for(name)
+            except ValueError as e:
+                self.toast.show_message(f"{name}: {e}")
+                continue
+            jobs += [(p, cat_id, folder) for p in files]
+        if not jobs:
+            return
+        self.learning = {"total": len(jobs), "done": 0, "learned": 0, "known": 0, "unread": 0}
+        for job in jobs:
+            self.pool.submit(self._learn_job, *job)
+        self.refresh()
+
+    def _learn_job(self, path, cat_id, folder):
+        try:
+            out = self.workers.run(str(path))   # read in a worker process, like any document; only read
+        except Exception as e:
+            out = e
+        self.bridge.job_done.emit(lambda result: self._learn_done(path, cat_id, folder, result), out)
+
+    def _learn_done(self, path, cat_id, folder, out):
+        run = self.learning
+        what = "unread" if isinstance(out, Exception) else self.org.learn(path, *out, cat_id, folder)
+        run[what] += 1
+        run["done"] += 1
+        if run["done"] < run["total"]:
+            return self._show_processing()
+        self.learning = None
+        parts = [f"Learned from {run['learned']} document{'s' if run['learned'] != 1 else ''}"] + (
+            [f"{run['known']} already in ClassiFile"] if run["known"] else []) + (
+            [f"{run['unread']} couldn't be read"] if run["unread"] else [])
+        self.toast.show_message(" · ".join(parts), ms=TOAST_LONG)
+        if run["learned"]:
+            self.update_matching()              # learn from them now, with the usual check; then look again
+        self.refresh()
+
+    def forget_folder(self, folder):
+        n = self.org.forget_folder(folder)
+        self.toast.show_message(f"Forgot {n} example{'s' if n != 1 else ''} from {Path(folder).name}. "
+                                "Your files weren't touched.")
+        self.refresh()
+
     @staticmethod
     def _drag_paths(e):
         return [u.toLocalFile() for u in e.mimeData().urls() if u.isLocalFile()]
@@ -1169,7 +1307,7 @@ class MainWindow(QWidget):
                 self.pool.submit(self._read_job, p)
         if refused:
             self.toast.show_message("Not added: " + "; ".join(refused), ms=TOAST_LONG)
-        if self.view[0] in (SETTINGS, "category"):
+        if self.view[0] in TEXT_PAGES + ("category",):
             self._clear_search()
             self.view = (ALL, None)
         self.refresh()
@@ -1654,11 +1792,16 @@ class MainWindow(QWidget):
                     + (f" {since} filed document{'s are' if since != 1 else ' is'} ready to learn from." if since
                        else ""))
         else:
-            text = (f"Version {m['version']}: learned from {m['documents']} documents in {m['categories']} "
-                    f"categories on {short_date(m['created_at'])}. "
+            text = (f"Learned from {m['documents']} documents in {m['categories']} categories on "
+                    f"{short_date(m['created_at'])}. "
                     + (f"{since} document{'s' if since != 1 else ''} filed or moved since." if since
                        else "Nothing was filed or moved since."))
         self.matching_label.setText(text)
+        self._show_learned()
+        self.tech.setText(
+            f"ClassiFile {__version__} · matching version {m.get('version', 'none yet')} · catalog schema "
+            f"{self.org.catalog.schema_version} · extraction record {RECORD_VERSION}\nData folder: "
+            f"{wrappable(self.org.catalog.path.parent)}")
         lines = []
         for r in self.org.catalog.matcher_log():
             found = json.loads(r["check_json"]) if r["check_json"] else None
@@ -1669,6 +1812,27 @@ class MainWindow(QWidget):
                          f"documents · {what}{check}")
         self.matching_log.setText("\n".join(lines))
         self.matching_log.setVisible(bool(lines))
+
+    def _show_learned(self):
+        """Settings: the folders the user's examples came from, each with Forget."""
+        while self.learned_rows.count():
+            row = self.learned_rows.takeAt(0).widget()
+            row.setParent(None)                 # gone at once, not at the next turn of the event loop
+            row.deleteLater()
+        for folder, _, name, n in self.org.catalog.learned_folders():
+            row = QWidget()
+            h = box(QHBoxLayout(row), spacing=GROUP)
+            text = QLabel(f"{Path(folder).name} → {name} · {n} document{'s' if n != 1 else ''}")
+            text.setObjectName("secondary")
+            text.setToolTip(folder)
+            forget = QPushButton("Forget")
+            forget.setObjectName("link")
+            forget.setToolTip("ClassiFile deletes what it stored for these examples. Your files aren't touched.")
+            forget.clicked.connect(lambda _=False, f=folder: self.forget_folder(f))
+            h.addWidget(text, 1)
+            h.addWidget(forget)
+            self.learned_rows.addWidget(row)
+        self.learned.setVisible(self.learned_rows.count() > 0)
 
     def update_matching(self):
         self.matching_button.setEnabled(False)
