@@ -125,7 +125,8 @@ def test_update_matching_is_versioned_and_keeps_the_previous_version_if_the_new_
     assert org.matches(waiting, set(cats.values())) == [] and org.matching_status() == {"since": 6}   # no model yet
 
     first = org.update_matching()
-    assert {k: first[k] for k in ("outcome", "version", "documents", "categories")} ==         {"outcome": "updated", "version": 1, "documents": 6, "categories": 2}
+    assert {k: first[k] for k in ("outcome", "version", "documents", "categories")} == {
+        "outcome": "updated", "version": 1, "documents": 6, "categories": 2}
     assert "previous" not in first["check"] and first["check"]["new"]["documents"] == 6   # nothing to compare with
     best = org.matches(waiting, set(cats.values()))[0]
     assert best[:2] == (cats["Networks"], 3)                                # best first, with its documents
@@ -140,7 +141,8 @@ def test_update_matching_is_versioned_and_keeps_the_previous_version_if_the_new_
     second = org.update_matching()
     assert second["outcome"] == "updated" and second["version"] == 2
     found = second["check"]
-    assert found["level"] == matching.LEVELS["strict"] and found["new"]["documents"] == found["previous"]["documents"] == 7
+    assert found["level"] == matching.LEVELS["strict"]
+    assert found["new"]["documents"] == found["previous"]["documents"] == 7
     assert json.loads(org.catalog.active_matcher()["check_json"]) == found   # both results are kept for Settings
     assert [r["status"] for r in org.catalog.all("SELECT status FROM matchers ORDER BY version")] == \
         ["previous", "active"]
@@ -492,3 +494,37 @@ def test_matching_updates_by_itself_after_enough_confirmations(make_org, tmp_pat
         _add(org, src, "Algebra", n)
     assert org.update_matching("automatic")["outcome"] == "kept previous"
     assert not org.update_due()                                        # a rejected version is not retried at once
+
+
+def _flag(org, *docs):
+    """Have the last evaluation list these documents (each filed by the user) as matching the other category."""
+    labels, cats = org.catalog.explicit_labels(), [c["id"] for c in org.catalog.categories()]
+    row = org.catalog.latest_matcher()
+    found = json.loads(row["check_json"]) | {"check": [
+        {"doc": d, "category": labels[d], "other": next(c for c in cats if c != labels[d]), "margin": 0.3}
+        for d in docs]}
+    org.catalog.set_matcher_check(row["version"], found)
+
+
+def test_check_these_asks_until_kept_or_moved_and_never_moves_by_itself(make_org, tmp_path):
+    org, src = make_org(), tmp_path / "src"
+    algebra = [_add(org, src, "Algebra", n) for n in range(3)]
+    for n in range(3):
+        _add(org, src, "Networks", n)
+    cats = {c["name"]: c["id"] for c in org.catalog.categories()}
+    org.update_matching()
+    assert "check" in json.loads(org.catalog.latest_matcher()["check_json"])   # every update measures the list
+    _flag(org, algebra[0], algebra[1])
+    assert org.to_check() == [(algebra[0], "algebra-0.pdf", cats["Algebra"], cats["Networks"], 0.3),
+                              (algebra[1], "algebra-1.pdf", cats["Algebra"], cats["Networks"], 0.3)]
+    assert org.catalog.explicit_labels()[algebra[0]] == cats["Algebra"]   # listed, never moved by itself
+    org.keep_here([algebra[0]])
+    org.move(algebra[1], cats["Networks"])                                # the user's correction
+    assert org.to_check() == []
+    _flag(org, algebra[0])
+    assert org.to_check() == []                                           # kept: not asked again
+    org.move(algebra[0], cats["Networks"])
+    org.move(algebra[0], cats["Algebra"])
+    _flag(org, algebra[0])
+    assert org.to_check() == []                                           # back where it was kept
+    assert (algebra[0], cats["Algebra"]) in org.catalog.kept_here()

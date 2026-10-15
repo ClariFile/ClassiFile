@@ -137,6 +137,7 @@ class MainWindow(QWidget):
         self.inspected = None       # the document whose details are open beside the decision or auto-filed page
         self.missing = {}           # waiting doc_id -> its original is not where it was (looked for on request)
         self.waiting_docs = []      # the waiting documents as of the last refresh, with what their cards show
+        self.checks = []            # "Check these": (document id, file name, its category, the one it matches)
         self.doc_rows = []          # every document as of the last refresh
         self.entered = None         # the view the last refresh showed
         self.since = recent_since() # "Recently added" starts here; set again whenever a view is opened
@@ -741,13 +742,17 @@ class MainWindow(QWidget):
     # -- refresh ----------------------------------------------------------------------------------------------
     def refresh(self, select_docs=None, recheck=True):
         """Bring the window in line with the catalog, in place: rows, cards and counts that did not change are
-        left alone, so what is typed, opened, selected or scrolled to stays. Five queries, whatever the size.
+        left alone, so what is typed, opened, selected or scrolled to stays. Six queries, whatever the size.
         recheck: look on disk for the waiting documents' originals again (a background read ending is no reason)."""
         cats = self._fill_categories()
         self.waiting_docs = waiting = self.decision_docs(recheck, cats)
         n = len(waiting)
         self.setWindowTitle(f"ClassiFile — {n} waiting" if n else "ClassiFile")
-        self.decide_count.setText(str(n) if n else "")
+        names = {c["id"]: c["name"] for c in cats}
+        self.checks = [(d, file_name, names[here], names[other])
+                       for d, file_name, here, other, _ in self.org.to_check()]
+        asked = n + len(self.checks)
+        self.decide_count.setText(str(asked) if asked else "")
         if self.view[0] == "category" and self.cat_model.get(self.view[1]) is None:
             self.view = (ALL, None)  # the category was deleted
         key = self.view[0]
@@ -782,6 +787,7 @@ class MainWindow(QWidget):
             self.close_toggle.setChecked(self.org.catalog.get_setting("close_notice") != "off")
             self.close_toggle.blockSignals(False)
         elif key == DECIDE:
+            self.decision.show_checks(self.checks)
             self.decision.show_items(waiting, {c["name_key"]: c for c in cats},
                                      [(r["key"], r["name"], r["count"]) for r in self.cat_model.rows],
                                      enter=self.entered != DECIDE)
@@ -805,7 +811,7 @@ class MainWindow(QWidget):
         if key == "category":
             title = self.cat_model.get(cat)["name"]
         if key == DECIDE:
-            total = len(self.waiting_docs)
+            total = len(self.waiting_docs) + len(self.checks)
             self.decision.set_query(q)
             shown = self.decision.shown_documents()
         elif key == AUTO:
@@ -1520,6 +1526,13 @@ class MainWindow(QWidget):
         if self.org.catalog.category(cat_id):
             self.show_view("category", cat_id)
             self.select_docs(ids)
+
+    def keep_here(self, ids):
+        """"Check these": the user keeps the documents where they are; recorded, and not asked again."""
+        self.org.keep_here(ids)
+        self.toast.show_message("Kept where it is. ClassiFile won't ask about it again." if len(ids) == 1 else
+                                f"Kept {len(ids)} documents where they are.")
+        self.refresh()
 
     def leave_pending(self, ids):
         self.deferred = [i for i in self.deferred if i not in ids] + list(ids)

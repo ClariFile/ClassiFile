@@ -901,7 +901,7 @@ def test_a_card_in_use_survives_background_reads(app, samples, make_org):
     w.org.catalog.db.set_trace_callback(statements.append)
     w.refresh()
     w.org.catalog.db.set_trace_callback(None)
-    assert len([s for s in statements if s.lstrip().upper().startswith("SELECT")]) == 5
+    assert len([s for s in statements if s.lstrip().upper().startswith("SELECT")]) == 6   # with "Check these"
     assert _item(w, SAMPLE["S1"]) is item and item.picker.field.text() == "my draft"
 
     w.org.create_category("Brand New")                             # the open list follows the catalog
@@ -1570,4 +1570,31 @@ def test_a_filed_row_folds_away_and_goes_at_once_with_reduced_motion(app, sample
     w.show_view(SETTINGS)
     assert w.motion.currentData() == "reduce"
     widgets.set_motion("system")
+    _close(w, rec)
+
+
+def test_check_these_on_the_decision_page_keep_here_and_move(app, make_org, tmp_path):
+    from test_matching import _add, _flag
+
+    org, src = make_org(), tmp_path / "src"
+    algebra = [_add(org, src, "Algebra", n) for n in range(3)]
+    for n in range(3):
+        _add(org, src, "Networks", n)
+    org.update_matching()
+    _flag(org, *algebra[:2])
+    w, rec = _window(make_org)
+    assert w.decide_count.text() == "2"                               # two questions, nothing waiting
+    w.show_view(DECIDE)
+    checks = w.decision.checks
+    assert [c.name.full for c in checks] == ["algebra-0.pdf", "algebra-1.pdf"] and w.decision.check_box.isVisible()
+    assert checks[0].about.text() == "In Algebra. Its content matches Networks much more closely."
+    assert not w.decision.empty.isVisible() and w.page_title.full == "Needs your decision · 2"
+    picked = []
+    w.pick_category = lambda title, verb, on_choice: picked.append((title, verb))
+    checks[1].move.click()
+    assert picked == [("Move 1 document to…", "Move")]               # the user chooses; nothing moves by itself
+    checks[0].keep.click()
+    assert w.toast.label.text() == "Kept where it is. ClassiFile won't ask about it again."
+    assert [c.doc_id for c in w.decision.checks] == [algebra[1]] and w.decide_count.text() == "1"
+    assert w.org.catalog.explicit_labels()[algebra[0]] == w.org.catalog.category_by_key("algebra")["id"]
     _close(w, rec)

@@ -494,6 +494,25 @@ class Catalog:
         """{(document id, category id)} the user kept."""
         return {tuple(r) for r in self.all("SELECT document_id, category_id FROM kept_here")}
 
+    def to_check(self):
+        """"Check these", in one query: [(document id, file name, its category id, the other category id,
+        margin)] from the last evaluation that listed any (matchers.check_json "check"), for documents still filed
+        by the user where they were measured, whose two categories still exist, and that the user did not keep."""
+        return [tuple(r) for r in self.all(
+            "SELECT j.value ->> 'doc', s.file_name, j.value ->> 'category', j.value ->> 'other', j.value ->> 'margin'"
+            " FROM matchers m, json_each(m.check_json, '$.check') j"
+            " JOIN memberships ms ON ms.document_id = j.value ->> 'doc' AND ms.category_id = j.value ->> 'category'"
+            "  AND ms.role = 'primary' AND ms.status = 'active'"
+            "  AND ms.provenance IN ('user-confirmed', 'user-corrected')"
+            " JOIN documents d ON d.id = ms.document_id AND d.status = 'filed'"
+            " JOIN snapshots s ON s.document_id = d.id"
+            " JOIN categories here ON here.id = ms.category_id AND here.deleted_at IS NULL"
+            " JOIN categories other ON other.id = j.value ->> 'other' AND other.deleted_at IS NULL"
+            " WHERE m.version = (SELECT MAX(version) FROM matchers WHERE check_json ->> '$.check' IS NOT NULL)"
+            "  AND NOT EXISTS (SELECT 1 FROM kept_here k WHERE k.document_id = ms.document_id"
+            "   AND k.category_id = ms.category_id)"
+            " GROUP BY ms.document_id ORDER BY j.key")]
+
     def family_labels(self):
         """{sha256: the owner's family id}."""
         return dict(self.all("SELECT sha256, family_id FROM family_labels"))

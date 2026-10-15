@@ -546,13 +546,69 @@ def cap_width(page, layout):
     layout.setContentsMargins(m.left(), m.top(), max(GROUP, page.width() - LIST_MAX), m.bottom())
 
 
+class CheckItem(QFrame):
+    """A document the user filed whose content matches another category by a wide margin ("Check these"):
+    where it is, what it matches, Keep here (recorded, not asked again) and Move to…. Nothing moves by itself."""
+
+    def __init__(self, doc_id, controller):
+        super().__init__()
+        self.doc_id, self.state, self.search_text = doc_id, None, ""
+        self.setObjectName("row")
+        self.icon = QLabel()
+        self.name = ElidedLabel(object_name="strong")
+        self.about = QLabel()
+        self.about.setObjectName("secondary")
+        self.about.setWordWrap(True)
+        self.move = QPushButton("Move to…")
+        self.move.setObjectName("accent")
+        self.move.setToolTip("Choose the category it belongs in. Its copy moves; the original is never touched.")
+        self.move.clicked.connect(lambda: controller.move_docs([self.doc_id]))
+        self.keep = QPushButton("Keep here")
+        self.keep.setObjectName("quiet")
+        self.keep.setToolTip("It belongs where it is. ClassiFile won't ask about it again.")
+        self.keep.clicked.connect(lambda: controller.keep_here([self.doc_id]))
+        text = box(QVBoxLayout(), spacing=TIGHT)
+        text.addWidget(self.name)
+        text.addWidget(self.about)
+        h = box(QHBoxLayout(self), (RELATED, RELATED, RELATED, RELATED), GROUP)
+        h.addWidget(self.icon, 0, Qt.AlignTop)
+        h.addLayout(text, 1)
+        h.addWidget(self.move, 0, Qt.AlignVCenter)
+        h.addWidget(self.keep, 0, Qt.AlignVCenter)
+
+    def fill(self, file_name, here, other):
+        if (file_name, here, other) != self.state:
+            self.state = (file_name, here, other)
+            self.icon.setPixmap(format_icon(file_name).pixmap(FILE_ICON, FILE_ICON))
+            self.name.setText(file_name)
+            self.about.setText(f"In {here}. Its content matches {other} much more closely.")
+            self.keep.setAccessibleName(f"Keep {file_name} in {here}")
+            self.move.setAccessibleName(f"Move {file_name} to another category")
+            self.search_text = f"{file_name} {here} {other}".casefold()
+
+
 class DecisionPage(QWidget):
     def __init__(self, controller):
         super().__init__()
         self.c = controller
         self.items, self.query, self.version, self.inspected = [], "", None, None
+        self.checks = []                            # CheckItems: filed documents to check, above the questions
         self.holder = QWidget()
-        self.list = box(QVBoxLayout(self.holder), (0, 0, GROUP, 0), 0)  # room for the scroll bar
+        outer = box(QVBoxLayout(self.holder), (0, 0, GROUP, 0), 0)     # room for the scroll bar
+        self.check_box = QWidget()
+        caption = QLabel("CHECK THESE")
+        caption.setObjectName("section")
+        why = QLabel("You filed these yourself, but their content matches another category much more closely. "
+                     "Nothing moves unless you choose.")
+        why.setObjectName("secondary")
+        why.setWordWrap(True)
+        self.check_list = box(QVBoxLayout(self.check_box), (0, 0, 0, GROUP), TIGHT)
+        self.check_list.addWidget(caption)
+        self.check_list.addWidget(why)
+        self.check_box.hide()
+        outer.addWidget(self.check_box)
+        self.list = box(QVBoxLayout(), spacing=0)
+        outer.addLayout(self.list, 1)
         self.list.addStretch(1)                     # always last; the rows go before it
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -567,7 +623,25 @@ class DecisionPage(QWidget):
 
     def resizeEvent(self, e):
         super().resizeEvent(e)
-        cap_width(self, self.list)
+        cap_width(self, self.holder.layout())
+
+    def show_checks(self, checks):
+        """checks: [(document id, file name, its category's name, the category its content matches)]."""
+        old = {i.doc_id: i for i in self.checks}
+        self.checks = []
+        for n, (doc_id, file_name, here, other) in enumerate(checks):
+            item = old.pop(doc_id, None) or CheckItem(doc_id, self.c)
+            item.fill(file_name, here, other)
+            if self.check_list.indexOf(item) != n + 2:
+                self.check_list.insertWidget(n + 2, item)
+            item.setVisible(self._matches(item))
+            self.checks.append(item)
+        for gone in old.values():
+            self.check_list.removeWidget(gone)
+            gone.hide()
+            gone.deleteLater()
+        self.check_box.setVisible(bool(self.checks))
+        self.empty.setVisible(not self.items and not self.checks)
 
     def show_items(self, docs, categories=None, version=None, enter=False):
         """Bring the rows in line with the waiting documents, in place. A row whose question is unchanged is
@@ -607,7 +681,7 @@ class DecisionPage(QWidget):
             for item in kept:
                 item.refresh_choices()
         self.items, self.version = items, version
-        self.empty.setVisible(not items)
+        self.empty.setVisible(not items and not self.checks)
         shown = [i for i in items if self._matches(i)]
         if shown and (refocus or (enter and at is None)):
             target = items[min(at or 0, len(items) - 1)]
@@ -641,10 +715,11 @@ class DecisionPage(QWidget):
     def set_query(self, query):
         """The page's search: rows that don't match are hidden, not rebuilt."""
         self.query = query.strip().casefold()
-        for item in self.items:
+        for item in self.items + self.checks:
             match = self._matches(item)
             if item.isHidden() == match:    # only the rows whose answer changed
                 item.setVisible(match)
 
     def shown_documents(self):
-        return sum(len(i.ids) for i in self.items if self._matches(i))
+        return (sum(len(i.ids) for i in self.items if self._matches(i))
+                + sum(1 for i in self.checks if self._matches(i)))

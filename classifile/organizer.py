@@ -584,16 +584,10 @@ class Organizer:
 
     # -- "Check these": filed documents whose content matches another folder by a wide margin -----------------
     def to_check(self):
-        """[(document id, its category, the category its content matches, margin)] from the last evaluation,
-        for documents still filed where they were measured, whose other category still exists, and that the user
-        has not kept where they are. Nothing is ever moved by itself."""
-        row = self.catalog.one("SELECT check_json FROM matchers WHERE check_json LIKE '%\"check\"%'"
-                               " ORDER BY version DESC LIMIT 1")
-        listed = json.loads(row[0])["check"] if row else []
-        labels, live = self.catalog.explicit_labels(), {c["id"] for c in self.catalog.categories()}
-        kept = self.catalog.kept_here()
-        return [(m["doc"], m["category"], m["other"], m["margin"]) for m in listed
-                if labels.get(m["doc"]) == m["category"] and m["other"] in live and (m["doc"], m["category"]) not in kept]
+        """[(document id, file name, its category, the category its content matches, margin)] from the last
+        evaluation (Catalog.to_check): still filed where they were measured, not kept there by the user. Nothing is
+        ever moved by itself."""
+        return self.catalog.to_check()
 
     def keep_here(self, doc_ids):
         """The user keeps these documents in their category: recorded, and not asked again while they stay there."""
