@@ -1,7 +1,26 @@
 # ClassiFile v1: the finish line
 
-2026-10-14 · the definition of done for ClassiFile v1. From now on ClassiFile gets only the launch work below
-and bug fixes, until v1 is released. New features wait for v1.1.
+2026-10-14, marked 2026-10-15 · the definition of done for ClassiFile v1. From now on ClassiFile gets only the
+launch work below and bug fixes, until v1 is released. New features wait for v1.1.
+
+**[Blocker]** must be done before v1 is released. **[v1.1]** can wait. Everything in sections 1 to 3 is a
+blocker unless marked otherwise.
+
+## 0. Before the freeze (found 2026-10-15)
+
+- **[Blocker]** The owner decides the proposed changes to the decision record (`docs/STATUS.md`, "Proposed
+  changes"): the update check (A7), the one evaluation (B4), "Check these", and the CP4 items not built (E1 policy,
+  E5–E7 on their defaults). The freeze writes into the record, so it must say what the code does.
+- **[Blocker]** "Update matching" once more, so the frozen version has learned the owner's last moves; then the
+  owner answers "Check these" (2 documents on 2026-10-15).
+- **[Blocker]** The CP5 report covers all of Part E: besides what `tools.evaluate` prints, incorrect creations,
+  duplicate categories, over-merging and fragmentation (from `tools.group_eval --folders`), pending rate, and the
+  four effort numbers (B2). One command for it, like `tools.evaluate`.
+- **[Blocker]** Functional gate: an offline run with networking disabled, checked on the laptop.
+- **[v1.1]** Balanced with "the nearest document is in the best folder" (on development data it files as many as
+  Balanced and wrongly files fewer new subjects, 11 of 118 instead of 15). Only if the owner wants more automatic
+  filing than Strict; it would need validation and a record change.
+- **[v1.1]** E5–E7 run on their own data (name equivalence, instance identifiers, conflicting self-descriptions).
 
 ## 1. CP5: freeze, then the final evaluation once
 
@@ -57,7 +76,7 @@ and bug fixes, until v1 is released. New features wait for v1.1.
   - folder names are usually typed by you: subject names are rarely written in the documents;
   - small folders (one or two documents) are rarely matched until they hold about five.
 
-## 4. Not in v1
+## 4. Not in v1 [v1.1 or later]
 
 - Summaries for the user (SummarEase is a separate project).
 - Languages other than English.
@@ -69,6 +88,8 @@ and bug fixes, until v1 is released. New features wait for v1.1.
 
 ## Done when
 
+- [ ] Section 0 blockers done: record changes decided, matching updated, Check these answered, the full
+      CP5 report command, the offline check.
 - [ ] Choices frozen in the record; final evaluation run once and reported.
 - [ ] Installer built and checked on a clean machine; licence notices included.
 - [ ] User README written.
