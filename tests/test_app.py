@@ -1074,8 +1074,9 @@ def test_cards_offer_the_best_matching_categories_once_matching_is_updated(app, 
     assert "1 document filed or moved since." in w.matching_label.text()
     w.matching_button.click()
     _pump(app, lambda: w.matching_button.isEnabled())
-    assert w.toast.label.text().startswith("Matching updated (version 2): 10 documents in 3 categories. On the 1 "
-                                           "document filed since, it put your category first for ")
+    assert w.toast.label.text().startswith("Matching updated (version 2): 10 documents in 3 categories; your "
+                                           "category first for ")
+    assert "(the version before: " in w.matching_log.text()          # both results, in Settings too
     w.matching_button.click()
     _pump(app, lambda: w.matching_button.isEnabled())
     assert w.toast.label.text() == "Matching is already up to date."

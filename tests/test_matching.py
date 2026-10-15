@@ -5,7 +5,7 @@ import math
 import pymupdf
 import pytest
 
-from classifile import matching
+from classifile import evaluation, matching
 from classifile.organizer import read_and_analyze
 
 SUBJECTS = {  # made-up subjects: no real document is involved
@@ -71,17 +71,45 @@ def test_ranking_and_abstention():
     assert not matching.Matcher(bundle).good(torn)
 
 
-def test_check_asks_only_for_what_changed_and_never_trains_on_it():
+def test_evaluation_holds_out_families_and_counts_what_it_says():
     texts = {f"{s}{n}": " ".join(words.split()[n:n + 6]) for s, words in SUBJECTS.items() for n in range(3)}
     labels = {d: d[:-1] for d in texts}
-    previous = matching.train({d: t for d, t in texts.items() if not d.startswith("Poetry")},
-                              {d: c for d, c in labels.items() if c != "Poetry"})
-    found = matching.check(texts, labels, previous)
-    assert found == {"documents": 3, "new": 3, "previous": 0}               # a subject the old model never saw
     texts["twin"], labels["twin"] = texts["Poetry0"], "Poetry"              # a version of a document
-    alone = {d: t for d, t in texts.items() if not d.startswith("Poetry") or d in ("Poetry0", "twin")}
-    found = matching.check(alone, {d: labels[d] for d in alone}, previous)
-    assert found == {"documents": 2, "new": 0, "previous": 0}               # its twin did not teach the answer
+    counts = {d: matching.terms(t) for d, t in texts.items()}
+    files = {d: (f"sha-{d}", f"{d}.pdf", "") for d in texts} | {"Algebra2": ("sha-a2", "a.pdf", "lecture"),
+                                                                  "Networks2": ("sha-n2", "n.pdf", "lecture")}
+    groups = evaluation.families(counts, files)
+    assert groups["twin"] == groups["Poetry0"]                             # nearly the same text
+    assert groups["Algebra2"] == groups["Networks2"] != groups["Algebra0"]   # the owner says so
+    rows = {r["doc"]: r for r in evaluation.evaluate(counts, labels, groups)}
+    assert rows["twin"]["examples"] == 2 and rows["Poetry1"]["examples"] == 3   # its twin never trains it
+    assert rows["Algebra2"]["examples"] == 2                               # nor does its family
+    alone = evaluation.evaluate(counts, labels, dict(labels))              # each category held out whole
+    assert all(r["examples"] == 0 and r["category"] not in dict(r["ranked"]) for r in alone)
+    assert evaluation.evaluate(counts, labels, groups) == evaluation.evaluate(counts, labels, groups)  # no chance
+    s = evaluation.summary(list(rows.values()), 0.0)
+    assert (s["documents"], s["known"]) == (10, 10) and s["right"] + s["wrong"] + s["waiting"] == 10
+    assert s["first"] == sum(r["ranked"][0][0] == r["category"] for r in rows.values())
+    assert evaluation.summary(alone, 0.0)["known"] == 0
+    assert evaluation.summary(alone, 0.0)["right"] == 0                   # a subject never seen: never right
+    lo, hi = evaluation.wilson(1, 10)
+    assert 0 < lo < 0.1 < hi < 0.5 and evaluation.wilson(0, 0) == (0.0, 1.0)
+
+
+def test_the_update_check_needs_no_more_wrong_filings_and_no_fewer_first():
+    old = {"first": 10, "wrong": 1}
+    assert evaluation.no_worse({"first": 10, "wrong": 1}, old)
+    assert evaluation.no_worse({"first": 11, "wrong": 0}, old)
+    assert not evaluation.no_worse({"first": 12, "wrong": 2}, old)         # more wrong filings: never
+    assert not evaluation.no_worse({"first": 9, "wrong": 0}, old)          # fewer first: never
+
+
+def test_check_these_lists_documents_another_folder_fits_by_a_wide_margin():
+    rows = [{"doc": "a", "category": "X", "examples": 3, "ranked": [("Y", 0.5), ("X", 0.3)]},
+            {"doc": "b", "category": "X", "examples": 3, "ranked": [("Y", 0.35), ("X", 0.3)]},   # close: not listed
+            {"doc": "c", "category": "X", "examples": 0, "ranked": [("Y", 0.5)]},                # X could not be seen
+            {"doc": "d", "category": "X", "examples": 3, "ranked": [("X", 0.6), ("Y", 0.1)]}]
+    assert evaluation.mismatches(rows) == [{"doc": "a", "category": "X", "other": "Y", "margin": 0.2}]
 
 
 def test_update_matching_is_versioned_and_keeps_the_previous_version_if_the_new_one_is_worse(
@@ -97,7 +125,8 @@ def test_update_matching_is_versioned_and_keeps_the_previous_version_if_the_new_
     assert org.matches(waiting, set(cats.values())) == [] and org.matching_status() == {"since": 6}   # no model yet
 
     first = org.update_matching()
-    assert first == {"outcome": "updated", "version": 1, "documents": 6, "categories": 2, "check": None}
+    assert {k: first[k] for k in ("outcome", "version", "documents", "categories")} ==         {"outcome": "updated", "version": 1, "documents": 6, "categories": 2}
+    assert "previous" not in first["check"] and first["check"]["new"]["documents"] == 6   # nothing to compare with
     best = org.matches(waiting, set(cats.values()))[0]
     assert best[:2] == (cats["Networks"], 3)                                # best first, with its documents
     assert 2 <= len(best[2]) <= 4 and set(best[2]) <= set(SUBJECTS["Networks"].split())   # and the words shared
@@ -110,14 +139,26 @@ def test_update_matching_is_versioned_and_keeps_the_previous_version_if_the_new_
     assert org.matching_status()["since"] == 1
     second = org.update_matching()
     assert second["outcome"] == "updated" and second["version"] == 2
-    assert second["check"] == {"documents": 1, "new": 1, "previous": 1}
+    found = second["check"]
+    assert found["level"] == matching.LEVELS["strict"] and found["new"]["documents"] == found["previous"]["documents"] == 7
+    assert json.loads(org.catalog.active_matcher()["check_json"]) == found   # both results are kept for Settings
     assert [r["status"] for r in org.catalog.all("SELECT status FROM matchers ORDER BY version")] == \
         ["previous", "active"]
 
     poem = _add(org, src, "Poetry", 1)
-    monkeypatch.setattr(matching, "check", lambda *a: {"documents": 1, "new": 0, "previous": 1})
+    real = evaluation.evaluate
+
+    def one_more_wrong(counts, labels, groups, training=None, live=None):
+        rows = real(counts, labels, groups, training, live)
+        if training is None:                # the new version: one more document filed in another category
+            i = next(i for i, r in enumerate(rows) if not evaluation.filed(r, matching.LEVELS["strict"]))
+            other = next(c for c in sorted(live) if c != rows[i]["category"])
+            rows[i] = rows[i] | {"ranked": [(other, 0.9), (rows[i]["category"], 0.1)], "confirmed": 9}
+        return rows
+    monkeypatch.setattr(evaluation, "evaluate", one_more_wrong)
     third = org.update_matching()
     assert third["outcome"] == "kept previous" and third["version"] == 2
+    assert third["check"]["new"]["wrong"] == third["check"]["previous"]["wrong"] + 1
     assert [r["status"] for r in org.catalog.all("SELECT status FROM matchers ORDER BY version")] == \
         ["previous", "active", "rejected"]
     assert org.matching_status()["version"] == 2 and org.matching_status()["since"] == 1
@@ -446,7 +487,7 @@ def test_matching_updates_by_itself_after_enough_confirmations(make_org, tmp_pat
     log = org.catalog.matcher_log()
     assert [(r["version"], r["trigger"], r["status"]) for r in log] == [(2, "automatic", "active"),
                                                                         (1, "user", "previous")]
-    monkeypatch.setattr(matching, "check", lambda *a: {"documents": 3, "new": 0, "previous": 3})
+    monkeypatch.setattr(evaluation, "no_worse", lambda new, old: False)
     for n in range(6, 9):
         _add(org, src, "Algebra", n)
     assert org.update_matching("automatic")["outcome"] == "kept previous"

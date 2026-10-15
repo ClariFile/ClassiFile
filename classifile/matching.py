@@ -76,7 +76,6 @@ GROUP_LEVEL = 0.15  # [Default] unmatched waiting documents this alike on averag
 FOLDER_LEVEL = 0.20  # groups this alike become a folder by themselves (B2 "Automatic new folders", record 2.6)
 FOLDER_MIN = 3       # and only groups of at least this many (record 2.7): pairs stay a question for the user
 AUTO_UPDATE_EVERY = 10  # matching updates by itself after this many new confirmations or moves (A7, record 2.6)
-CHECK_FOLDS = 5
 
 
 def lead(ranked):
@@ -129,26 +128,6 @@ class Matcher:
     def good(self, ranked):
         """Is the best of these a good match (else: abstain, and suggest a new name)?"""
         return bool(ranked) and lead(ranked) >= self.bundle["settings"]["good_match"]
-
-
-def check(texts, labels, previous):
-    """Is a model trained now worse than the previous one? Both are asked for the documents filed or moved since
-    the previous one was trained: the previous model as it is, the new one trained without the documents it is
-    asked for (in CHECK_FOLDS parts) and without their near-identical versions.
-    Returns {"documents", "new", "previous"}: how many, and how many each put in the user's category first."""
-    docs = [d for d in labels if texts.get(d)]
-    changed = sorted(d for d in docs if previous["training"].get(d) != labels[d])
-    first = lambda model, d: next((c for c, _ in model.rank(texts[d])), None)
-    old = Matcher(previous)
-    found = {"documents": len(changed), "new": 0, "previous": sum(first(old, d) == labels[d] for d in changed)}
-    idf = fit_idf([terms(texts[d]) for d in docs])                  # for spotting versions only
-    vectors = {d: vector(terms(texts[d]), idf) for d in docs}
-    for k in range(min(CHECK_FOLDS, len(changed))):
-        held = changed[k::CHECK_FOLDS]
-        out = set(held) | {d for d in docs for h in held if dot(vectors[d], vectors[h]) >= NEAR_TEXT}
-        new = Matcher(train(texts, {d: labels[d] for d in docs if d not in out}))
-        found["new"] += sum(first(new, d) == labels[d] for d in held)
-    return found
 
 
 def record_text(record):

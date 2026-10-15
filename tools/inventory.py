@@ -13,13 +13,13 @@ import argparse
 import csv
 import hashlib
 import os
-import re
 import sys
 from collections import defaultdict
 from pathlib import Path
 
 import pymupdf
 
+from classifile.evaluation import file_stem as _name_key   # one definition, shared with the evaluation
 from tools import refuse_final_eval
 
 COLUMNS = [
@@ -78,14 +78,6 @@ def _group(rows, key, column, prefix, distinct=lambda members: True):
             n += 1
             for r in members:
                 r[column] = f"{prefix}{n}"
-
-
-def _name_key(file_name):
-    """The name without its extension, copy marks ("(2)", "copy", "converted"), case and punctuation; "" when
-    too little is left to mean anything."""
-    stem = re.sub(r"(\s*\(\d+\)|[\s_-]*copy|[\s_-]*converted)+$", "", Path(file_name).stem.casefold())
-    key = " ".join(re.findall(r"[a-z0-9]+", stem))
-    return key if len(key) >= 4 and re.search(r"[a-z]", key) else ""
 
 
 def prefill_families(rows, known=()):

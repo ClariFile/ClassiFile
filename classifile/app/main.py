@@ -36,6 +36,7 @@ from classifile.app.widgets import (
 )
 from classifile.copies.engine import CopyError
 from classifile.catalog.db import Catalog
+from classifile.matching import LEVELS
 from classifile.organizer import Organizer, is_cloud_synced, read_and_analyze
 from classifile.worker import WorkerPool
 
@@ -64,6 +65,22 @@ def short_date(iso):
 def stored_analysis(text):
     """A document's stored analysis, parsed once per distinct text. Shared: never change what it returns."""
     return json.loads(text) if text else {}
+
+
+def check_text(found):
+    """What the update check found, in words: the full evaluation of the new version, and of the one before when
+    there was one (classifile.evaluation). Older versions were checked another way; their result is said as it was."""
+    if not found:
+        return ""
+    if not isinstance(found.get("new"), dict):          # before 2026-10-15: only the documents filed since
+        return (f"on {found['documents']} documents filed since, your category first for {found['new']} (the version "
+                f"before: {found['previous']})" if found.get("documents") else "")
+    level = next((k for k, v in LEVELS.items() if v == found["level"]), str(found["level"])).capitalize()
+    new, old = found["new"], found.get("previous")
+    if not new["known"]:
+        return "too few documents in separate families to measure it yet"
+    text = (f"your category first for {new['first']} of {new['known']}, filed wrongly at {level}: {new['wrong']}")
+    return text + (f" (the version before: {old['first']} and {old['wrong']})" if old else "")
 
 
 def settings_card(title, sentence, *parts):
@@ -1631,8 +1648,7 @@ class MainWindow(QWidget):
             found = json.loads(r["check_json"]) if r["check_json"] else None
             who = "by itself" if r["trigger"] == "automatic" else "by you"
             what = {"active": "in use", "previous": "replaced"}.get(r["status"], "not kept: it did worse")
-            check = (f"; on {found['documents']} documents filed since, your category first for {found['new']} "
-                     f"(the version before: {found['previous']})" if found and found["documents"] else "")
+            check = check_text(found) and f"; {check_text(found)}"
             lines.append(f"Version {r['version']} · {short_date(r['created_at'])} · {who} · {r['documents']} "
                          f"documents · {what}{check}")
         self.matching_log.setText("\n".join(lines))
@@ -1653,16 +1669,13 @@ class MainWindow(QWidget):
             elif result["outcome"] == "up to date":
                 text = "Matching is already up to date."
             else:
-                found = result["check"]
-                since = found and f"{found['documents']} document{'s' if found['documents'] != 1 else ''} filed since"
+                said = check_text(result["check"])
                 if result["outcome"] == "kept previous":
-                    text = (f"Kept version {result['version']}: the new one did worse on the {since} (your category "
-                            f"first for {found['new']}, against {found['previous']}).")
+                    text = f"Kept version {result['version']}: the new one did worse ({said})."
                 else:
                     text = (f"Matching updated (version {result['version']}): {result['documents']} documents in "
-                            f"{result['categories']} categories."
-                            + (f" On the {since}, it put your category first for {found['new']}; the previous "
-                               f"version for {found['previous']}." if found and found["documents"] else ""))
+                            f"{result['categories']} categories" + (f"; {said}." if result["check"].get("previous")
+                                                                     else "."))
             self.toast.show_message(text, ms=TOAST_LONG)
             self.recheck_waiting()              # with what it knows now
             self.refresh()

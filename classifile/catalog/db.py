@@ -195,6 +195,17 @@ MIGRATIONS = [
     ALTER TABLE categories ADD COLUMN app_named INTEGER NOT NULL DEFAULT 0;  -- created and named by the app, until renamed
     ALTER TABLE matchers ADD COLUMN trigger TEXT;   -- who started the update: user | automatic (NULL before v10)
     """,
+    # v11: "Check these": the user kept a document in its category although its content matches another one
+    """
+    CREATE TABLE kept_here (
+        document_id TEXT NOT NULL REFERENCES documents(id),
+        category_id TEXT NOT NULL REFERENCES categories(id),
+        at TEXT NOT NULL,
+        PRIMARY KEY (document_id, category_id)
+    );
+    -- the owner's document families (versions, format twins, parts of one lecture), by file bytes: held out together
+    CREATE TABLE family_labels (sha256 TEXT PRIMARY KEY, family_id TEXT NOT NULL);
+    """,
 ]
 
 
@@ -422,6 +433,7 @@ class Catalog:
             self.db.execute("DELETE FROM copies WHERE document_id = ?", (doc_id,))
             self.db.execute("DELETE FROM moves WHERE document_id = ?", (doc_id,))
             self.db.execute("DELETE FROM suggestion_feedback WHERE document_id = ?", (doc_id,))
+            self.db.execute("DELETE FROM kept_here WHERE document_id = ?", (doc_id,))
             self.db.execute("DELETE FROM documents WHERE id = ?", (doc_id,))
 
     def analysis(self, doc_id):
@@ -468,6 +480,28 @@ class Catalog:
                 (now(), "active" if keep else "rejected", sum(bundle["documents"].values()),
                  len(bundle["documents"]),
                  json.dumps(found) if found else None, json.dumps(bundle), trigger)).lastrowid
+
+    def set_matcher_check(self, version, found):
+        """Store what the evaluation found for a version again (it was measured anew, nothing else changed)."""
+        self.run("UPDATE matchers SET check_json = ? WHERE version = ?", json.dumps(found), version)
+
+    def keep_here(self, doc_id, cat_id):
+        """The user keeps a document in this category ("Check these"): not asked again while it stays there."""
+        self.run("INSERT OR IGNORE INTO kept_here (document_id, category_id, at) VALUES (?, ?, ?)", doc_id, cat_id,
+                 now())
+
+    def kept_here(self):
+        """{(document id, category id)} the user kept."""
+        return {tuple(r) for r in self.all("SELECT document_id, category_id FROM kept_here")}
+
+    def family_labels(self):
+        """{sha256: the owner's family id}."""
+        return dict(self.all("SELECT sha256, family_id FROM family_labels"))
+
+    def set_family_labels(self, families):
+        """Record the owner's family ids ({sha256: family id}), replacing those of the same files."""
+        with self.lock, self.db:
+            self.db.executemany("INSERT OR REPLACE INTO family_labels VALUES (?, ?)", families.items())
 
     def latest_matcher(self):
         """The last version trained, whatever became of it (kept or rejected), or None."""
@@ -640,6 +674,7 @@ class Catalog:
                                    " WHERE category_id = ? LIMIT 1", (cat_id,) * 4).fetchone()
             if used:
                 return False
+            self.db.execute("DELETE FROM kept_here WHERE category_id = ?", (cat_id,))
             self.db.execute("DELETE FROM copies WHERE category_id = ?", (cat_id,))
             self.db.execute("DELETE FROM categories WHERE id = ?", (cat_id,))
             return True

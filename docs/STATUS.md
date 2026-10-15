@@ -1,6 +1,6 @@
 # ClassiFile status
 
-2026-10-14 · decision record version 2.6
+2026-10-15 · decision record version 2.7
 
 ## Done
 
@@ -261,6 +261,65 @@
 - A primary button is told by its white label; its fill against the page is no longer held to 3:1.
 - Screenshots of both themes: `data\theme-calm\` (local).
 
+**One evaluation, and an update check on everything (2026-10-15, the owner's instruction before the CP5 freeze)**
+- **One evaluation for every number from now on:** `classifile/evaluation.py`, printed by
+  `python -m tools.evaluate` (add `--rules` for the safer filing rules, `--json FILE` to save the rows). Numbers
+  in this file from before 2026-10-15 came from earlier tools (`tools.match_eval`, `tools.accuracy_round`,
+  `tools.group_eval`) and are kept as history; they are not comparable one to one.
+  - Each family held out in turn; the word weights fitted inside each fold; no random step, so the same catalog
+    gives the same report (a seed is not needed because nothing is drawn at random).
+  - Families: the owner's family ids (recorded once in the catalog with `tools.evaluate --set-families
+    data\splits_incoming_2.csv`: 50 of the 118 files), the same bytes, the same file name apart from the
+    extension and copy marks, or nearly the same text. The owner's ids matter: three lectures in parts are one
+    family only by them, and without them the report counted 4 more documents "right first".
+  - It prints what was counted and left out, the model and every threshold, right first and in the first three
+    overall and per category, automatic filing at each level, new subjects wrongly filed, the "Check these" list,
+    and a 95% range (Wilson) beside each share.
+- **Why 116 and not 118:** 2 documents are the only family of their category (two single-document folders). Held
+  out, their category has no example left, so they cannot come first; they are left out of "first" and "in the
+  first three" and still counted in automatic filing, where filing them anywhere is wrong.
+- **The evaluation on 2026-10-15** (118 documents filed by the owner, 113 families, 12 categories; model version 4
+  in use, trained before the owner's last moves; the evaluation retrains the same method in each fold). These
+  counts describe the owner's development documents; they are not accuracy estimates.
+
+  | | Count | 95% range |
+  |---|---|---|
+  | The owner's category first | 100 of 116 | 79–91% |
+  | In the first three | 112 of 116 | 91–99% |
+
+  | Level (lead) | Filed right | Filed wrong | Waiting | New subjects wrongly filed, of 118 |
+  |---|---|---|---|---|
+  | Very strict (0.15) | 46 | 0 | 72 | 0 |
+  | **Strict (0.10), in use** | 74 | 1 | 43 | 2 |
+  | Balanced (0.06) | 85 | 2 | 31 | 15 |
+  | Lenient (0.03) | 94 | 6 | 18 | 39 |
+
+- **The update check now looks at everything** (record A7): a new matching version and the one in use are both
+  measured on that full evaluation (the old one replayed on its own training, so both answer the same
+  questions). The new one replaces the old only if wrong automatic filings at the level in use do not increase
+  and "right first" does not drop. Both results are kept with the version and shown in Settings. It used to
+  ask only about the documents filed or moved since the last version.
+- **Safer filing rules, tried on development data only (item 3; nothing adopted):** each rule added to the lead.
+
+  | At Strict (0.10, in use) | Filed right | Wrong | Waiting | New subjects wrongly filed |
+  |---|---|---|---|---|
+  | Lead only (in use) | 74 | 1 | 43 | 2 |
+  | a. best similarity ≥ 0.20 / 0.25 / 0.30 | 74 / 72 / 70 | 1 | 43 / 45 / 47 | 2 |
+  | a. best similarity ≥ 0.35 | 50 | 0 | 68 | 1 |
+  | b. nearest 1 of 1, 1 of 3, 2 of 3, 3 of 5 in the best folder | 74 | 1 | 43 | 2 |
+
+  | At Balanced (0.06, for comparison) | Filed right | Wrong | Waiting | New subjects wrongly filed |
+  |---|---|---|---|---|
+  | Lead only | 85 | 2 | 31 | 15 |
+  | a. best similarity ≥ 0.30 / 0.35 | 77 / 52 | 2 / 1 | 39 / 65 | 12 / 3 |
+  | b. the nearest document in the best folder | 85 | 2 | 31 | 11 |
+  | b. 2 of the 3 nearest / 3 of the 5 nearest | 83 / 82 | 2 | 33 / 34 | 13 / 12 |
+
+  At Strict no rule lowers new subjects wrongly filed without filing clearly fewer documents (the only one that
+  lowers it, similarity ≥ 0.35, files 24 fewer), so by the owner's rule none is kept. At Balanced, "the nearest
+  document is in the best folder" lowers it from 15 to 11 and files as many: worth considering only if the owner
+  moves to Balanced.
+
 ## Development results so far
 
 These counts describe development data only. They are not accuracy estimates.
@@ -352,6 +411,27 @@ These counts describe development data only. They are not accuracy estimates.
   their first page reads the same; no two files have the same bytes; 3 files look like versions of development
   files and are marked to join development. Labels are empty (no subfolders). Suggestions for the owner to
   review; nothing was read beyond hashes, page counts and a digest of each first page's text.
+
+## Validation: every use so far
+
+`data\validation` (23 files) is kept apart for operating choices (record B4). Every time it has been used:
+
+1. **2026-10-12, split and labels.** `tools.apply_split` moved the split files into `data\validation`; the owner
+   saw their pages to label them (`tools.label_inventory --splits`). Nothing was measured.
+2. **2026-10-13, the matcher measured once** (`tools.match_validation`, model version 1, 83 documents in 10
+   categories): the owner's category first for 21 of 23, in the first three for 23; at the five levels fixed
+   beforehand, Strict filed 14 with 0 wrong and 9 waiting. The owner chose Strict from this and the development
+   numbers (`docs/CP4_PROPOSAL.md`, record 2.3). Saved: `data\validation_matching.json` (local).
+3. **2026-10-13, one representation variant measured once** (`tools.accuracy_round --validation`, 11
+   categories): in use 19 first, the variant 20; both 14 filed, 0 wrong. The rule set beforehand was met by one
+   document; the variant was withdrawn on 2026-10-14 after new development files (`docs/ACCURACY_ROUND.md`,
+   sections 4 and 9). Saved: `data\validation_accuracy_round.json` (local).
+4. **2026-10-15:** `tools.evaluate --set-families` read the family ids of the split CSV and recorded only those
+   of files in the catalog; no validation file is in the catalog, so none was recorded and no validation file
+   was read.
+
+Validation has informed one operating choice (Strict) and one rejected variant. It has not been used to tune a
+threshold since. `datainal-eval` has never been read.
 
 ## Open
 

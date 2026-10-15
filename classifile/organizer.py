@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 
-from classifile import matching
+from classifile import evaluation, matching
 from classifile.analysis.candidates import analyze, name_key, top_names
 from classifile.analysis.summary import summarize
 import json
@@ -531,29 +531,76 @@ class Organizer:
         labels = self.catalog.explicit_labels()
         return sum(trained.get(d) != c for d, c in labels.items()) >= matching.AUTO_UPDATE_EVERY
 
+    def evaluation_inputs(self):
+        """(counts, labels, groups) for classifile.evaluation, from the catalog as it is now: the terms() of every
+        document with readable text, the user's explicit choices, and the families they are held out by (the
+        owner's family labels where recorded, tools.evaluate --set-families)."""
+        counts = {d: matching.terms(t) for d, t in self.catalog.texts().items()}
+        owner = self.catalog.family_labels()
+        files = {r["document_id"]: (r["sha256"], r["file_name"], owner.get(r["sha256"], ""))
+                 for r in self.catalog.all("SELECT document_id, sha256, file_name FROM snapshots ORDER BY id")}
+        labels = self.catalog.explicit_labels()
+        return counts, labels, {d: d for d in labels} | evaluation.families(counts, files)
+
+    def check_level(self):
+        """The level the update check counts automatic filings at: the one in use, or Strict when it is off."""
+        return matching.LEVELS.get(self.auto_level(), matching.LEVELS[matching.AUTO_DEFAULT])
+
     def update_matching(self, trigger="user"):
-        """Retrain on the documents the user filed (A7), on request or by itself (trigger "automatic"): the new
-        version is checked against the one in use and replaces it unless it does worse; either way it is recorded
-        with what the check found.
+        """Retrain on the documents the user filed (A7), on request or by itself (trigger "automatic"). The new
+        version and the one in use are measured on the same full evaluation (classifile.evaluation: every
+        family held out in turn, each version replayed on its own training); the new one replaces the one in use
+        only if it files no more documents wrongly at the level in use and puts the user's category first no less
+        often (evaluation.no_worse). Either way it is recorded with both results, and the documents to check
+        ("Check these").
         Returns {"outcome": "updated" | "kept previous" | "up to date", "version", "documents", "categories",
         "check"}. Raises ValueError with a plain reason when there is too little to learn from."""
-        texts, labels = self.catalog.texts(), self.catalog.explicit_labels()
-        if len({c for d, c in labels.items() if texts.get(d)}) < 2:
+        counts, labels, groups = self.evaluation_inputs()
+        if len({c for d, c in labels.items() if counts.get(d)}) < 2:
             raise ValueError("Matching needs filed documents in at least two categories.")
         self._matcher = False               # read the catalog's state, not a remembered one
         current = self.matcher()
+        live, level = {c["id"] for c in self.catalog.categories()}, self.check_level()
+        rows = evaluation.evaluate(counts, labels, groups, live=live)
+        found = {"level": level, "new": evaluation.summary(rows, level), "check": evaluation.mismatches(rows)}
         if current and current[1].bundle["training"] == labels:
+            stored = json.loads(current[0]["check_json"] or "{}")
+            if stored.get("check") != found["check"] or stored.get("level") != level:
+                self.catalog.set_matcher_check(current[0]["version"], stored | found)  # measured as it is now
             return {"outcome": "up to date", "version": current[0]["version"],
                     "documents": current[0]["documents"], "categories": current[0]["categories"], "check": None}
+        if current:
+            found["previous"] = evaluation.summary(
+                evaluation.evaluate(counts, labels, groups, current[1].bundle["training"], live), level)
+        keep = current is None or evaluation.no_worse(found["new"], found["previous"])
+        texts = self.catalog.texts()
         bundle = matching.train(texts, labels)
-        found = matching.check(texts, labels, current[1].bundle) if current else None
-        keep = found is None or found["new"] >= found["previous"]
         version = self.catalog.add_matcher(bundle, found, keep, trigger)
         self._matcher = False
         return {"outcome": "updated" if keep else "kept previous",
                 "version": version if keep else current[0]["version"],
                 "documents": sum(bundle["documents"].values()), "categories": len(bundle["documents"]),
                 "check": found}
+
+    # -- "Check these": filed documents whose content matches another folder by a wide margin -----------------
+    def to_check(self):
+        """[(document id, its category, the category its content matches, margin)] from the last evaluation,
+        for documents still filed where they were measured, whose other category still exists, and that the user
+        has not kept where they are. Nothing is ever moved by itself."""
+        row = self.catalog.one("SELECT check_json FROM matchers WHERE check_json LIKE '%\"check\"%'"
+                               " ORDER BY version DESC LIMIT 1")
+        listed = json.loads(row[0])["check"] if row else []
+        labels, live = self.catalog.explicit_labels(), {c["id"] for c in self.catalog.categories()}
+        kept = self.catalog.kept_here()
+        return [(m["doc"], m["category"], m["other"], m["margin"]) for m in listed
+                if labels.get(m["doc"]) == m["category"] and m["other"] in live and (m["doc"], m["category"]) not in kept]
+
+    def keep_here(self, doc_ids):
+        """The user keeps these documents in their category: recorded, and not asked again while they stay there."""
+        for d in doc_ids:
+            cat = self.catalog.active_primary(d)
+            if cat:
+                self.catalog.keep_here(d, cat["category_id"])
 
     def discard_unused_category(self, cat_id):
         """A category with no documents (e.g. created for a filing that failed) is removed again."""
