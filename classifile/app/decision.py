@@ -570,11 +570,24 @@ class CheckItem(QFrame):
         text = box(QVBoxLayout(), spacing=TIGHT)
         text.addWidget(self.name)
         text.addWidget(self.about)
+        buttons = box(QHBoxLayout(), spacing=RELATED)
+        buttons.addWidget(self.move)
+        buttons.addWidget(self.keep)
+        buttons.addStretch(1)
+        self.body = box(QBoxLayout(QBoxLayout.LeftToRight), spacing=RELATED)   # under the text when room is short
+        self.body.addLayout(text, 1)
+        self.body.addLayout(buttons)
         h = box(QHBoxLayout(self), (RELATED, RELATED, RELATED, RELATED), GROUP)
         h.addWidget(self.icon, 0, Qt.AlignTop)
-        h.addLayout(text, 1)
-        h.addWidget(self.move, 0, Qt.AlignVCenter)
-        h.addWidget(self.keep, 0, Qt.AlignVCenter)
+        h.addLayout(self.body, 1)
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        wide = self.move.sizeHint().width() + self.keep.sizeHint().width() + RELATED
+        side = self.width() - FILE_ICON - 4 * RELATED - wide >= TEXT_MIN
+        direction = QBoxLayout.LeftToRight if side else QBoxLayout.TopToBottom
+        if self.body.direction() != direction:
+            self.body.setDirection(direction)
 
     def fill(self, file_name, here, other):
         if (file_name, here, other) != self.state:

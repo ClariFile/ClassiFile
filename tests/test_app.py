@@ -1584,6 +1584,7 @@ def test_check_these_on_the_decision_page_keep_here_and_move(app, make_org, tmp_
     _flag(org, *algebra[:2])
     w, rec = _window(make_org)
     assert w.decide_count.text() == "2"                               # two questions, nothing waiting
+    assert _notices(w) == ["2 filed documents to check."]               # the notice counts what the sidebar counts
     w.show_view(DECIDE)
     checks = w.decision.checks
     assert [c.name.full for c in checks] == ["algebra-0.pdf", "algebra-1.pdf"] and w.decision.check_box.isVisible()

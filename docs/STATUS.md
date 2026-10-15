@@ -333,6 +333,15 @@
 - Catalog schema 11. Matching version 4 is in use; it was trained before the owner's last three moves, so the
   next update (by hand, or by itself after 10 confirmations or moves) learns them.
 
+**Interface defects on the two review pages (2026-10-15, item 6; fixes only, no redesign)**
+- Rendered with made-up documents (long names, automatic filings, an app-named folder, Check these, waiting
+  cards), both themes, 1280×720 and 1024×640, with and without Details. List and screenshots:
+  `data\ui-defects\DEFECTS.md` (local).
+- Fixed: Check these rows put their buttons under the text when room is short, as the cards do; Details shows
+  "Why this category" above the page preview; documents filed in the same second are listed in a stable order;
+  the notice counts what the sidebar counts (waiting documents and filed documents to check).
+- `tools.check_ui` passes at 100%, 125% and 150%.
+
 ## Development results so far
 
 These counts describe development data only. They are not accuracy estimates.

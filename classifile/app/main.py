@@ -939,9 +939,12 @@ class MainWindow(QWidget):
         if self.update_note:
             notices.append(("info", self.update_note, "OK", self._dismiss_update_note))
         ready = len(waiting) - len(unreadable)
-        if ready and self.view[0] != DECIDE:    # on the auto-filed page a quiet line: that page is for reviewing
-            notices.append(("quiet" if self.view[0] == AUTO else "info",
-                            f"{ready} document{'s need' if ready > 1 else ' needs'} your decision.",
+        if (ready or self.checks) and self.view[0] != DECIDE:   # on the auto-filed page a quiet line
+            checks = len(self.checks)
+            text = (f"{ready} document{'s need' if ready > 1 else ' needs'} your decision" if ready else "")
+            text += (("; " if text else "") + f"{checks} filed document{'s' if checks > 1 else ''} to check"
+                     if checks else "")
+            notices.append(("quiet" if self.view[0] == AUTO else "info", text[0].upper() + text[1:] + ".",
                             "Review", self.review))
         self.notices.show_notices(notices[:3])
 

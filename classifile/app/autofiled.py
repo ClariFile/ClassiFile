@@ -268,7 +268,8 @@ class AutoPage(QWidget):
         since it was opened. Rows are updated in place: ticks, focus and the scroll position stay."""
         for d in docs:
             self.order.setdefault(d["id"], d["filed_at"] or "")
-        docs = sorted(docs, key=lambda d: (self.order[d["id"]], d["id"]), reverse=True)   # the latest first
+        docs = sorted(sorted(docs, key=lambda d: (d["file_name"].casefold(), d["id"])),   # the latest first;
+                      key=lambda d: self.order[d["id"]], reverse=True)     # the same second: by name
         old = {i.doc_id: i for i in self.items}
         items = []
         for d in docs:
