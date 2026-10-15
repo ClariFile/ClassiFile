@@ -6,9 +6,7 @@ from PySide6.QtWidgets import (
 )
 
 from classifile import __version__
-from classifile.app.widgets import GROUP, PANEL, RELATED, SECTION, SUPPORTED, box
-
-READABLE = 720          # the widest a column of running text gets: about 75 characters a line
+from classifile.app.widgets import GROUP, PANEL, READABLE, RELATED, SECTION, SUPPORTED, box
 SOURCE = "https://github.com/ClariFile/ClassiFile"
 
 HELP = [
@@ -71,8 +69,8 @@ ABOUT = [
 
 
 def text_page(title, sections, extra=None):
-    """A page of headed paragraphs in one readable column, on a page as wide as the window. extra: a widget
-    placed after the title (a button)."""
+    """A page of headed paragraphs in one readable column, on a page as wide as the window. title: a lead line
+    under the page's own title (None for none); extra: a widget placed after it (buttons)."""
     outer = QScrollArea()
     outer.setWidgetResizable(True)
     outer.setFrameShape(QFrame.NoFrame)
@@ -82,10 +80,11 @@ def text_page(title, sections, extra=None):
     column = QWidget()
     column.setMaximumWidth(READABLE)
     v = box(QVBoxLayout(column), spacing=RELATED)
-    lead = QLabel(title)
-    lead.setObjectName("heading")
-    lead.setWordWrap(True)
-    v.addWidget(lead)
+    if title:
+        lead = QLabel(title)
+        lead.setObjectName("heading")
+        lead.setWordWrap(True)
+        v.addWidget(lead)
     if extra is not None:
         v.addWidget(extra, 0, Qt.AlignLeft)
     for heading, text in sections:
@@ -103,7 +102,7 @@ def text_page(title, sections, extra=None):
     row = box(QHBoxLayout(page))
     row.addWidget(column, 1)
     row.addStretch(0)
-    outer.texts = [title] + [t for s in sections for t in s]
+    outer.texts = [title or ""] + [t for s in sections for t in s]
     return outer
 
 

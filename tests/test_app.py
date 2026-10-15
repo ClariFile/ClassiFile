@@ -10,7 +10,7 @@ from PySide6.QtTest import QTest  # noqa: E402
 from PySide6.QtWidgets import QApplication, QLabel, QPushButton  # noqa: E402
 
 from classifile.app.main import ABOUT, ALL, DECIDE, DOC, HELP, RECENT, SETTINGS, MainWindow  # noqa: E402
-from classifile.app.widgets import LIST_MAX, RELATED, reduced_motion  # noqa: E402
+from classifile.app.widgets import GROUP, RELATED, reduced_motion  # noqa: E402
 from classifile.app.reasons import reason_text  # noqa: E402
 from conftest import SAMPLE, EXPECT, source_state  # noqa: E402
 
@@ -546,7 +546,7 @@ def test_details_open_beside_the_decision_page(app, samples, make_org):
     item = _item(w, SAMPLE["S4"])
     right = lambda: item.more_menu.mapTo(item, item.more_menu.rect().topRight()).x()
     _pump(app, lambda: item.width() > 1040 and right() >= item.width() - 2 * RELATED)
-    assert item.width() <= LIST_MAX                                # wide screens: the buttons stay near the name
+    assert item.width() >= w.decision.width() - 2 * GROUP - 2 * RELATED   # the whole width, on wide screens too
     side = lambda: item.action_bar.y() < item.suggestion.geometry().bottom()
     assert side()                                                  # beside the name and the suggestion
     assert item.number.text() == "1." and not item.details.isChecked()
@@ -966,8 +966,12 @@ def test_search_name_and_category_count_and_keys(app, samples, make_org):
     assert w.search.placeholderText() == "Search recently added…" and len(_rows(w)) == 3
 
     w.review()                                                     # the same field on the decision page
-    assert w.toolbar.isVisible() and not w.sort.isVisible() and not w.details_toggle.isVisible()
+    assert w.toolbar.isVisible() and not w.sort.isVisible() and w.details_toggle.isVisible()   # Details as everywhere
     assert w.search.placeholderText() == "Search these documents…"
+    w.details_toggle.click()                                       # on: beside the first document of the page
+    assert w.details.isVisible() and w.inspected == w.waiting_docs[0]["id"] == w.details.doc_id
+    w.details_toggle.click()
+    assert w.inspected is None and not w.details_open
     cards = list(w.decision.items)
     w.search.setText(SAMPLE["S4"][:6].upper())
     shown = [c for c in cards if c.isVisible()]

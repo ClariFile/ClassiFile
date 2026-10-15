@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
 from classifile.analysis.candidates import name_key, top_names
 from classifile.app.reasons import reason_text, similar_reason
 from classifile.app.widgets import (
-    BAR, BUTTON_TEXT_MAX, CHOICES_MAX, FILE_ICON, GROUP, LIST_MAX, NAME_FIELD_MAX, RELATED, TEXT_MIN, TIGHT,
+    BAR, BUTTON_TEXT_MAX, CHOICES_MAX, FILE_ICON, GROUP, NAME_FIELD_MAX, RELATED, TEXT_MIN, TIGHT,
     CategoryPicker, ElidedLabel, ListRow, box, collapse, format_icon, restyle, scroll_area_of, unfold, wrappable,
     wrapped,
 )
@@ -540,10 +540,10 @@ class SubjectItem(ListRow):
             super().keyPressEvent(e)
 
 
-def cap_width(page, layout):
-    """A list stops growing at LIST_MAX: the room beyond it is left empty at its right."""
+def full_width(layout):
+    """A list uses the whole width of its page (record 2.9), keeping GROUP at its right for the scroll bar."""
     m = layout.contentsMargins()
-    layout.setContentsMargins(m.left(), m.top(), max(GROUP, page.width() - LIST_MAX), m.bottom())
+    layout.setContentsMargins(m.left(), m.top(), GROUP, m.bottom())
 
 
 class CheckItem(QFrame):
@@ -636,7 +636,7 @@ class DecisionPage(QWidget):
 
     def resizeEvent(self, e):
         super().resizeEvent(e)
-        cap_width(self, self.holder.layout())
+        full_width(self.holder.layout())
 
     def show_checks(self, checks):
         """checks: [(document id, file name, its category's name, the category its content matches)]."""

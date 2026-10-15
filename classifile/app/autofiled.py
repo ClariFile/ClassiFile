@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
     QCheckBox, QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea, QSizePolicy, QVBoxLayout, QWidget,
 )
 
-from classifile.app.decision import cap_width
+from classifile.app.decision import full_width
 from classifile.app.reasons import new_folder_reason
 from classifile.app.widgets import (
     BAR, COLUMNS_MIN, FILE_ICON, GROUP, RELATED, STATUS_COLUMN, TIGHT, ElidedLabel, ListRow, box, format_icon,
@@ -337,8 +337,8 @@ class AutoPage(QWidget):
 
     def resizeEvent(self, e):
         super().resizeEvent(e)
-        cap_width(self, self.list)
-        cap_width(self, self.top)
+        full_width(self.list)
+        full_width(self.top)
         narrow = self.width() - self.list.contentsMargins().right() < COLUMNS_MIN
         if narrow != self.narrow:
             self.narrow = narrow

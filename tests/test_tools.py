@@ -299,3 +299,9 @@ def test_offline_guard_refuses_and_records_network_attempts_in_child_processes(t
              "    print(e)\n")
     out = subprocess.run([sys.executable, "-c", probe], env=env, capture_output=True, text=True).stdout
     assert "refused by the offline check" in out and log.read_text(encoding="utf-8").split() == ["create_connection"]
+
+
+def test_screenshots_render_a_made_up_library(tmp_path):
+    from tools import screenshots
+    assert screenshots.main([str(tmp_path / "shots"), "--size", "1024x640", "--views", "decide,settings"]) == 0
+    assert sorted(p.name for p in (tmp_path / "shots").iterdir()) == ["decide.png", "settings.png"]

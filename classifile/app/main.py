@@ -32,7 +32,7 @@ from classifile.app.learn import LearnDialog
 from classifile.app.models import DOC, SORTS, CategoryModel, DocumentFilter, DocumentModel, sorted_by_name
 from classifile.app.widgets import (
     CHECKLIST_MAX, DATE_COLUMN_MIN, PANEL, TIGHT, DETAILS_MAX, DETAILS_MIN, DETAILS_WIDTH, FILE_ICON, GROUP, LIST_MIN, MIN_WINDOW,
-    MOTION_STANDARD, NARROW, PAD, RELATED, SEARCH_MAX, SECTION, SIDEBAR_WIDTH, SUPPORTED, TOAST, TOAST_LONG,
+    MOTION_STANDARD, NARROW, PAD, READABLE, RELATED, SEARCH_MAX, SECTION, SIDEBAR_WIDTH, SUPPORTED, TOAST, TOAST_LONG,
     WIDE, WINDOW, box, motion, qt_palette, set_motion, slide_away, style_sheet, use_theme,
     Collapsible, DropOverlay, ElidedLabel, Notices, PickerDialog, PreviewOverlay, Toast, wrappable,
 )
@@ -101,6 +101,7 @@ def settings_card(title, sentence, *parts):
         about.setObjectName("secondary")
         about.setWordWrap(True)
         about.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        about.setMaximumWidth(READABLE)         # the card is as wide as the page; its sentence stays readable
         v.addWidget(about)
     v.addSpacing(TIGHT)
     for part in parts:
@@ -351,7 +352,7 @@ class MainWindow(QWidget):
         hb.addWidget(tour)
         hb.addWidget(learn)
         self.help_page = text_page("How ClassiFile works", HELP_TEXT, help_buttons)
-        self.about_page = text_page("About ClassiFile", ABOUT_TEXT)
+        self.about_page = text_page(None, ABOUT_TEXT)  # the page title says "About ClassiFile" already
         for page in (self.table, self.empty_state, self.decision, self.auto_page, self.settings_page, self.no_match,
                      self.help_page, self.about_page):
             self.stack.addWidget(page)
@@ -657,6 +658,7 @@ class MainWindow(QWidget):
         folders_text.setObjectName("secondary")
         folders_text.setWordWrap(True)
         folders_text.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        folders_text.setMaximumWidth(READABLE)
         self.auto_level = QComboBox()             # the level of automatic filing; every change is recorded
         self.auto_level.setView(QListView())
         for name, words in AUTO_LEVELS:
@@ -843,6 +845,9 @@ class MainWindow(QWidget):
         rows = [d["id"] for d in waiting] if key == DECIDE else [r["id"] for r in filed_by_app] if key == AUTO else []
         if self.inspected not in rows:
             self.inspected = None   # filed, removed or moved away: its details close
+        if self.inspected is None and self.details_open and rows:
+            self.inspected = rows[0]                # Details is on: it shows the first document of the page
+            self.details.show_doc(rows[0])
         if select_docs is not None:
             self.select_docs(select_docs)
         if key == SETTINGS:
@@ -896,8 +901,7 @@ class MainWindow(QWidget):
         self.page_title.setText(title + (f" · {total}" if total else ""))
         searchable = key not in TEXT_PAGES and not empty and (key not in (DECIDE, AUTO) or bool(shown or q))
         self.toolbar.setVisible(searchable)
-        for w in (self.sort, self.details_toggle):
-            w.setVisible(key not in (DECIDE, AUTO))     # rows open their own details there
+        self.sort.setVisible(key not in (DECIDE, AUTO))     # those pages keep their own order
         self.search.setPlaceholderText(SEARCH_HINTS.get(key) or f"Search {title}…")
         searching = bool(q) and searchable
         if key == AUTO:
@@ -1067,13 +1071,20 @@ class MainWindow(QWidget):
             self.details.shown = state
 
     def set_details_open(self, open_):
-        """Details (the document's pages and facts) stay on, on every list page, until switched off."""
+        """Details (the document's pages and facts) stay on, on every page that lists documents, until switched
+        off: beside the list's selection, or beside a row of Needs your decision and Filed automatically."""
         ids = self.selected_ids()
         self.details_open = bool(open_)
         self.details_toggle.blockSignals(True)
         self.details_toggle.setChecked(self.details_open)
         self.details_toggle.blockSignals(False)
-        if self.details_open:
+        page = self.stack.currentWidget()
+        if page in (self.decision, self.auto_page):
+            rows = [d["id"] for d in self.waiting_docs] if page is self.decision else [i.doc_id for i in page.items]
+            self.inspected = (self.inspected or (rows[0] if rows else None)) if self.details_open else None
+            if self.inspected:
+                self.details.show_doc(self.inspected)
+        elif self.details_open:
             self._show_in_details(ids[0] if ids else None)
         self._place_details()
 
@@ -1082,6 +1093,10 @@ class MainWindow(QWidget):
             if (self.inspected, self.details.doc_id) != (doc_id, doc_id) or self.details.isHidden():
                 self.inspected = doc_id
                 self.details.show_doc(doc_id)   # the list is not touched: it keeps its scroll position
+            self.details_open = True            # the same Details as on the other pages: the toggle says so
+            self.details_toggle.blockSignals(True)
+            self.details_toggle.setChecked(True)
+            self.details_toggle.blockSignals(False)
             return self._place_details()
         if self.view[0] in TEXT_PAGES:
             self.show_view(ALL)

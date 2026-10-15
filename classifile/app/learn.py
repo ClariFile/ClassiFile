@@ -7,9 +7,7 @@ from PySide6.QtWidgets import (
 )
 
 from classifile.analysis.candidates import name_key
-from classifile.app.widgets import DIALOG_MIN, GROUP, PANEL, RELATED, box
-
-LEARN_LIST_MAX = 360    # the list of folders scrolls beyond this height
+from classifile.app.widgets import DIALOG_MIN, GROUP, LEARN_LIST_MAX, PANEL, RELATED, box
 
 
 class LearnDialog(QDialog):
