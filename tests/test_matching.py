@@ -577,3 +577,19 @@ def test_quality_gate_reports_every_part_e_item_and_never_overwrites(make_org, t
         assert item in text
     with pytest.raises(SystemExit):
         quality_gate.main(["--catalog", str(catalog), "--out", str(report)])
+
+
+def test_cold_start_files_by_itself_only_after_three_confirmed_and_counts_each_step():
+    from tools import cold_start
+    texts = {f"{s}{n}": " ".join(SUBJECTS[s].split()[n % 4:] * 3) for s in ("Algebra", "Networks") for n in range(6)}
+    truth = {d: d[:-1] for d in texts}
+    order = [f"{s}{n}" for n in range(6) for s in ("Algebra", "Networks")]       # the two subjects take turns
+    run = cold_start.simulate(order, texts, truth)
+    what = dict(run["steps"])
+    assert [what[d] for d in order[:2]] == ["new", "new"]                       # an empty library: both created
+    assert not any(what[d].startswith("auto") for d in order[:6])               # fewer than 3 confirmed each
+    assert all(what[d] == "auto right" for d in order[6:])                      # from then on, by itself
+    assert run["before"] == {"Algebra": 3, "Networks": 3}
+    seeded = cold_start.simulate(order, texts, truth, seeds=order[:6])          # "Learn from my existing folders"
+    assert len(seeded["steps"]) == 6 and seeded["before"] == {"Algebra": 0, "Networks": 0}
+    assert cold_start.simulate(order, texts, truth) == run                      # no chance involved
