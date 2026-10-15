@@ -320,6 +320,19 @@
   document is in the best folder" lowers it from 15 to 11 and files as many: worth considering only if the owner
   moves to Balanced.
 
+**Check these, and the owner's settings (2026-10-15)**
+- **Check these** (item 4): filed documents whose content, held out, matches another category ahead of their own
+  by at least the Strict lead (0.10). Listed at the top of "Needs your decision" with Move to… and Keep here;
+  Keep here is recorded and not asked again while the document stays there. Nothing moves by itself. The list
+  comes from the last update check, so it appears after the next "Update matching". On 2026-10-15 the
+  evaluation lists 2 documents.
+- **Settings in the owner's catalog, as the record says (2.7):** automatic new folders **on** (they had been
+  switched off again on 2026-10-14 at 15:09, after several on/off changes within seconds; the change log keeps
+  them all), at least 3 documents per folder at an average similarity of 0.20, automatic filing at Strict, all
+  categories. A copy of the catalog from before is kept (`catalog.before-evaluation.sqlite3`).
+- Catalog schema 11. Matching version 4 is in use; it was trained before the owner's last three moves, so the
+  next update (by hand, or by itself after 10 confirmations or moves) learns them.
+
 ## Development results so far
 
 These counts describe development data only. They are not accuracy estimates.
@@ -431,7 +444,7 @@ These counts describe development data only. They are not accuracy estimates.
    was read.
 
 Validation has informed one operating choice (Strict) and one rejected variant. It has not been used to tune a
-threshold since. `datainal-eval` has never been read.
+threshold since. `data\final-eval` has never been read.
 
 ## Open
 
@@ -470,16 +483,41 @@ threshold since. `datainal-eval` has never been read.
     four files with a typed category, two now show it or its near form in the top three (none before).
   - Against the first review, as a regression check only: 32 top-three names marked not good (76 under rules-5),
     20 of 34 files with a name once marked good (21), 17 names never judged. Development data; not accuracy.
-  - What would settle the level: the user's own grouping of the development files (decision record G3), which
-    does not exist yet. Filing them in the app with the categories the user wants would provide it.
-- **From the record's CP4 list, not built:** automatic creation of a category from a single document (the owner
-  ruled that the app never creates a folder by itself) and the discovery replay (E10). The record still lists
-  both; a change of the record is the owner's.
+  - The owner's grouping (G3) now exists and was measured (E1, record 2.1): names found in documents cannot
+    reproduce it, which is why matching by content (CP3) comes first.
+- **In the record, not built or not run (2026-10-15):**
+  - D/CP4 "The documented policy (E1) drives the proposer": no written policy; suggested names still come from
+    the rules (rules-8), and E1 showed names cannot reproduce the owner's folders.
+  - E5 (semantic name equivalence), E6 (titles and instance identifiers), E7 (dominant self-description) were not
+    run; their defaults are in use (names are compared after normalization only; identifier guards; pending on
+    conflict). E3 and E9 were not needed so far.
+  - Part E's quality-gate report for CP5 also asks for incorrect creations, duplicate categories,
+    over-merging and fragmentation, and the four effort numbers (B2). `tools.evaluate` reports filing, first
+    and new subjects; the rest comes from the replay (`tools.group_eval --folders`) and has to be added to the
+    CP5 report.
+  - Functional gate: an offline run with networking disabled has not been checked on the laptop.
 - **"Also belongs to" cannot be undone in the app yet** (there is no "remove from this category").
 
 ## Next
 
-1. The owner uses automatic new folders (at least 3 documents) and the new themes.
-   The owner tries CP4 and the new interface in the app.
-2. CP5 quality gate and freeze (`data\final-eval` stays untouched until then). SummarEase is a separate
+1. The owner presses "Update matching" once (version 5 learns the three moves; the check list appears) and answers
+   "Check these".
+2. The owner decides the proposed record changes (below) and the launch blockers in `docs/LAUNCH.md`.
+3. CP5 quality gate and freeze (`data\final-eval` stays untouched until then). SummarEase is a separate
    project.
+
+## Proposed changes to the decision record (waiting for the owner; the record is not edited by Claude)
+
+1. **A7, the check:** "A new version replaces the one in use only if, on the full evaluation (each family held out
+   in turn, both versions answering the same questions), it files no more documents wrongly at the level in use
+   and puts the user's category first no less often. Both results are logged in Settings." (Today A7 says only
+   "the previous version stays in use if the new one does worse".)
+2. **B4, one evaluation:** "Every number about matching comes from one evaluation (`tools.evaluate`): family-held
+   out, preprocessing fitted inside each fold, deterministic, with simple ranges. The owner's family ids are kept
+   in the catalog so the app's check and the report hold out the same families."
+3. **B2 or B5, Check these:** "Filed documents whose content, held out, matches another category ahead of their own
+   by at least the Strict lead are listed with Keep here and Move to…. Keep here is recorded and not asked again
+   while the document stays there. Nothing is moved by itself."
+4. **D/CP4:** mark "The documented policy (E1) drives the proposer" as not built (or drop it), and E5–E7 as
+   running on their defaults for v1.
+

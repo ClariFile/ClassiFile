@@ -6,13 +6,17 @@ and bug fixes, until v1 is released. New features wait for v1.1.
 ## 1. CP5: freeze, then the final evaluation once
 
 1. **Freeze** (the record's CP5 and Part E). Write the frozen choices into the decision record:
-   - the matcher: the matching version in use, with its preprocessing, vocabulary, category mapping and settings;
+   - the matcher: the matching version in use, with its preprocessing, vocabulary, category mapping and settings
+     (updated once more first, so it has learned the owner's last moves);
    - the level for automatic filing (Strict) and the 3 confirmed documents it needs per category;
    - the folder rules: new folders at a similarity of 0.20, at least 3 documents each; questions for groups found
      at 0.15; a single document waits.
+   - the update check (no more wrong automatic filings, no fewer right first, on the full evaluation) and
+     "Check these" (another category ahead by at least 0.10);
    - From then on, matching does not update by itself during the evaluation.
 2. **Run `data\final-eval` once**, with the frozen version, on a copy of the catalog.
-   - The tool reads the folder, measures, and saves its result to a new file. It refuses a second run.
+   - The tool reads the folder, measures, and saves its result to a new file. It refuses a second run. It
+     counts the same way as `tools.evaluate` (the same summary, levels and ranges).
    - Nothing is tuned afterwards. If a bug is found, it is fixed and reported, and the number stays as measured.
 3. **Report**:
    - right first, and in the first three;

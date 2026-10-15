@@ -185,3 +185,10 @@ version trained without it: the owner's category first for 32, against 28 for ve
 new folder, which version 2 could not know. Version 2 is kept as the previous version.
 
 These counts describe development data and the owner's own run. They are not accuracy estimates.
+
+## 10. Since 2026-10-15
+
+Every number about matching now comes from one evaluation (`tools.evaluate`, `docs/STATUS.md`); the tables above
+came from `tools.accuracy_round` and are kept as history, not to be compared one to one. Matching version 4 (118
+documents) replaced version 3 on 2026-10-14. The safer filing rules tried on 2026-10-15 (a minimum similarity; the
+best folder among the nearest documents) are in `docs/STATUS.md`; none was adopted.
