@@ -515,7 +515,10 @@ threshold since. `data\final-eval` has never been read.
 3. CP5 quality gate and freeze (`data\final-eval` stays untouched until then). SummarEase is a separate
    project.
 
-## Proposed changes to the decision record (waiting for the owner; the record is not edited by Claude)
+## Changes to the decision record, approved by the owner (record 2.8, 2026-10-15)
+
+The owner approved this wording as proposed; it is in the record as version 2.8.
+
 
 1. **A7, the check:** "A new version replaces the one in use only if, on the full evaluation (each family held out
    in turn, both versions answering the same questions), it files no more documents wrongly at the level in use

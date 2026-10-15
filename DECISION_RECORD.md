@@ -1,6 +1,6 @@
 # Decision Record — ClassiFile (Offline Document Organizer)
 
-Version 2.7 · 2026-10-14
+Version 2.8 · 2026-10-15
 
 **Names**
 - **ClariFile:** the suite.
@@ -88,7 +88,8 @@ Version 2.7 · 2026-10-14
 
 **A7 [Requirement] Learning**
 - Explicit confirmations and corrections are eligible supervised training examples by default.
-- Model updates are versioned and validated. Since 2.6 they also run by themselves in the background after every 10 new confirmations or moves, with the same check (the previous version stays in use if the new one does worse). Each update is logged in Settings and noted at the top of the window.
+- Model updates are versioned and validated. Since 2.6 they also run by themselves in the background after every 10 new confirmations or moves, with the same check. Each update is logged in Settings and noted at the top of the window.
+- The check (2.8): a new version replaces the one in use only if, on the full evaluation (each family held out in turn, both versions answering the same questions), it files no more documents wrongly at the level in use and puts the user's category first no less often. Both results are logged in Settings.
 
 **A8 [Requirement] Originals**
 - Source files are never moved, renamed, deleted, overwritten or edited, and their metadata is never deliberately changed. They are read only.
@@ -181,6 +182,7 @@ Version 2.7 · 2026-10-14
   - "Looks right" in that view, for one document or many selected at once, records the user's confirmation: those documents become training examples (2.4). Moving a document stays the correction.
   - Waiting documents are looked at again when a category reaches 3 confirmed documents, and after a model update or a change of level (2.4).
   - Selected-category mode (A5) is a setting beside the level: "All categories" or "Only the ones I tick", with a checklist. In selected mode a document is filed automatically only when its best category among all categories is a ticked one (B1). The active mode is always shown at the top of the main window, with a link to change it (2.4).
+- **[Decision] Check these** (2.8). Filed documents whose content, held out, matches another category ahead of their own by at least the Strict lead are listed with Keep here and Move to…. Keep here is recorded and not asked again while the document stays there. Nothing is moved by itself.
 - **[Decision] Grouping new subjects** (2.3; a narrow exception to the clustering deferral in F).
   - Only waiting documents that match no existing category are grouped. Nothing is ever merged into an existing category. Groups found only at 0.15 stay questions for the user; the app creates a folder by itself only under "Automatic new folders" below (2.6).
   - A group has at least 2 documents. It is shown as one question: its documents, the shared key words as the reason, and the suggested names. The user names the folder once and can untick documents before confirming.
@@ -228,6 +230,7 @@ Version 2.7 · 2026-10-14
 - **[Default]** A global abstention baseline comes first. Category-specific spread is used only with evidence (E4).
 - **[Decision]** Vocabulary coverage and OOV rate are diagnostics, not proof of unfamiliarity; OCR errors, identifiers and formulas affect them. Any gate built on them is evaluated before use.
 - **[Decision]** Every validated model version bundles its preprocessing, vectorizer, category mapping and decision settings.
+- **[Decision] One evaluation** (2.8). Every number about matching comes from one evaluation (`tools.evaluate`): family-held out, preprocessing fitted inside each fold, deterministic, with simple ranges. The owner's family ids are kept in the catalog so the app's check and the report hold out the same families.
 - **[Decision]** Classification uses the full extracted content; the internal summary feeds naming and checks. Content-based and digest-based decisions are compared under identical conditions (E9).
 - **[Decision]** Candidate-name extraction starts with rules. A trained own-name classifier is deferred and is adopted only if it beats the rules.
   - Name review (development data, 1.8): the user judged the top three suggested names of 34 development files. 21 files had at least one good name in the top three, and the user typed 3 better names; 76 names were marked not good.
@@ -365,17 +368,20 @@ Each experiment lists its alternatives, data, measurements, what decides it, and
 - Measure: incorrect reuse versus review burden.
 - Decides: automatic semantic reuse only if development and validation results support a trade-off the user accepts. The rule is frozen before final evaluation.
 - Default: queue.
+- For v1 (2.8): not run; the default is in use.
 
 **E6 Titles and instance identifiers**
 - Data: a genuinely new one-document category, a generic title, and invoice and lecture identifiers.
 - Measure: whether created categories are appropriate and reusable (human judgement), and how often valid categories are wrongly rejected.
 - Decides: keep guards that prevent demonstrated mistakes; refine guards that block valid categories.
 - Default: weighting plus targeted identifier guards.
+- For v1 (2.8): not run; the default is in use.
 
 **E7 Dominant self-description vs conflict**
 - Data: correct repeated headers, stale repeated templates, accurate covers, misleading filenames, and genuinely conflicting identities.
 - Measure: incorrect automatic outcomes and review burden.
 - Default: pending when the evidence cannot resolve the conflict.
+- For v1 (2.8): not run; the default is in use.
 
 **E8 Selective OCR**
 - Data: page labels on the sample PDFs, plus fixtures of known miss types.
@@ -444,8 +450,8 @@ Partial checkpoints are not the completed v1. Evaluation runs alongside developm
 - Grouping new subjects, after the user has seen the development report (B2).
 - Selected-category mode, with permissions through the queue (from CP3).
 - "Also belongs to" (from CP3).
-- The documented policy (E1) drives the proposer.
-- Automatic new folders for groups of at least 3 unmatched waiting documents at 0.20 (A4, B2, since 2.6; minimum 3 since 2.7), switched on by the user after the development replay. A single document never creates a category. Suggested names keep the duplicate and equivalence checks of the defaults above (E5–E7).
+- The documented policy (E1) drives the proposer. Not built for v1 (2.8): suggested names still come from the rules, and E1 showed that names found in documents cannot reproduce the user's folders.
+- Automatic new folders for groups of at least 3 unmatched waiting documents at 0.20 (A4, B2, since 2.6; minimum 3 since 2.7), switched on by the user after the development replay. A single document never creates a category. Suggested names keep the duplicate and equivalence checks of the defaults above (E5–E7). For v1, E5–E7 run on their defaults; their experiments are not run (2.8).
 - Re-evaluation of pending documents.
 - The replay of automatic new folders on development data, each category held out in turn (replaces E10, 2.6).
 - Matching updated by itself after every 10 new confirmations or moves (A7, 2.6).
@@ -533,3 +539,4 @@ Partial checkpoints are not the completed v1. Evaluation runs alongside developm
 - **2.5 (2026-10-13):** A4: the user ruled that ClassiFile never creates a folder by itself; new folders come only from the user's answer to a card or a group question, and a single document can justify a suggestion, never a creation. D/CP4: single-document automatic creation is dropped, and the discovery replay (E10) is marked not needed. C/E10: marked not needed. Authorized by the user.
 - **2.6 (2026-10-14):** correction by the user: the 2.5 wording "ClassiFile never creates a folder by itself" was Claude's phrasing, not the user's rule. A4: in automatic mode the app may create a category when the evidence supports it; a single unmatched document still waits. B2: automatic new folders for groups of at least 2 unmatched waiting documents at an average similarity of 0.20 (0.15-only groups stay questions), named from a name repeated across the group or the best suggested name, never reused or merged by name (B1), marked "New (named by ClassiFile)" with Rename and listed in "Filed automatically"; off until the user has seen a held-out replay on development data. A7: matching also updates by itself after every 10 new confirmations or moves, with the existing check, logged in Settings and noted in the window. D/CP4 and C/E10 updated to match. Authorized by the user.
 - **2.7 (2026-10-14):** B2 and A4: automatic new folders need a group of at least 3 documents; groups of 2 stay a question for the user. The user switched automatic new folders on after the development replay (recorded in B2), and kept automatic filing at Strict. Authorized by the user.
+- **2.8 (2026-10-15):** wording the user approved before the CP5 freeze, so the record says what the code does. A7: the update check (a new version replaces the one in use only if, on the full evaluation, it files no more documents wrongly at the level in use and puts the user's category first no less often; both results logged in Settings). B4: one evaluation (`tools.evaluate`) for every number about matching, with the owner's family ids kept in the catalog. B2: "Check these" (Keep here is recorded; nothing is moved by itself). D/CP4: the documented policy (E1) is not built for v1; E5–E7 run on their defaults (also noted under E5–E7). Authorized by the user.
