@@ -266,3 +266,36 @@ def test_file_labels_files_only_waiting_development_rows(make_org, tmp_path):
     copy = placed[rows[0]["id"]]["copy_path"]                       # a verified copy, like any filing
     assert (org.output_root / "Algebra" / "doc0.pdf").samefile(copy)
     assert file_labels(org, rows) == {"already filed (left as it is)": 3, "not in the catalog": 1}   # nothing twice
+
+
+def test_offline_check_runs_the_app_end_to_end_with_the_network_refused(tmp_path, capsys):
+    import pymupdf
+    from tools import offline_check
+    words = {"a": "matrix vector eigenvalue determinant linear algebra basis subspace",
+             "b": "router packet switch subnet protocol ethernet gateway latency"}
+    src = tmp_path / "src"
+    src.mkdir()
+    for n in range(4):
+        d = pymupdf.open()
+        d.new_page().insert_text((72, 72), " ".join([words["ab"[n % 2]]] * 3), fontsize=11)
+        d.save(src / f"doc{n}.pdf")
+        d.close()
+    before = {p.name: p.read_bytes() for p in src.iterdir()}
+    assert offline_check.main([str(src)]) == 0
+    out = capsys.readouterr().out
+    assert "Network attempts: 0" in out and "PASS" in out
+    assert {p.name: p.read_bytes() for p in src.iterdir()} == before         # the originals are only read
+
+
+def test_offline_guard_refuses_and_records_network_attempts_in_child_processes(tmp_path):
+    import os
+    import subprocess
+    import sys
+    from tools import offline_check
+    (tmp_path / "sitecustomize.py").write_text(offline_check.GUARD, encoding="utf-8")
+    log = tmp_path / "attempts.log"
+    env = os.environ | {"PYTHONPATH": str(tmp_path), "CLASSIFILE_OFFLINE_LOG": str(log)}
+    probe = ("import socket\ntry:\n    socket.create_connection(('192.0.2.1', 9), timeout=1)\nexcept OSError as e:\n"
+             "    print(e)\n")
+    out = subprocess.run([sys.executable, "-c", probe], env=env, capture_output=True, text=True).stdout
+    assert "refused by the offline check" in out and log.read_text(encoding="utf-8").split() == ["create_connection"]
