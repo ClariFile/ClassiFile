@@ -342,6 +342,63 @@
   the notice counts what the sidebar counts (waiting documents and filed documents to check).
 - `tools.check_ui` passes at 100%, 125% and 150%.
 
+**Toward friends and family (2026-10-15, the owner's instruction; measurements are report only)**
+- **Record 2.8** written as the owner approved it (update check, one evaluation, Check these, E1 and E5–E7 not
+  built for v1).
+- **Part E report, one command:** `python -m tools.quality_gate [--out FILE]`: the one evaluation with outcomes and
+  real use, the replay of automatic new folders (the owner's family ids from the catalog), and every Part E item
+  at the level in use. On 2026-10-15 (matching version 6, Strict): 0 of 75 automatic filings wrong; 1 of 118 new
+  subjects forced into an existing folder; 4 folders created in the replay, none mixing subjects, no second
+  folder for a known subject; 1 of 12 held-out subjects split over two folders; 43 of 118 waiting (36%, range
+  28–45%); 40 distinct questions, 1.07 documents per decision; later corrections 1 of 21 automatic placements.
+- **Offline check:** `python -m tools.offline_check [FOLDER]` (default: the six samples) runs the window offscreen
+  with a fresh catalog, imports through the reader worker processes with OCR, files, learns, files by itself,
+  checks every copy's hash and reopens the catalog, while every Python process refuses and records network access
+  (a temporary sitecustomize). The six samples: PASS, 0 attempts. Its own test caught a first version whose guard
+  let everything through; fixed before any result was used. Still to do: the owner runs it with the laptop's
+  networking switched off.
+- **True and false positives** (`python -m tools.evaluate --outcomes`, development data, each family held out):
+
+  | Level | Right (TP) | Wrong (FP) | New subjects forced, of 118 | Missed automation | Correct waits | Precision | Coverage |
+  |---|---|---|---|---|---|---|---|
+  | Very strict | 47 | 0 | 0 | 54 | 17 | 47 of 47 | 40% |
+  | **Strict (in use)** | 75 | 0 | 1 | 26 | 17 | 75 of 75 (range 95–100%) | 64% (55–72%) |
+  | Balanced | 85 | 2 | 15 | 16 | 15 | 85 of 87 | 72% |
+  | Lenient | 95 | 4 | 38 | 6 | 13 | 95 of 99 | 81% |
+
+  - Per category at Strict: the largest folder (50 documents) 90% coverage; the 17-document folder 88%; the 11-
+    and 6-document folders 0% (their documents wait: the two share cover-page wording); folders of 3 or fewer
+    documents 0%.
+  - Causes of the 42 distinct false positives over all levels (a document may have several): shared vocabulary
+    with the folder it went to 42 (so it does not tell them apart), a broad folder (the largest, about 45% of the
+    training documents) 27, template text 4, OCR text 2, very little text 1. OCR and template text are named only
+    when taking them away sends the document elsewhere.
+- **Real use** (`--real-use`): 21 automatic placements, all by matching version 2: 20 "Looks right", 1 moved (to a
+  folder created after it was placed), none left untouched.
+- **A new user's first days** (`python -m tools.cold_start [--shuffle SEED]`, development data, empty start,
+  Strict; matching trained once two folders exist, then after every 10 decisions; placements not reviewed):
+
+  | Variant (arrival order; shuffled orders 1–3 in brackets) | Decisions | Filed by itself right / wrong | Decisions before the first automatic filing |
+  |---|---|---|---|
+  | The app as it is | 75 (54–64) | 37 / 6 (51–53 / 3–11) | 10 (5–12) |
+  | a. Existing folders hold 3 per folder (87 arrive) | 43 (30–35) | 44 / 0 (52–57 / 0) | 1 (2–11) |
+  | a. Existing folders hold half of each (63 arrive) | 30 (26–28) | 31 / 2 (34–36 / 1–2) | 1 (1–2) |
+  | b. Folder name as key words, 3-document rule kept | 68 (49–65) | 47 / 3 (50–52 / 1–17) | 11 (10–16) |
+  | b. Folder name as key words, rule relaxed | 68 (41–57) | 37 / 13 (43–49 / 17–34) | 0 (0–2) |
+  | b. 5 best words (an upper bound), rule relaxed | 58 (50–56) | 51 / 9 (60–62 / 2–7) | 1 (0) |
+
+  - In a cold start the app files wrongly where the steady state does not (6 in arrival order; 3 of them because
+    their folder did not exist yet): early models know few documents.
+  - "Learn from my existing folders" with 3 documents per folder filed nothing wrongly in all four orders and
+    roughly halved the decisions. Key words from the folder name do not help, and filing on them before 3
+    confirmed documents files many wrongly.
+  - Today a new user's first matching model comes only from pressing "Update matching" in Settings: the update
+    after every 10 confirmations (record A7, 2.6) never starts while no version exists. The simulation assumes
+    the first model is trained as soon as two folders exist.
+- **Pictures (JPG, PNG):** the reader refuses a picture opened as a document (an error while reading pages); the
+  same picture turned into a one-page PDF in memory reads through the existing OCR: a dense sample page rendered
+  at 100–200 dpi gave back 290–295 of its 302 words. A clean rendering, not a phone photo.
+
 ## Development results so far
 
 These counts describe development data only. They are not accuracy estimates.
@@ -500,18 +557,17 @@ threshold since. `data\final-eval` has never been read.
   - E5 (semantic name equivalence), E6 (titles and instance identifiers), E7 (dominant self-description) were not
     run; their defaults are in use (names are compared after normalization only; identifier guards; pending on
     conflict). E3 and E9 were not needed so far.
-  - Part E's quality-gate report for CP5 also asks for incorrect creations, duplicate categories,
-    over-merging and fragmentation, and the four effort numbers (B2). `tools.evaluate` reports filing, first
-    and new subjects; the rest comes from the replay (`tools.group_eval --folders`) and has to be added to the
-    CP5 report.
-  - Functional gate: an offline run with networking disabled has not been checked on the laptop.
+  - Part E's quality-gate report: built (`tools.quality_gate`, 2026-10-15). For the final evaluation it still has
+    to count the held-out set the same way (docs/LAUNCH.md, section 1).
+  - Functional gate: `tools.offline_check` passes with Python's network access refused; the run with the laptop's
+    networking switched off is the owner's.
 - **"Also belongs to" cannot be undone in the app yet** (there is no "remove from this category").
 
 ## Next
 
-1. The owner presses "Update matching" once (version 5 learns the three moves; the check list appears) and answers
-   "Check these".
-2. The owner decides the proposed record changes (below) and the launch blockers in `docs/LAUNCH.md`.
+1. The owner answers the last "Check these" document (version 6 is in use; one of the two is kept here) and runs
+   `tools.offline_check` once with networking switched off.
+2. The owner decides the friends-and-family gaps in `docs/LAUNCH.md` (section 5): which go into v1.
 3. CP5 quality gate and freeze (`data\final-eval` stays untouched until then). SummarEase is a separate
    project.
 

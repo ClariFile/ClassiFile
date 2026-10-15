@@ -8,15 +8,14 @@ blocker unless marked otherwise.
 
 ## 0. Before the freeze (found 2026-10-15)
 
-- **[Blocker]** The owner decides the proposed changes to the decision record (`docs/STATUS.md`, "Proposed
-  changes"): the update check (A7), the one evaluation (B4), "Check these", and the CP4 items not built (E1 policy,
-  E5–E7 on their defaults). The freeze writes into the record, so it must say what the code does.
-- **[Blocker]** "Update matching" once more, so the frozen version has learned the owner's last moves; then the
-  owner answers "Check these" (2 documents on 2026-10-15).
-- **[Blocker]** The CP5 report covers all of Part E: besides what `tools.evaluate` prints, incorrect creations,
-  duplicate categories, over-merging and fragmentation (from `tools.group_eval --folders`), pending rate, and the
-  four effort numbers (B2). One command for it, like `tools.evaluate`.
-- **[Blocker]** Functional gate: an offline run with networking disabled, checked on the laptop.
+- **[Blocker, done 2026-10-15]** The owner decided the changes to the decision record: written as record 2.8 (the
+  update check, the one evaluation, "Check these", E1 not built and E5–E7 on their defaults for v1).
+- **[Blocker]** "Update matching" once more, so the frozen version has learned the owner's last moves (done:
+  version 6); then the owner answers "Check these" (one document left on 2026-10-15).
+- **[Blocker, done 2026-10-15]** The CP5 report covers all of Part E: `python -m tools.quality_gate`.
+- **[Blocker]** Functional gate: an offline run with networking disabled. Built: `python -m tools.offline_check`
+  (passes with Python's network access refused). Left: the owner runs it once with the laptop's networking
+  switched off.
 - **[v1.1]** Balanced with "the nearest document is in the best folder" (on development data it files as many as
   Balanced and wrongly files fewer new subjects, 11 of 118 instead of 15). Only if the owner wants more automatic
   filing than Strict; it would need validation and a record change.
@@ -85,6 +84,21 @@ blocker unless marked otherwise.
 - Linking versions of the same document.
 - macOS and Linux installers.
 - A cloud or multi-device catalog.
+
+## 5. For people other than the owner (gap list, 2026-10-15; proposals waiting for the owner)
+
+Effort: S under a day, M a few days, L a week or more. Measurements are in `docs/STATUS.md` ("Toward friends and
+family"); they describe development data.
+
+| Gap | Effort | Risk | Proposed |
+|---|---|---|---|
+| **The first matching model.** A new user gets cards with existing folders, and automatic filing, only after pressing "Update matching" in Settings; the update after every 10 confirmations (A7) never starts while no version exists. | S | low | **v1** (makes the code do what A7 says): the first version after 10 confirmations in at least two folders, by itself. |
+| **"Learn from my existing folders."** The user picks an organized folder; each subfolder becomes a category, its files examples, read only, nothing moved or copied. Simulated: with 3 documents per folder, nothing filed wrongly in four arrival orders and about half the decisions. | M | medium: long reads for big folders (OCR); nested subfolders; a record entry for documents that are examples without an app copy | **v1**, before the freeze, if the owner approves the record entry; otherwise v1.1. |
+| **Key words per folder as starting examples.** Simulated: the folder name as key words does not help, and filing on them before 3 confirmed documents files many wrongly. | S | high | **Not built.** |
+| **Phone photos and scans (JPG, PNG).** The reader refuses a picture today; turned into a one-page PDF in memory it reads through the existing OCR (a clean page image: 290–295 of 302 words). | S (reader) + M (checking) | medium: phone photos (angle, shadow, blur) are unmeasured; HEIC (iPhone) is not readable; photo rotation; the junk filter was tuned on slides; the reader is shared with SummarEase (a new tag) | **v1.1, first item**, after a check on about 20 real phone photos. v1 only if the owner supplies them before the freeze. |
+| **Burmese.** Tesseract's Burmese data is installed. Matching reads Latin letters only, so Burmese text gives no words; it needs syllable splitting, Zawgyi and Unicode told apart (the same text in two encodings), name rules, the junk filter, a translated interface and Burmese development documents. | L | high | **v1.1 or later** (record F defers it). |
+| **Everyday documents** (bills, receipts, IDs, letters). No development data, so nothing can be claimed. Receipts are very short (little text: they wait or go wrong); monthly bills from one sender look like versions of one document; IDs are mostly photos (the row above). | M (collecting and labelling 30–50 of the owner's own) | medium | **v1:** say so in the README's limitations. **v1.1:** measure on a household set. |
+| **Installer and first-run guide** (sections 2 and 3). The first run should say: originals are never changed; choose the output folder; file about 10 documents (or learn from existing folders) before the app files by itself. Unsigned installers show a SmartScreen warning. | M–L | medium: bundling Tesseract and Qt; clean-machine test | **v1** (already a blocker). |
 
 ## Done when
 
