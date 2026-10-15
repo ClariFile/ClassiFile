@@ -523,12 +523,13 @@ class Organizer:
 
     def update_due(self):
         """Matching updates by itself (A7, record 2.6) once this many confirmations or moves were made since the
-        last version was trained, kept or not: a rejected version is not retried at every filing."""
+        last version was trained, kept or not: a rejected version is not retried at every filing. The first version
+        comes the same way, once that many are filed in at least two categories."""
         last = self.catalog.latest_matcher()
-        if last is None:
-            return False
-        trained = json.loads(last["bundle_json"])["training"]
         labels = self.catalog.explicit_labels()
+        if last is None:                    # the first version too (record A7): once there is something to tell apart
+            return len(labels) >= matching.AUTO_UPDATE_EVERY and len(set(labels.values())) >= 2
+        trained = json.loads(last["bundle_json"])["training"]
         return sum(trained.get(d) != c for d, c in labels.items()) >= matching.AUTO_UPDATE_EVERY
 
     def evaluation_inputs(self):

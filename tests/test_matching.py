@@ -478,9 +478,11 @@ def test_matching_updates_by_itself_after_enough_confirmations(make_org, tmp_pat
     org, src = make_org(), tmp_path / "src"
     for n in range(2):
         _add(org, src, "Algebra", n)
+    assert not org.update_due()                                        # too few, and nothing to tell apart
+    for n in range(2):
         _add(org, src, "Networks", n)
-    assert not org.update_due()                                        # no model yet: the user starts it
-    org.update_matching()
+    assert org.update_due()                                            # the first version comes by itself too
+    org.update_matching("automatic")
     _add(org, src, "Algebra", 3)
     _add(org, src, "Networks", 4)
     assert not org.update_due()
@@ -489,7 +491,7 @@ def test_matching_updates_by_itself_after_enough_confirmations(make_org, tmp_pat
     assert org.update_matching("automatic")["outcome"] == "updated"
     log = org.catalog.matcher_log()
     assert [(r["version"], r["trigger"], r["status"]) for r in log] == [(2, "automatic", "active"),
-                                                                        (1, "user", "previous")]
+                                                                        (1, "automatic", "previous")]
     monkeypatch.setattr(evaluation, "no_worse", lambda new, old: False)
     for n in range(6, 9):
         _add(org, src, "Algebra", n)
