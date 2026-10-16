@@ -234,6 +234,11 @@ def test_group_item_files_only_the_listed_documents(app, samples, make_org, tmp_
     group = _item(w, "2 documents with the same suggestion")
     assert group.group and group.names.isVisible() and SAMPLE["S2"] in group.names.text()
     assert second.name in group.names.text() and len(w.decision.items) == 2
+    pages = group.details.menu().actions()                          # Details: each document of the group
+    assert not group.details.isHidden() and sorted(a.text() for a in pages) == sorted([SAMPLE["S2"], second.name])
+    pages[1].trigger()
+    assert w.details.isVisible() and w.details.doc_id == w.inspected == group.ids[1]
+    w.close_details()
     best = group.best
     group.choose.click()                                            # one picker for the group
     assert [r.split("\n")[0] for r in _rows_of(group.picker)] == [f"New: {best}"]
@@ -966,12 +971,13 @@ def test_search_name_and_category_count_and_keys(app, samples, make_org):
     assert w.search.placeholderText() == "Search recently added…" and len(_rows(w)) == 3
 
     w.review()                                                     # the same field on the decision page
-    assert w.toolbar.isVisible() and not w.sort.isVisible() and w.details_toggle.isVisible()   # Details as everywhere
+    assert w.toolbar.isVisible() and not w.sort.isVisible() and not w.details_toggle.isVisible()  # per row instead
     assert w.search.placeholderText() == "Search these documents…"
-    w.details_toggle.click()                                       # on: beside the first document of the page
-    assert w.details.isVisible() and w.inspected == w.waiting_docs[0]["id"] == w.details.doc_id
-    w.details_toggle.click()
-    assert w.inspected is None and not w.details_open
+    first = w.decision.items[0]
+    first.details.click()                                          # on: beside that row's document
+    assert w.details.isVisible() and w.inspected == first.ids[0] == w.details.doc_id and first.details.isChecked()
+    first.details.click()
+    assert w.inspected is None and not w.details_open and not first.details.isChecked()
     cards = list(w.decision.items)
     w.search.setText(SAMPLE["S4"][:6].upper())
     shown = [c for c in cards if c.isVisible()]
@@ -1603,6 +1609,12 @@ def test_check_these_on_the_decision_page_keep_here_and_move(app, make_org, tmp_
     assert [c.name.full for c in checks] == ["algebra-0.pdf", "algebra-1.pdf"] and w.decision.check_box.isVisible()
     assert checks[0].about.text() == "In Algebra. Its content matches Networks much more closely."
     assert not w.decision.empty.isVisible() and w.page_title.full == "Needs your decision · 2"
+    checks[0].details.click()                                         # a filed document's pages, from its row
+    assert w.details.isVisible() and w.inspected == algebra[0] == w.details.doc_id and checks[0].details.isChecked()
+    w.refresh()                                                       # stays open: it is a row of this page
+    assert w.inspected == algebra[0] and w.details.isVisible()
+    checks[0].details.click()
+    assert w.inspected is None and not checks[0].details.isChecked()
     picked = []
     w.pick_category = lambda title, verb, on_choice: picked.append((title, verb))
     checks[1].move.click()

@@ -842,7 +842,7 @@ class MainWindow(QWidget):
         self.auto_page.show_folders(self._named_folders(cats))
         awaiting = self.auto_page.awaiting()
         self.auto_count.setText(str(awaiting) if awaiting else "")
-        rows = [d["id"] for d in waiting] if key == DECIDE else [r["id"] for r in filed_by_app] if key == AUTO else []
+        rows = [d["id"] for d in waiting] + [c[0] for c in self.checks] if key == DECIDE else [r["id"] for r in filed_by_app] if key == AUTO else []
         if self.inspected not in rows:
             self.inspected = None   # filed, removed or moved away: its details close
         if self.inspected is None and self.details_open and rows:
@@ -902,6 +902,7 @@ class MainWindow(QWidget):
         searchable = key not in TEXT_PAGES and not empty and (key not in (DECIDE, AUTO) or bool(shown or q))
         self.toolbar.setVisible(searchable)
         self.sort.setVisible(key not in (DECIDE, AUTO))     # those pages keep their own order
+        self.details_toggle.setVisible(key != DECIDE)       # there each row has its own Details
         self.search.setPlaceholderText(SEARCH_HINTS.get(key) or f"Search {title}…")
         searching = bool(q) and searchable
         if key == AUTO:

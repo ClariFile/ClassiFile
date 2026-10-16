@@ -150,12 +150,16 @@ class DecisionItem(ListRow):
         self.details.setCheckable(True)         # pressed while this document's details are open
         self.details.clicked.connect(
             lambda on: self.c.show_details(first["id"]) if on else self.c.close_details())
+        if self.group:                          # a group: Details lists each document, to open its pages
+            self.details.setCheckable(False)
+            self.details.clicked.disconnect()
+            self.details.setToolTip("Show one of these documents' pages and details beside the list")
+            pages = QMenu(self.details)
+            for d in docs:
+                pages.addAction(d["file_name"], lambda i=d["id"]: self.c.show_details(i))
+            self.details.setMenu(pages)
         self.more_menu = more_button()
         menu = QMenu(self)
-        for d in docs if self.group else ():    # a group: each member's pages
-            menu.addAction(f"Details: {d['file_name']}", lambda i=d["id"]: self.c.show_details(i))
-        if self.group:
-            self.details.hide()
         # A row keeps one main action, "Choose another…" and "Details"; the rest is under ⋯, at the row's end.
         self.pending = menu.addAction("Leave pending", lambda: self.c.leave_pending(self.ids))
         menu.addAction("Remove from ClassiFile", lambda: self.c.remove_docs(self.ids))
@@ -546,14 +550,14 @@ def full_width(layout):
     layout.setContentsMargins(m.left(), m.top(), GROUP, m.bottom())
 
 
-class CheckItem(QFrame):
+class CheckItem(ListRow):
     """A document the user filed whose content matches another category by a wide margin ("Check these"):
-    where it is, what it matches, Keep here (recorded, not asked again) and Move to…. Nothing moves by itself."""
+    where it is, what it matches, Keep here (recorded, not asked again), Move to… and Details. Nothing moves by
+    itself."""
 
     def __init__(self, doc_id, controller):
-        super().__init__()
-        self.doc_id, self.state, self.search_text = doc_id, None, ""
-        self.setObjectName("row")
+        super().__init__(controller)
+        self.doc_id, self.ids, self.state, self.search_text = doc_id, [doc_id], None, ""
         self.icon = QLabel()
         self.name = ElidedLabel(object_name="strong")
         self.about = QLabel()
@@ -567,12 +571,18 @@ class CheckItem(QFrame):
         self.keep.setObjectName("quiet")
         self.keep.setToolTip("It belongs where it is. ClassiFile won't ask about it again.")
         self.keep.clicked.connect(lambda: controller.keep_here([self.doc_id]))
+        self.details = QPushButton("Details")
+        self.details.setObjectName("quiet")
+        self.details.setToolTip("Show or hide this document's pages and details beside the list")
+        self.details.setCheckable(True)         # pressed while this document's details are open
+        self.details.clicked.connect(
+            lambda on: controller.show_details(self.doc_id) if on else controller.close_details())
         text = box(QVBoxLayout(), spacing=TIGHT)
         text.addWidget(self.name)
         text.addWidget(self.about)
         buttons = box(QHBoxLayout(), spacing=RELATED)
-        buttons.addWidget(self.move)
-        buttons.addWidget(self.keep)
+        for b in (self.move, self.keep, self.details):
+            buttons.addWidget(b)
         buttons.addStretch(1)
         self.body = box(QBoxLayout(QBoxLayout.LeftToRight), spacing=RELATED)   # under the text when room is short
         self.body.addLayout(text, 1)
@@ -581,9 +591,13 @@ class CheckItem(QFrame):
         h.addWidget(self.icon, 0, Qt.AlignTop)
         h.addLayout(self.body, 1)
 
+    def set_inspected(self, doc_id):
+        super().set_inspected(doc_id)
+        self.details.setChecked(doc_id == self.doc_id)
+
     def resizeEvent(self, e):
         super().resizeEvent(e)
-        wide = self.move.sizeHint().width() + self.keep.sizeHint().width() + RELATED
+        wide = sum(b.sizeHint().width() + RELATED for b in (self.move, self.keep, self.details))
         side = self.width() - FILE_ICON - 4 * RELATED - wide >= TEXT_MIN
         direction = QBoxLayout.LeftToRight if side else QBoxLayout.TopToBottom
         if self.body.direction() != direction:
@@ -716,11 +730,11 @@ class DecisionPage(QWidget):
         """The document whose details are open beside the page (None: closed): its row is marked."""
         if doc_id != self.inspected:
             self.inspected = doc_id
-            for item in self.items:
+            for item in self.checks + self.items:
                 item.set_inspected(doc_id)
 
     def row_of(self, doc_id):
-        return next((i for i in self.items if doc_id in i.ids), None)
+        return next((i for i in self.checks + self.items if doc_id in i.ids), None)
 
     def _matches(self, item):
         return not self.query or self.query in item.search_text
