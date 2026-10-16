@@ -1,6 +1,6 @@
 # Decision Record — ClassiFile (Offline Document Organizer)
 
-Version 2.9 · 2026-10-15
+Version 2.10 · 2026-10-16
 
 **Names**
 - **ClariFile:** the suite.
@@ -467,6 +467,12 @@ Partial checkpoints are not the completed v1. Evaluation runs alongside developm
 - From validation results, the user chooses the operating point.
 - Choices are frozen.
 - The final evaluation runs once, producing the v1 candidate.
+- **Frozen (2.10, 2026-10-16):**
+  - Matcher: matching version 6 (2026-10-15; 118 documents, 12 categories), nearest centroid on word TF-IDF, with its bundled preprocessing, vocabulary, category mapping and decision settings.
+  - Automatic filing: Strict (the best category leads the second by at least 0.10), only into a category that holds at least 3 confirmed documents; all categories.
+  - Folders: an automatic new folder for a group of at least 3 unmatched waiting documents at an average similarity of 0.20; groups found at 0.15 are questions; a single document waits.
+  - The update check (A7) and "Check these" (another category ahead by at least 0.10), as in 2.8.
+  - The final evaluation (`tools.final_eval`) reads `data\final-eval` once with version 6 on a copy of the catalog, so matching does not update during it. It counts as `tools.evaluate` does and refuses a second run. Nothing is tuned afterwards; a bug found is fixed and reported, and the number stays as measured.
 
 ---
 
@@ -548,3 +554,4 @@ Partial checkpoints are not the completed v1. Evaluation runs alongside developm
 - **2.7 (2026-10-14):** B2 and A4: automatic new folders need a group of at least 3 documents; groups of 2 stay a question for the user. The user switched automatic new folders on after the development replay (recorded in B2), and kept automatic filing at Strict. Authorized by the user.
 - **2.8 (2026-10-15):** wording the user approved before the CP5 freeze, so the record says what the code does. A7: the update check (a new version replaces the one in use only if, on the full evaluation, it files no more documents wrongly at the level in use and puts the user's category first no less often; both results logged in Settings). B4: one evaluation (`tools.evaluate`) for every number about matching, with the owner's family ids kept in the catalog. B2: "Check these" (Keep here is recorded; nothing is moved by itself). D/CP4: the documented policy (E1) is not built for v1; E5–E7 run on their defaults (also noted under E5–E7). Authorized by the user.
 - **2.9 (2026-10-15):** v1 scope for friends and family, authorized by the user. A7: the first matching version is learned by itself too. B5 and the glossary: "Learn from my existing folders", with the user-example provenance; examples count toward the 3 documents of automatic filing (B2). A10: a first-run tour, Help and About pages, full-width pages with readable text, the same Details panel on every page that lists documents, and an Advanced section in Settings. Photos (JPG, PNG), a household test set and Burmese are v1.1 (docs/LAUNCH.md). Authorized by the user.
+- **2.10 (2026-10-16):** CP5 freeze (D/CP5): matching version 6, Strict with the 3 confirmed documents, the folder rules (3 documents at 0.20; questions at 0.15; a single document waits), the update check and "Check these" as in 2.8; the final evaluation runs once with the frozen version on a catalog copy (`tools.final_eval`). Authorized by the user (the list in docs/LAUNCH.md section 1).

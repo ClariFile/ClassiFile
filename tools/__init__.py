@@ -1,5 +1,6 @@
-"""Development tools. None of them reads data/final-eval/ (the held-out final evaluation, decision record B4);
-the inventory labelling window shows its files to the owner when a split is named (tools.label_inventory)."""
+"""Development tools. None of them reads data/final-eval/ (the held-out final evaluation, decision record B4)
+except tools.final_eval, once, with the frozen version (record 2.10); the inventory labelling window shows its
+files to the owner when a split is named (tools.label_inventory)."""
 import sys
 from pathlib import Path
 

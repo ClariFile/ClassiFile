@@ -10,18 +10,34 @@ blocker unless marked otherwise.
 
 - **[Blocker, done 2026-10-15]** The owner decided the changes to the decision record: written as record 2.8 (the
   update check, the one evaluation, "Check these", E1 not built and E5–E7 on their defaults for v1).
-- **[Blocker]** "Update matching" once more, so the frozen version has learned the owner's last moves (done:
-  version 6); then the owner answers "Check these" (one document left on 2026-10-15).
+- **[Blocker, done 2026-10-16]** "Update matching" once more, so the frozen version has learned the owner's last
+  moves (version 6); the owner answered "Check these" (Keep here).
 - **[Blocker, done 2026-10-15]** The CP5 report covers all of Part E: `python -m tools.quality_gate`.
-- **[Blocker]** Functional gate: an offline run with networking disabled. Built: `python -m tools.offline_check`
-  (passes with Python's network access refused). Left: the owner runs it once with the laptop's networking
-  switched off.
+- **[Blocker, done 2026-10-16]** Functional gate: an offline run with networking disabled
+  (`python -m tools.offline_check`; the owner ran it in airplane mode).
 - **[v1.1]** Balanced with "the nearest document is in the best folder" (on development data it files as many as
   Balanced and wrongly files fewer new subjects, 11 of 118 instead of 15). Only if the owner wants more automatic
   filing than Strict; it would need validation and a record change.
 - **[v1.1]** E5–E7 run on their own data (name equivalence, instance identifiers, conflicting self-descriptions).
 
-## 1. CP5: freeze, then the final evaluation once
+## 1. CP5: freeze, then the final evaluation once (done 2026-10-16)
+
+**Result** (`tools.final_eval`, run once; record 2.10). Matching version 6, Strict; 28 documents in 22 families,
+6 labels, every one an existing category (so the final set says nothing about new subjects or new folders).
+Counts on a small held-out set, not a promise of accuracy.
+
+| | Count | 95% range |
+|---|---|---|
+| The owner's category first | 26 of 28 | 77–98% |
+| In the first three | 27 of 28 | 82–99% |
+| Filed automatically (Strict), right | 18 | |
+| Filed automatically (Strict), wrong | 0 | precision 82–100% |
+| Left waiting | 10 of 28 | 21–54% |
+| New folders created / mixing / second folder for a known subject | 0 / 0 / 0 | |
+| Documents per decision | 1.00 (10 questions) | |
+
+Other levels, right / wrong / waiting: Very strict 9 / 0 / 19; Balanced 21 / 0 / 7; Lenient 25 / 2 / 1.
+
 
 1. **Freeze** (the record's CP5 and Part E). Write the frozen choices into the decision record:
    - the matcher: the matching version in use, with its preprocessing, vocabulary, category mapping and settings
@@ -118,9 +134,9 @@ family"); they describe development data.
 
 ## Done when
 
-- [ ] Section 0 blockers done: record changes decided, matching updated, Check these answered, the full
+- [x] Section 0 blockers done: record changes decided, matching updated, Check these answered, the full
       CP5 report command, the offline check.
-- [ ] Choices frozen in the record; final evaluation run once and reported.
+- [x] Choices frozen in the record (2.10); final evaluation run once and reported (2026-10-16).
 - [ ] Installer built and checked on a clean machine; licence notices included.
 - [x] User README written (2026-10-15).
 - [ ] All tests pass, `tools.check_ui` passes, the privacy audit has 0 hits, and v1 is tagged.

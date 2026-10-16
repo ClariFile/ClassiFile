@@ -6,10 +6,10 @@ from PySide6.QtWidgets import (
 )
 
 from classifile import __version__
-from classifile.app.widgets import GROUP, PANEL, READABLE, RELATED, SECTION, SUPPORTED, box
+from classifile.app.widgets import GROUP, PAD, PANEL, READABLE, RELATED, SECTION, SUPPORTED, TIGHT, box
 SOURCE = "https://github.com/ClariFile/ClassiFile"
 
-HELP = [
+_HELP = [
     ("What ClassiFile does",
      "ClassiFile sorts your documents into categories by what they say, not by their file names. It puts a copy of "
      f"each document in the category's folder inside your output folder. It reads {SUPPORTED} files."),
@@ -48,7 +48,7 @@ HELP = [
      "Nothing is sent over the internet: ClassiFile works entirely on your computer."),
 ]
 
-ABOUT = [
+_ABOUT = [
     ("ClassiFile", f"Version {__version__}. ClassiFile organizes copies of your documents into categories, by "
                    "their content, so you can find them again without sorting them by hand."),
     ("How it works",
@@ -68,17 +68,37 @@ ABOUT = [
 ]
 
 
+# Each page: captioned sections, each a card of topics in the order its caption lists them.
+def _sections(topics, groups):
+    by = dict(topics)
+    return [(caption, [(h, by[h]) for h in heads]) for caption, heads in groups]
+
+
+HELP = _sections(_HELP, [
+    ("Getting started", ["What ClassiFile does", "Adding documents", "Learning from your folders"]),
+    ("Filing", ["Automatic filing", "Needs your decision", "Check these", "New folders"]),
+    ("Correcting and learning", ["Filed automatically and “Looks right”", "Move to…", "How ClassiFile learns"]),
+    ("Your files", ["What never happens"]),
+])
+ABOUT = _sections(_ABOUT, [
+    ("Overview", ["ClassiFile", "How it works", "Privacy"]),
+    ("The ClariFile suite", ["ClariFile"]),
+    ("Licences", ["Licences and credits", "Source"]),
+])
+
+
 def text_page(title, sections, extra=None):
-    """A page of headed paragraphs in one readable column, on a page as wide as the window. title: a lead line
-    under the page's own title (None for none); extra: a widget placed after it (buttons)."""
+    """A page of captioned sections, each a card of headed paragraphs (the Settings card style), in one readable
+    column on a page as wide as the window. sections: [(caption, [(heading, text)])]. title: a lead line under the
+    page's own title (None for none); extra: a widget placed after it (buttons)."""
     outer = QScrollArea()
     outer.setWidgetResizable(True)
     outer.setFrameShape(QFrame.NoFrame)
     page = QWidget()
-    page.setContentsMargins(0, 0, GROUP, 0)     # room for the scroll bar
+    page.setContentsMargins(0, 0, GROUP, PAD)   # room for the scroll bar, and below the last card
     outer.setWidget(page)
     column = QWidget()
-    column.setMaximumWidth(READABLE)
+    column.setMaximumWidth(READABLE + 2 * PANEL)    # the cards' text keeps a readable line length
     v = box(QVBoxLayout(column), spacing=RELATED)
     if title:
         lead = QLabel(title)
@@ -87,22 +107,34 @@ def text_page(title, sections, extra=None):
         v.addWidget(lead)
     if extra is not None:
         v.addWidget(extra, 0, Qt.AlignLeft)
-    for heading, text in sections:
-        v.addSpacing(SECTION - RELATED)
-        h = QLabel(heading)
-        h.setObjectName("heading")
-        p = QLabel(text)
-        p.setWordWrap(True)
-        p.setTextFormat(Qt.RichText if "<a " in text else Qt.PlainText)
-        p.setOpenExternalLinks(True)            # only when the user clicks: ClassiFile itself connects to nothing
-        p.setTextInteractionFlags(Qt.TextBrowserInteraction)
-        p.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
-        v.addWidget(h)
-        v.addWidget(p)
+    for n, (caption, topics) in enumerate(sections):
+        if n or title or extra is not None:
+            v.addSpacing(SECTION - RELATED)
+        c = QLabel(caption.upper())
+        c.setObjectName("section")
+        v.addWidget(c)
+        card = QFrame()
+        card.setObjectName("settingsCard")
+        inside = box(QVBoxLayout(card), PANEL, TIGHT)
+        for k, (heading, text) in enumerate(topics):
+            if k:
+                inside.addSpacing(GROUP)
+            h = QLabel(heading)
+            h.setObjectName("heading")
+            p = QLabel(text)
+            p.setWordWrap(True)
+            p.setTextFormat(Qt.RichText if "<a " in text else Qt.PlainText)
+            p.setOpenExternalLinks(True)        # only when the user clicks: ClassiFile itself connects to nothing
+            p.setTextInteractionFlags(Qt.TextBrowserInteraction)
+            p.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+            inside.addWidget(h)
+            inside.addWidget(p)
+        v.addWidget(card)
+    v.addStretch(1)
     row = box(QHBoxLayout(page))
     row.addWidget(column, 1)
     row.addStretch(0)
-    outer.texts = [title or ""] + [t for s in sections for t in s]
+    outer.texts = [title or ""] + [t for _, topics in sections for s in topics for t in s]
     return outer
 
 

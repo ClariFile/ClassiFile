@@ -1,6 +1,6 @@
 # ClassiFile status
 
-2026-10-15 · decision record version 2.7
+2026-10-16 · decision record version 2.10
 
 ## Done
 
@@ -416,6 +416,17 @@
   `data\ui-width\` (local, made-up documents). `tools.check_ui` passes at 100%, 125% and 150%.
 - **README** for the public with screenshots of a made-up library (`docs/images`, from `tools.screenshots`), and
   the user guide in `docs/guide/` (English; Burmese marked for the owner's review).
+
+**CP5: freeze and the final evaluation (2026-10-16, record 2.10)**
+- Frozen: matching version 6, Strict with 3 confirmed documents, the folder rules, the update check and Check these.
+- `tools.final_eval` read `datainal-eval` once (28 documents, 22 families) with version 6 on a catalog copy; the
+  result is `datainal_evaluation.json` (local) and a second run is refused. The owner's category first for 26 of
+  28 and in the first three for 27; at Strict 18 filed right, 0 wrong, 10 waiting; no new folder (every final
+  label is an existing category). Table in docs/LAUNCH.md section 1. Counts on a small held-out set, not a
+  promise of accuracy.
+- Needs your decision: each row has its own Details (Check these rows too; a group lists its documents); the
+  page-level Details switch is gone from that page.
+- Help and About: captioned sections, each a padded card of topics.
 
 ## Development results so far
 
