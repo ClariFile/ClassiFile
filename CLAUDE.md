@@ -38,6 +38,10 @@ The record above is authoritative.
 - If git is available, commit after each completed step with a clear message.
 - The target is a native Windows desktop app. Keep paths and file operations cross-platform.
 - Keep the interface minimal: categories, documents, minimal status, decision prompts.
+- **Full width, every page (record A10). This mistake has been made many times: do not repeat it.**
+  - Never cap a page, column or card with `setMaximumWidth`. Cards, lists and panels reach the page's right edge, with no empty band at the right.
+  - Only running text keeps a readable line length: put a wrapped label in a card with `readable(label)` from `classifile/app/widgets.py`. Never call `setMaximumWidth(READABLE)` on a label straight in a vertical layout: Qt then cuts its last lines off.
+  - `tests/test_app.py::test_empty_state_and_settings` fails on an empty right band or cut-off text on Help, About and Settings. Extend it when you add a page. Render the page (`tools.screenshots`) and look at it before reporting.
 
 ## Fixtures and references
 
@@ -81,6 +85,7 @@ Run from the project folder (Windows, Python 3.11+; the venv uses 3.12).
   - Grouping new subjects on development data: `.venv\Scripts\python -m tools.group_eval [--families <csv>...] [--level X] [--compare X...] [--out FILE]`; the replay of automatic new folders (record 2.6): `... --folders` (prints category names and words from documents: keep the output local)
   - File waiting development documents from the owner's labels: `.venv\Scripts\python -m tools.file_labels data\splits_incoming_2.csv` (development rows only; close the app first)
 - The final evaluation, once (CP5, record 2.10): `.venv\Scripts\python -m tools.final_eval data\final-eval --labels data\splits_incoming_2.csv` (refuses a second run and any version but the frozen one; `--report data\final_evaluation.json` prints the saved result; prints category names: keep the output local)
+- Installer (needs Tesseract's `eng.traineddata` and Inno Setup 6): `.venv\Scripts\python -m pip install -r requirements-build.txt`, then `.venv\Scripts\python -m installer.build` (writes `dist\ClassiFile-<version>\` and `dist\ClassiFile-<version>-setup.exe`; refuses to overwrite either). Check a built or installed app with `ClassiFile.exe --self-test REPORT FILE...` (counts only). Clean-machine test: `docs\INSTALLER_TEST.md`
 - Offline check (functional gate): `.venv\Scripts\python -m tools.offline_check [FOLDER]` (copies the folder, default the six samples; the app end to end with network access refused in every Python process; also run it once with networking switched off)
 - Screenshots of a made-up library (README, layout checks): `.venv\Scripts\python -m tools.screenshots OUT [--size 1280x720] [--theme light|dark] [--views decide,auto,...]`
 - Interface timings on a made-up catalog: `.venv\Scripts\python -m tools.measure_ui [--json FILE]`

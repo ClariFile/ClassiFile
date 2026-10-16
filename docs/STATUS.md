@@ -428,6 +428,14 @@
   page-level Details switch is gone from that page.
 - Help and About: captioned sections, each a padded card of topics.
 
+**The Windows installer (2026-10-17, docs/LAUNCH.md section 2)**
+- `installer/`: PyInstaller spec, Inno Setup script, the licence texts and notice, and `installer.build`. The setup
+  file installs per user, offline; uninstalling keeps documents, copies and the catalog (checked on the build laptop).
+- `ClassiFile.exe --self-test REPORT FILE...` checks an installed app: reads in a worker process with OCR, counts only.
+- Help, About and Settings: cards span the full width again; long text was cut off where a wrapped label had a
+  maximum width straight in a column (Settings' new-folders sentence too). `readable()` in widgets.py, and a test.
+- Next: the clean-laptop test (`docs/INSTALLER_TEST.md`).
+
 ## Development results so far
 
 These counts describe development data only. They are not accuracy estimates.

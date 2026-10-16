@@ -329,6 +329,20 @@ class ListRow(QFrame):
             super().keyPressEvent(e)
 
 
+def readable(label):
+    """A wrapped label kept to a readable line length (READABLE) on a full-width page, returned in a row of its own
+    to add instead of the label. Straight in a vertical layout, Qt works out the wrapped height for the layout's
+    whole width, not the capped one, and the last lines are cut off; in a row the height follows the width the
+    label really gets."""
+    label.setWordWrap(True)
+    label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+    label.setMaximumWidth(READABLE)
+    row = box(QHBoxLayout())
+    row.addWidget(label, 1)
+    row.addStretch(0)
+    return row
+
+
 def wrapped(label):
     """A label that wraps and never widens its row: a long word or path wraps or is cut, never scrolls sideways."""
     label.setWordWrap(True)

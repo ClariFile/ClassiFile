@@ -143,3 +143,13 @@ def test_a_picture_shown_twice_is_read_once(tmp_path, monkeypatch):
     units = read_document(tmp_path / "twice.pdf").record.units
     assert len(calls) == 1 and _has_words(units[4].ocr_text) and units[4].ocr_text == units[5].ocr_text
     assert units[4].ocr_layout[0]["blocks"][0] is not units[5].ocr_layout[0]["blocks"][0]  # each unit has its own
+
+
+def test_the_installed_app_reads_with_its_own_language_data(monkeypatch, tmp_path):
+    (tmp_path / "tessdata").mkdir()
+    (tmp_path / "tessdata" / f"{ocr.OCR_LANGUAGE}.traineddata").write_bytes(b"x")
+    monkeypatch.delenv("TESSDATA_PREFIX", raising=False)
+    assert ocr.bundled_tessdata() is None                   # run from source: no bundle
+    monkeypatch.setattr(ocr.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(ocr.sys, "_MEIPASS", str(tmp_path), raising=False)
+    assert ocr.tessdata() == str(tmp_path / "tessdata")     # installed: its own data, before any other install

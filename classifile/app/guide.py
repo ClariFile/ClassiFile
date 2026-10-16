@@ -2,11 +2,11 @@
 The pages use the whole window; their text keeps a readable line length."""
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QDialog, QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget,
+    QDialog, QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea, QStackedWidget, QVBoxLayout, QWidget,
 )
 
 from classifile import __version__
-from classifile.app.widgets import GROUP, PAD, PANEL, READABLE, RELATED, SECTION, SUPPORTED, TIGHT, box
+from classifile.app.widgets import GROUP, PAD, PANEL, RELATED, SECTION, SUPPORTED, TIGHT, box, readable
 SOURCE = "https://github.com/ClariFile/ClassiFile"
 
 _HELP = [
@@ -88,8 +88,8 @@ ABOUT = _sections(_ABOUT, [
 
 
 def text_page(title, sections, extra=None):
-    """A page of captioned sections, each a card of headed paragraphs (the Settings card style), in one readable
-    column on a page as wide as the window. sections: [(caption, [(heading, text)])]. title: a lead line under the
+    """A page of captioned sections, each a card of headed paragraphs (the Settings card style). The cards span
+    the whole page (record A10: no empty band at the right); only the text inside keeps a readable line length. sections: [(caption, [(heading, text)])]. title: a lead line under the
     page's own title (None for none); extra: a widget placed after it (buttons)."""
     outer = QScrollArea()
     outer.setWidgetResizable(True)
@@ -97,9 +97,7 @@ def text_page(title, sections, extra=None):
     page = QWidget()
     page.setContentsMargins(0, 0, GROUP, PAD)   # room for the scroll bar, and below the last card
     outer.setWidget(page)
-    column = QWidget()
-    column.setMaximumWidth(READABLE + 2 * PANEL)    # the cards' text keeps a readable line length
-    v = box(QVBoxLayout(column), spacing=RELATED)
+    v = box(QVBoxLayout(page), spacing=RELATED)
     if title:
         lead = QLabel(title)
         lead.setObjectName("heading")
@@ -122,18 +120,13 @@ def text_page(title, sections, extra=None):
             h = QLabel(heading)
             h.setObjectName("heading")
             p = QLabel(text)
-            p.setWordWrap(True)
             p.setTextFormat(Qt.RichText if "<a " in text else Qt.PlainText)
             p.setOpenExternalLinks(True)        # only when the user clicks: ClassiFile itself connects to nothing
             p.setTextInteractionFlags(Qt.TextBrowserInteraction)
-            p.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
             inside.addWidget(h)
-            inside.addWidget(p)
+            inside.addLayout(readable(p))       # the card is as wide as the page; its text stays readable
         v.addWidget(card)
     v.addStretch(1)
-    row = box(QHBoxLayout(page))
-    row.addWidget(column, 1)
-    row.addStretch(0)
     outer.texts = [title or ""] + [t for _, topics in sections for s in topics for t in s]
     return outer
 

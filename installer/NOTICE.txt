@@ -1,0 +1,21 @@
+ClassiFile — licences and notices
+
+ClassiFile is free software under the GNU Affero General Public License, version 3 (AGPL-3.0); see
+ClassiFile-AGPL-3.0.txt. Its source code, including the scripts that build this installer, is at
+https://github.com/ClariFile/ClassiFile
+
+This installation includes the following software, each under its own licence:
+
+- Python (Python Software Foundation License): Python-PSF.txt
+- PyMuPDF and MuPDF, by Artifex Software (AGPL-3.0): PyMuPDF-COPYING.txt.
+  Source: https://github.com/pymupdf/PyMuPDF
+- Qt for Python (PySide6, Shiboken6) and Qt, by The Qt Company (LGPL-3.0, which adds to GPL-3.0):
+  LGPL-3.0.txt and GPL-3.0.txt. Source: https://code.qt.io/cgit/pyside/pyside-setup.git/ and
+  https://download.qt.io/official_releases/qt/
+  The Qt libraries are separate files in the installation folder and can be replaced with compatible versions.
+- Tesseract OCR English language data (eng.traineddata), by the Tesseract authors (Apache License 2.0):
+  Tesseract-Apache-2.0.txt. Source: https://github.com/tesseract-ocr/tessdata_fast and
+  https://github.com/tesseract-ocr/tesseract
+
+ClassiFile makes no internet connection. Your documents, their copies and ClassiFile's catalog are never sent
+anywhere, and uninstalling leaves them in place.

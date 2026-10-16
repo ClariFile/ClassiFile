@@ -16,6 +16,7 @@ import hashlib
 import math
 import os
 import re
+import sys
 import time
 from collections import Counter
 from pathlib import Path
@@ -32,9 +33,16 @@ WINDOWS_TESSDATA = Path(r"C:\Program Files\Tesseract-OCR\tessdata")
 SWITCH_ENV = "CLASSIFILE_OCR"
 
 
+def bundled_tessdata():
+    """The language data shipped inside the installed app (installer/classifile.spec), or None when not installed."""
+    return Path(sys._MEIPASS) / "tessdata" if getattr(sys, "frozen", False) else None
+
+
 def tessdata():
-    """Tesseract language-data folder: TESSDATA_PREFIX, else the default Windows install, else None."""
-    for folder in (os.environ.get("TESSDATA_PREFIX"), WINDOWS_TESSDATA if os.name == "nt" else None):
+    """Tesseract language-data folder: TESSDATA_PREFIX, else the installed app's own, else the default Windows
+    install, else None."""
+    for folder in (os.environ.get("TESSDATA_PREFIX"), bundled_tessdata(),
+                   WINDOWS_TESSDATA if os.name == "nt" else None):
         if folder and (Path(folder) / f"{OCR_LANGUAGE}.traineddata").is_file():
             return str(folder)
     return None

@@ -7,7 +7,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtCore import QMimeData, QPoint, Qt, QUrl  # noqa: E402
 from PySide6.QtGui import QDragEnterEvent, QDragLeaveEvent, QDropEvent, QKeySequence  # noqa: E402
 from PySide6.QtTest import QTest  # noqa: E402
-from PySide6.QtWidgets import QApplication, QLabel, QPushButton  # noqa: E402
+from PySide6.QtWidgets import QApplication, QFrame, QLabel, QPushButton  # noqa: E402
 
 from classifile.app.main import ABOUT, ALL, DECIDE, DOC, HELP, RECENT, SETTINGS, MainWindow  # noqa: E402
 from classifile.app.widgets import GROUP, RELATED, reduced_motion  # noqa: E402
@@ -147,6 +147,16 @@ def test_empty_state_and_settings(app, make_org):
         assert w.stack.currentWidget() is page and not w.toolbar.isVisible()
         assert any(words in t for t in page.texts)
     assert "github.com/ClariFile/ClassiFile" in " ".join(w.about_page.texts)
+    w.resize(1536, 864)             # no empty band at the right (record A10): cards reach the page's right edge
+    for key, page in ((HELP, w.help_page), (ABOUT, w.about_page), (SETTINGS, w.settings_page)):
+        w.show_view(key)
+        QApplication.processEvents()
+        right = page.mapTo(w, page.rect().topRight()).x()
+        cards = [c for c in page.findChildren(QFrame, "settingsCard") if c.isVisible()]
+        assert cards and all(right - c.mapTo(w, c.rect().topRight()).x() <= 2 * GROUP for c in cards), key
+        cut = [lab.text()[:40] for lab in page.findChildren(QLabel)       # and no wrapped text has its lines cut off
+               if lab.isVisible() and lab.wordWrap() and lab.height() < lab.heightForWidth(lab.width())]
+        assert not cut, (key, cut)
     _close(w, rec)
 
 

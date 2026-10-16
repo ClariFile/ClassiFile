@@ -74,6 +74,18 @@ Other levels, right / wrong / waiting: Very strict 9 / 0 / 19; Balanced 21 / 0 /
 - Checked on a clean Windows 11 machine: install, first run, import, OCR, filing, uninstall.
 - No other new features.
 
+**Built 2026-10-17** (`python -m installer.build`; `installer/`): PyInstaller 6.22.3 makes the app folder, Inno Setup
+6.7.3 the setup file (about 52 MB). OCR runs inside PyMuPDF (MuPDF's built-in Tesseract), so only Tesseract's
+English data (`eng.traineddata`) is bundled, not the Tesseract program. Per user (`%LOCALAPPDATA%\Programs\ClassiFile`,
+no administrator rights), Start-menu shortcuts for the app and its licences, an optional desktop shortcut. The
+licences folder holds ClassiFile's AGPL-3.0, NOTICE.txt with the source links, Python's licence, PyMuPDF's AGPL,
+LGPL-3.0 with GPL-3.0 for Qt and PySide6, and Tesseract's Apache-2.0.
+- Checked on the build laptop: `ClassiFile.exe --self-test` reads the six samples in a worker process with OCR from
+  the bundled data (PASS, the same counts as from source); the window starts with a fresh catalog; a silent
+  install into a temporary folder, the self-test from there, and the uninstall left no program files, shortcuts or
+  uninstall entry, and the catalog byte-for-byte unchanged.
+- **Left:** the clean-machine test on a laptop that never had Python: `docs/INSTALLER_TEST.md`.
+
 ## 3. A user README (written 2026-10-15: `README.md`, and the guide in `docs/guide/`, English and Burmese)
 
 - Install and first run: choosing the output folder, adding documents.

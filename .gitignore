@@ -18,3 +18,7 @@ Docs-Output/
 # Handoff notes and the checkpoint prompt stay local (they name development documents)
 document-organizer-claude-handoff/
 CHECKPOINT_*_PROMPT.md
+
+# Installer builds
+build/
+dist/

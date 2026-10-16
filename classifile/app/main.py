@@ -32,8 +32,8 @@ from classifile.app.learn import LearnDialog
 from classifile.app.models import DOC, SORTS, CategoryModel, DocumentFilter, DocumentModel, sorted_by_name
 from classifile.app.widgets import (
     CHECKLIST_MAX, DATE_COLUMN_MIN, PANEL, TIGHT, DETAILS_MAX, DETAILS_MIN, DETAILS_WIDTH, FILE_ICON, GROUP, LIST_MIN, MIN_WINDOW,
-    MOTION_STANDARD, NARROW, PAD, READABLE, RELATED, SEARCH_MAX, SECTION, SIDEBAR_WIDTH, SUPPORTED, TOAST, TOAST_LONG,
-    WIDE, WINDOW, box, motion, qt_palette, set_motion, slide_away, style_sheet, use_theme,
+    MOTION_STANDARD, NARROW, PAD, RELATED, SEARCH_MAX, SECTION, SIDEBAR_WIDTH, SUPPORTED, TOAST, TOAST_LONG,
+    WIDE, WINDOW, box, motion, qt_palette, readable, set_motion, slide_away, style_sheet, use_theme,
     Collapsible, DropOverlay, ElidedLabel, Notices, PickerDialog, PreviewOverlay, Toast, wrappable,
 )
 from classifile.copies.engine import CopyError
@@ -99,10 +99,7 @@ def settings_card(title, sentence, *parts):
     if sentence:
         about = QLabel(sentence)
         about.setObjectName("secondary")
-        about.setWordWrap(True)
-        about.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
-        about.setMaximumWidth(READABLE)         # the card is as wide as the page; its sentence stays readable
-        v.addWidget(about)
+        v.addLayout(readable(about))            # the card is as wide as the page; its sentence stays readable
     v.addSpacing(TIGHT)
     for part in parts:
         v.addLayout(part) if isinstance(part, QLayout) else v.addWidget(part)
@@ -656,9 +653,6 @@ class MainWindow(QWidget):
                               "in Filed automatically. Two alike, or one alone, stay a question for you. In "
                               "\u201cOnly the ones I tick\u201d mode ClassiFile always asks first.")
         folders_text.setObjectName("secondary")
-        folders_text.setWordWrap(True)
-        folders_text.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
-        folders_text.setMaximumWidth(READABLE)
         self.auto_level = QComboBox()             # the level of automatic filing; every change is recorded
         self.auto_level.setView(QListView())
         for name, words in AUTO_LEVELS:
@@ -704,7 +698,7 @@ class MainWindow(QWidget):
         v.addWidget(settings_card(
             "Automatic filing", "A document is filed without a question when one category is clearly ahead of the "
             "others and already holds 3 documents you confirmed. Stricter levels ask you more often and make fewer "
-            "mistakes.", auto_row, scope_row, self.auto_ticks, self.auto_folders, folders_text))
+            "mistakes.", auto_row, scope_row, self.auto_ticks, self.auto_folders, readable(folders_text)))
         v.addWidget(settings_card(
             "Learning", "ClassiFile learns from the documents you file, confirm or move, and from folders you have "
             "already organized. It updates by itself after every 10 of them, and keeps the previous version if the "
