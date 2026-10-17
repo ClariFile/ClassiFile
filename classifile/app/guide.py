@@ -1,5 +1,5 @@
 """Help, About and the first-run tour (decision record 2.9): plain words about what ClassiFile does and never does.
-The pages use the whole window; their text keeps a readable line length."""
+The pages use the whole window, their text too."""
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QApplication, QDialog, QFrame, QHBoxLayout, QLabel, QPlainTextEdit, QPushButton, QScrollArea, QStackedWidget,
@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (
 )
 
 from classifile import __version__
-from classifile.app.widgets import GROUP, PAD, PANEL, RELATED, SECTION, SUPPORTED, TIGHT, box, readable
+from classifile.app.widgets import GROUP, PAD, PANEL, RELATED, SECTION, SUPPORTED, TIGHT, box, wrapped
 SOURCE = "https://github.com/ClariFile/ClassiFile"
 RELEASES = SOURCE + "/releases"
 
@@ -91,8 +91,9 @@ ABOUT = _sections(_ABOUT, [
 
 def text_page(title, sections, extra=None):
     """A page of captioned sections, each a card of headed paragraphs (the Settings card style). The cards span
-    the whole page (record A10: no empty band at the right); only the text inside keeps a readable line length. sections: [(caption, [(heading, text)])]. title: a lead line under the
-    page's own title (None for none); extra: a widget placed after it (buttons)."""
+    the whole page and their text fills them (record A10: no empty band at the right).
+    sections: [(caption, [(heading, text)])]. title: a lead line under the page's own title (None for none);
+    extra: a widget placed after it (buttons)."""
     outer = QScrollArea()
     outer.setWidgetResizable(True)
     outer.setFrameShape(QFrame.NoFrame)
@@ -126,7 +127,7 @@ def text_page(title, sections, extra=None):
             p.setOpenExternalLinks(True)        # only when the user clicks: ClassiFile itself connects to nothing
             p.setTextInteractionFlags(Qt.TextBrowserInteraction)
             inside.addWidget(h)
-            inside.addLayout(readable(p))       # the card is as wide as the page; its text stays readable
+            inside.addWidget(wrapped(p))        # the text fills the card, as wide as the page
         v.addWidget(card)
     v.addStretch(1)
     outer.texts = [title or ""] + [t for _, topics in sections for s in topics for t in s]

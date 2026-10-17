@@ -38,10 +38,11 @@ The record above is authoritative.
 - If git is available, commit after each completed step with a clear message.
 - The target is a native Windows desktop app. Keep paths and file operations cross-platform.
 - Keep the interface minimal: categories, documents, minimal status, decision prompts.
-- **Full width, every page (record A10). This mistake has been made many times: do not repeat it.**
-  - Never cap a page, column or card with `setMaximumWidth`. Cards, lists and panels reach the page's right edge, with no empty band at the right.
-  - Only running text keeps a readable line length: put a wrapped label in a card with `readable(label)` from `classifile/app/widgets.py`. Never call `setMaximumWidth(READABLE)` on a label straight in a vertical layout: Qt then cuts its last lines off.
-  - `tests/test_app.py::test_empty_state_and_settings` fails on an empty right band or cut-off text on Help, About and Settings. Extend it when you add a page. Render the page (`tools.screenshots`) and look at it before reporting.
+- **Full width, every page, text included (owner's rule, 2026-10-17). This mistake has been made many times: do not repeat it.**
+  - Never cap a page, column, card or label with `setMaximumWidth`. Cards, lists and panels reach the page's right edge, and the text inside a card fills the card: it wraps at the card's right padding, never earlier. No empty band at the right, anywhere.
+  - There is no "readable line length". Never reintroduce one (no `READABLE`, no `readable()`, no stretch after a label to keep it narrow), even where the decision record or a design guide suggests it.
+  - Put running text in a card with `wrapped(label)` from `classifile/app/widgets.py`, added straight to the card's vertical layout. Only a control in the same row (a list, a button) may stop text short of the card's right edge.
+  - `tests/test_app.py::test_empty_state_and_settings` fails on an empty right band, on text that stops short of its card's right edge, and on cut-off text on Help, About and Settings. Extend it when you add a page. Render the page at 1536x864 (`tools.screenshots`) and look at the right side of every card before reporting.
 
 ## Fixtures and references
 

@@ -127,7 +127,6 @@ CHOICES_MAX = 680       # the "Choose another…" panel of a decision item
 SEARCH_MAX = 480        # the search field
 NAME_FIELD_MAX = 340    # the name field of a new-subject question
 DIALOG_MIN = 440        # the category picker's own window
-READABLE = 720          # the widest a paragraph of running text gets on a full-width page: about 75 characters
 LEARN_LIST_MAX = 360    # the folders of "Learn from my existing folders" scroll beyond this height
 PICKER_LIST_MIN = 200   # a long category name ends in "…" and never widens the picker
 PICKER_LIST_MAX = 280   # the category picker's list scrolls beyond this height

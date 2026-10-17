@@ -7,13 +7,13 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtCore import QMimeData, QPoint, Qt, QUrl  # noqa: E402
 from PySide6.QtGui import QDragEnterEvent, QDragLeaveEvent, QDropEvent, QKeySequence  # noqa: E402
 from PySide6.QtTest import QTest  # noqa: E402
-from PySide6.QtWidgets import QApplication, QFrame, QLabel, QPushButton  # noqa: E402
+from PySide6.QtWidgets import QApplication, QFrame, QLabel, QPushButton, QWidget  # noqa: E402
 
 from classifile.app.main import (  # noqa: E402
     ABOUT, ALL, DECIDE, DOC, HELP, RECENT, SETTINGS, MainWindow, problem_report, safe_reason,
 )
 from classifile.app.guide import ReportDialog  # noqa: E402
-from classifile.app.widgets import GROUP, RELATED, reduced_motion  # noqa: E402
+from classifile.app.widgets import GROUP, PANEL, RELATED, reduced_motion  # noqa: E402
 from classifile.app.reasons import reason_text  # noqa: E402
 from conftest import SAMPLE, EXPECT, source_state  # noqa: E402
 
@@ -157,6 +157,16 @@ def test_empty_state_and_settings(app, make_org):
         right = page.mapTo(w, page.rect().topRight()).x()
         cards = [c for c in page.findChildren(QFrame, "settingsCard") if c.isVisible()]
         assert cards and all(right - c.mapTo(w, c.rect().topRight()).x() <= 2 * GROUP for c in cards), key
+        def beside(lab, c):     # a control to the label's right in its row (a list, a Change… button)
+            r = lab.geometry().translated(lab.parentWidget().mapTo(c, QPoint(0, 0)))
+            return any(o.isVisible() and not isinstance(o, QLabel) and o.parentWidget() is lab.parentWidget()
+                       and o.x() > lab.geometry().right() and o.geometry().translated(
+                           o.parentWidget().mapTo(c, QPoint(0, 0))).intersects(r.adjusted(0, 0, 10000, 0))
+                       for o in lab.parentWidget().findChildren(QWidget))
+        narrow = [lab.text()[:40] for c in cards for lab in c.findChildren(QLabel)     # and their text fills them
+                  if lab.isVisible() and lab.wordWrap() and not beside(lab, c) and c.mapTo(w, c.rect().topRight()).x()
+                  - lab.mapTo(w, lab.rect().topRight()).x() > PANEL + 2]
+        assert not narrow, (key, narrow)
         cut = [lab.text()[:40] for lab in page.findChildren(QLabel)       # and no wrapped text has its lines cut off
                if lab.isVisible() and lab.wordWrap() and lab.height() < lab.heightForWidth(lab.width())]
         assert not cut, (key, cut)
