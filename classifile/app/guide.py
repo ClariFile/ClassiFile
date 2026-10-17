@@ -2,12 +2,14 @@
 The pages use the whole window; their text keeps a readable line length."""
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QDialog, QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea, QStackedWidget, QVBoxLayout, QWidget,
+    QApplication, QDialog, QFrame, QHBoxLayout, QLabel, QPlainTextEdit, QPushButton, QScrollArea, QStackedWidget,
+    QVBoxLayout, QWidget,
 )
 
 from classifile import __version__
 from classifile.app.widgets import GROUP, PAD, PANEL, RELATED, SECTION, SUPPORTED, TIGHT, box, readable
 SOURCE = "https://github.com/ClariFile/ClassiFile"
+RELEASES = SOURCE + "/releases"
 
 _HELP = [
     ("What ClassiFile does",
@@ -208,3 +210,37 @@ class TourDialog(QDialog):
     def _learn(self):
         self.learn_chosen = True
         self.accept()
+
+
+class ReportDialog(QDialog):
+    """Help, "Copy problem report": the whole report as it will be copied, so the user sees exactly what they would
+    send. Copy puts it on the clipboard; nothing is saved to a file or sent anywhere."""
+
+    def __init__(self, parent, report):
+        super().__init__(parent)
+        self.setWindowTitle("Problem report")
+        self.setModal(True)
+        self.resize(640, 480)
+        about = QLabel("This is everything the report contains: versions, counts, settings and the last problems. "
+                       "No file names and nothing from your documents. Copy it, then paste it into a message to "
+                       "the person who gave you ClassiFile.")
+        about.setWordWrap(True)
+        self.text = QPlainTextEdit(report)
+        self.text.setReadOnly(True)
+        close = QPushButton("Close")
+        close.clicked.connect(self.reject)
+        self.copy = QPushButton("Copy")
+        self.copy.setObjectName("primary")
+        self.copy.clicked.connect(self._copy)
+        buttons = box(QHBoxLayout(), spacing=RELATED)
+        buttons.addStretch(1)
+        buttons.addWidget(close)
+        buttons.addWidget(self.copy)
+        v = box(QVBoxLayout(self), PANEL, GROUP)
+        v.addWidget(about)
+        v.addWidget(self.text, 1)
+        v.addLayout(buttons)
+
+    def _copy(self):
+        QApplication.clipboard().setText(self.text.toPlainText())
+        self.copy.setText("Copied")

@@ -419,8 +419,8 @@
 
 **CP5: freeze and the final evaluation (2026-10-16, record 2.10)**
 - Frozen: matching version 6, Strict with 3 confirmed documents, the folder rules, the update check and Check these.
-- `tools.final_eval` read `datainal-eval` once (28 documents, 22 families) with version 6 on a catalog copy; the
-  result is `datainal_evaluation.json` (local) and a second run is refused. The owner's category first for 26 of
+- `tools.final_eval` read `data\final-eval` once (28 documents, 22 families) with version 6 on a catalog copy; the
+  result is `data\final_evaluation.json` (local) and a second run is refused. The owner's category first for 26 of
   28 and in the first three for 27; at Strict 18 filed right, 0 wrong, 10 waiting; no new folder (every final
   label is an existing category). Table in docs/LAUNCH.md section 1. Counts on a small held-out set, not a
   promise of accuracy.
@@ -435,6 +435,16 @@
 - Help, About and Settings: cards span the full width again; long text was cut off where a wrapped label had a
   maximum width straight in a column (Settings' new-folders sentence too). `readable()` in widgets.py, and a test.
 - Next: the clean-laptop test (`docs/INSTALLER_TEST.md`).
+
+**Pilot features (2026-10-17)**
+- Help, "Copy problem report…": a dialog shows the whole report (versions, Windows, counts, settings and their
+  changes, the matching log, the last ten problems), and Copy puts it on the clipboard; no file, no network. Documents
+  are "document N"; problem reasons that may name a file or folder are given only by their kind. A test checks
+  that no file name, path, category name or document line gets in.
+- Help, "Check for updates": opens the releases page in the browser, only on a click.
+- README and the guide (sections 12 and 13): the SmartScreen warning, updates, uninstalling, and the problem
+  report. The new Burmese sections are marked for the owner's review.
+- `docs/guide/pilot.md`: one page, English and Burmese, for the first week of the pilot.
 
 ## Development results so far
 

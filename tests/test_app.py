@@ -9,7 +9,10 @@ from PySide6.QtGui import QDragEnterEvent, QDragLeaveEvent, QDropEvent, QKeySequ
 from PySide6.QtTest import QTest  # noqa: E402
 from PySide6.QtWidgets import QApplication, QFrame, QLabel, QPushButton  # noqa: E402
 
-from classifile.app.main import ABOUT, ALL, DECIDE, DOC, HELP, RECENT, SETTINGS, MainWindow  # noqa: E402
+from classifile.app.main import (  # noqa: E402
+    ABOUT, ALL, DECIDE, DOC, HELP, RECENT, SETTINGS, MainWindow, problem_report, safe_reason,
+)
+from classifile.app.guide import ReportDialog  # noqa: E402
 from classifile.app.widgets import GROUP, RELATED, reduced_motion  # noqa: E402
 from classifile.app.reasons import reason_text  # noqa: E402
 from conftest import SAMPLE, EXPECT, source_state  # noqa: E402
@@ -329,6 +332,17 @@ def test_failed_filing_leaves_nothing_half_done_and_the_error_stays(app, samples
     w.show_view(ALL)
     w.refresh()
     assert w.notices.items[0][0] == "error"                        # errors stay until resolved
+    report = problem_report(w.org.catalog)          # Help, "Copy problem report": no names, paths or document text
+    text = " ".join(t for (t,) in w.org.catalog.all("SELECT text FROM extraction_units"))
+    lines = [ln.strip() for ln in text.splitlines() if len(ln.strip()) > 20]
+    assert lines and not any(ln in report for ln in lines)
+    assert original.stem not in report and str(tmp_path) not in report and "Course Notes" not in report
+    assert "the original file had moved" in report and "needs_decision 1" in report
+    assert safe_reason("encrypted PDF") == "encrypted PDF" and "C:" not in safe_reason("corrupt or unreadable C:\\x")
+    dialog = ReportDialog(w, report)                # shown in full first; Copy goes to the clipboard only
+    dialog.copy.click()
+    assert dialog.text.toPlainText() == report == QApplication.clipboard().text()
+    dialog.close()
     w.remove_docs([_doc(w, original.name)])
     assert not _notices(w)
     _close(w, rec)

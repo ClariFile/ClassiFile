@@ -4,6 +4,8 @@ Run: .venv\\Scripts\\python -m classifile.app
 """
 import json
 import os
+import platform
+import re
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
@@ -27,7 +29,9 @@ from classifile.app import app_icon, make_app
 from classifile.app.autofiled import AutoPage
 from classifile.app.decision import DecisionPage
 from classifile.app.details import DetailsPanel
-from classifile.app.guide import ABOUT as ABOUT_TEXT, HELP as HELP_TEXT, TourDialog, text_page
+from classifile.app.guide import (
+    ABOUT as ABOUT_TEXT, HELP as HELP_TEXT, RELEASES, ReportDialog, TourDialog, text_page,
+)
 from classifile.app.learn import LearnDialog
 from classifile.app.models import DOC, SORTS, CategoryModel, DocumentFilter, DocumentModel, sorted_by_name
 from classifile.app.widgets import (
@@ -39,7 +43,7 @@ from classifile.app.widgets import (
 from classifile.copies.engine import CopyError
 from classifile.catalog.db import Catalog
 from classifile import __version__
-from classifile.matching import LEVELS
+from classifile.matching import AUTO_DEFAULT, LEVELS
 from classifile.reader import RECORD_VERSION
 from classifile.organizer import Organizer, is_cloud_synced, read_and_analyze
 from classifile.worker import WorkerPool
@@ -86,6 +90,66 @@ def check_text(found):
         return "too few documents in separate families to measure it yet"
     text = (f"your category first for {new['first']} of {new['known']}, filed wrongly at {level}: {new['wrong']}")
     return text + (f" (the version before: {old['first']} and {old['wrong']})" if old else "")
+
+
+# Problem reasons that are fixed wording (reader, worker, organizer). Any other reason may name a file or folder,
+# so the problem report says only what kind of problem it was.
+FIXED_REASONS = re.compile(
+    r"too large|source could not be opened|empty file|source changed during reading|reading timed out"
+    r"|reader process stopped unexpectedly|internal error \(\w+\)|error while reading \w+ \(\w+\)"
+    r"|encrypted or legacy-format Office file|corrupt or unreadable \w+|required part missing"
+    r"|part too large to read safely|XML part declares a DOCTYPE|malformed XML part|not an ODF text document"
+    r"|encrypted ODT|ODT has no text body|DOCX has no body|PPTX has no slides|encrypted PDF|PDF has no pages"
+    r"|The last filing didn't finish\. Choose a category again\."
+    r"|The copy didn't match the original, so it was discarded\. Try again\.|Choose an output folder first\.")
+REASON_KINDS = (("output folder", "the output folder couldn't be found"),
+                ("no longer at", "the original file had moved"),
+                ("has changed since it was imported", "the original file had changed"))
+
+
+def safe_reason(reason):
+    """A problem reason fit for the problem report: fixed wording as it is, anything else only by its kind."""
+    if FIXED_REASONS.fullmatch(reason):
+        return reason
+    return next((kind for key, kind in REASON_KINDS if key in reason), "a copying problem (wording left out)")
+
+
+def problem_report(catalog):
+    """Help, "Copy problem report": versions, counts, settings and the last problems, for the owner of a pilot.
+    Never a file name, a path, a category name or document text: documents are "document 12" (catalog row)."""
+    one = lambda sql, *a: catalog.one(sql, *a)[0]
+    status = dict(catalog.all("SELECT status, COUNT(*) FROM documents GROUP BY status"))
+    categories = one("SELECT COUNT(*) FROM categories WHERE deleted_at IS NULL")
+    edited = one("SELECT COUNT(*) FROM copies WHERE status = 'edited'")
+    lines = [f"ClassiFile {__version__}", f"Windows: {platform.platform()}",
+             f"Python {platform.python_version()} · catalog schema {catalog.schema_version} · extraction record "
+             f"{RECORD_VERSION}", "",
+             "Documents: " + ", ".join(f"{k} {status.get(k, 0)}" for k in
+                                       ("filed", "needs_decision", "pending", "failed", "example")),
+             f"Categories: {categories} · edited copies flagged: {edited} · output folder: "
+             + ("set" if catalog.get_setting("output_root") else "not set"), ""]
+    lines.append("Settings: " + ", ".join(
+        f"{k} {catalog.get_setting(k, d)}" for k, d in (("auto_level", AUTO_DEFAULT), ("auto_scope", "all"),
+                                                        ("auto_folders", "off"), ("appearance", "system"),
+                                                        ("motion", "system"))))
+    changes = catalog.all("SELECT key, value, at FROM setting_changes ORDER BY id DESC LIMIT 10")
+    lines.append("Setting changes:" + ("" if changes else " none"))
+    for r in changes:
+        value = f"{len(json.loads(r['value']))} ticked" if r["key"] == "auto_selected" else r["value"]
+        lines.append(f"  {short_date(r['at'])} {r['key']} {value}")
+    lines.append("Matching:")
+    for r in catalog.matcher_log():
+        found = json.loads(r["check_json"]) if r["check_json"] else None
+        lines.append(f"  version {r['version']} · {short_date(r['created_at'])} · {r['trigger'] or 'user'} · "
+                     f"{r['documents']} documents, {r['categories']} categories · {r['status']}"
+                     + (f" · {check_text(found)}" if check_text(found) else ""))
+    problems = catalog.all("SELECT rowid, status, status_reason, updated_at FROM documents WHERE status_reason IS NOT"
+                         " NULL AND status != 'filed' ORDER BY updated_at DESC LIMIT 10")
+    lines.append("Last problems:" + ("" if problems else " none"))
+    for r in problems:
+        lines.append(f"  {short_date(r['updated_at'])} document {r['rowid']} ({r['status']}): "
+                     f"{safe_reason(r['status_reason'])}")
+    return "\n".join(lines)
 
 
 def settings_card(title, sentence, *parts):
@@ -244,6 +308,9 @@ class MainWindow(QWidget):
         if tour.learn_chosen:
             self.learn_folders()
 
+    def show_report(self):
+        ReportDialog(self, problem_report(self.org.catalog)).exec()
+
     def first_run(self):
         """On the first start: the tour, then the output folder."""
         if self.org.catalog.get_setting("tour_seen") != "yes":
@@ -344,10 +411,16 @@ class MainWindow(QWidget):
         tour.clicked.connect(self.show_tour)
         learn = QPushButton("Learn from my existing folders…")
         learn.clicked.connect(self.learn_folders)
+        report = QPushButton("Copy problem report…")
+        report.setToolTip("Shows the report first. No file names and nothing from your documents.")
+        report.clicked.connect(self.show_report)
+        updates = QPushButton("Check for updates")
+        updates.setToolTip("Opens the ClassiFile download page in your browser")
+        updates.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(RELEASES)))  # only on a click (rule 5)
         help_buttons = QWidget()
         hb = box(QHBoxLayout(help_buttons), spacing=RELATED)
-        hb.addWidget(tour)
-        hb.addWidget(learn)
+        for b in (tour, learn, report, updates):
+            hb.addWidget(b)
         self.help_page = text_page("How ClassiFile works", HELP_TEXT, help_buttons)
         self.about_page = text_page(None, ABOUT_TEXT)  # the page title says "About ClassiFile" already
         for page in (self.table, self.empty_state, self.decision, self.auto_page, self.settings_page, self.no_match,

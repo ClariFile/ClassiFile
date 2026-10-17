@@ -84,3 +84,18 @@ Sometimes a filed document reads much more like another category. It appears und
 - ClassiFile works best with English documents for now.
 - It needs about 3 documents in a category before it files there by itself, and works better with 5 or more.
 - Photos (JPG, PNG) can't be added yet.
+
+## 12. Installing, updating and removing
+
+- **Windows protected your PC:** when you run the setup file, Windows may show this blue SmartScreen box, because
+  ClassiFile is new. Click **More info**, then **Run anyway**.
+- **Updates:** **Help → Check for updates** opens the download page in your browser. ClassiFile never checks by
+  itself.
+- **Uninstall:** Windows **Settings → Apps → Installed apps** → ClassiFile → **⋯ → Uninstall**. Your original files,
+  the organized copies in your output folder and ClassiFile's catalog (`%LOCALAPPDATA%\ClassiFile`) stay.
+
+## 13. Reporting a problem
+
+**Help → Copy problem report…** shows a short report first: version numbers, counts, settings and the last problems.
+It has no file names and nothing from your documents. Press **Copy** and paste it into a message. Never send your
+documents themselves.

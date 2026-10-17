@@ -30,7 +30,7 @@ FILES = {
 NEW_SUBJECT = ("Photography", "aperture shutter lens exposure tripod focus portrait landscape",
                ["Camera settings", "Night photos", "Lens comparison"])
 VIEWS = ("empty", "all", "category", "decide", "decide-details", "auto", "auto-details", "settings",
-         "settings-advanced", "help", "about", "learn", "tour")
+         "settings-advanced", "help", "about", "learn", "tour", "report")
 
 
 def make_pdf(path, title, words, n):
@@ -87,9 +87,9 @@ def render(out, size=(1280, 720), theme="light", views=VIEWS):
     from PySide6.QtGui import QFont, QFontDatabase
     from PySide6.QtWidgets import QApplication
     from classifile.app import make_app
-    from classifile.app.guide import TourDialog
+    from classifile.app.guide import ReportDialog, TourDialog
     from classifile.app.learn import LearnDialog
-    from classifile.app.main import ABOUT, ALL, AUTO, DECIDE, HELP, SETTINGS, MainWindow
+    from classifile.app.main import ABOUT, ALL, AUTO, DECIDE, HELP, SETTINGS, MainWindow, problem_report
     from classifile.catalog.db import Catalog
     from classifile.organizer import Organizer
 
@@ -183,6 +183,12 @@ def render(out, size=(1280, 720), theme="light", views=VIEWS):
             pump()
             t.grab().save(str(out / "tour.png"))
             t.close()
+        if "report" in views:
+            r = ReportDialog(w, problem_report(w.org.catalog))
+            r.show()
+            pump()
+            r.grab().save(str(out / "report.png"))
+            r.close()
         w.close()
         w.org.catalog.close()
         pump(0.2)

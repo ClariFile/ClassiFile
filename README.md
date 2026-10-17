@@ -28,18 +28,28 @@ own.
 
 ## Install
 
-An installer is coming with v1. Until then, ClassiFile runs from source on Windows:
+1. Download `ClassiFile-<version>-setup.exe` from the
+   [releases page](https://github.com/ClariFile/ClassiFile/releases) and run it. It installs for your Windows user
+   only, without an administrator prompt. Reading text in pictures (OCR) is included.
+2. **If Windows shows "Windows protected your PC"** (SmartScreen): click **More info**, then **Run anyway**. Windows
+   shows this for programs that are new and not yet widely downloaded; ClassiFile is not signed with a paid
+   certificate.
 
-1. Install [Python 3.12](https://www.python.org/downloads/) and, for reading text in pictures,
-   [Tesseract OCR](https://github.com/UB-Mannheim/tesseract/wiki) (in `C:\Program Files\Tesseract-OCR`).
-2. In a terminal, in the ClassiFile folder:
-   ```
-   py -3.12 -m venv .venv
-   .venv\Scripts\python -m pip install -r requirements.txt
-   .venv\Scripts\python -m classifile.app
-   ```
+The internet is needed only to download. ClassiFile itself makes no connection. *Help → Check for updates* opens the
+releases page in your browser, only when you click it.
 
-The internet is needed only to download and install. ClassiFile itself makes no connection.
+**Uninstall:** Windows **Settings → Apps → Installed apps** → ClassiFile → **⋯ → Uninstall**. Your original files,
+the organized copies in your output folder and ClassiFile's catalog (`%LOCALAPPDATA%\ClassiFile`) stay. Delete those
+two folders yourself if you no longer want them.
+
+**From source** (developers): install [Python 3.12](https://www.python.org/downloads/) and
+[Tesseract OCR](https://github.com/UB-Mannheim/tesseract/wiki) (in `C:\Program Files\Tesseract-OCR`), then in the
+ClassiFile folder:
+```
+py -3.12 -m venv .venv
+.venv\Scripts\python -m pip install -r requirements.txt
+.venv\Scripts\python -m classifile.app
+```
 
 ## First steps
 
