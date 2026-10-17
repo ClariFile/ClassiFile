@@ -4,12 +4,12 @@ import zlib
 from pathlib import Path
 
 from PySide6.QtCore import (
-    QEasingCurve, QEvent, QPoint, QPointF, QPropertyAnimation, QRectF, QSize, Qt, QTimer, Signal,
+    QEasingCurve, QEvent, QObject, QPoint, QPointF, QPropertyAnimation, QRectF, QSize, Qt, QTimer, Signal,
 )
 from PySide6.QtGui import QColor, QIcon, QPainter, QPalette, QPen, QPixmap
 from PySide6.QtWidgets import (
-    QDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QPushButton, QScrollArea,
-    QSizePolicy, QToolButton, QVBoxLayout, QWidget,
+    QAbstractItemView, QAbstractScrollArea, QApplication, QDialog, QFrame, QHBoxLayout, QLabel, QLineEdit,
+    QListWidget, QListWidgetItem, QPushButton, QScrollArea, QSizePolicy, QToolButton, QVBoxLayout, QWidget,
 )
 
 QWIDGETSIZE_MAX = (1 << 24) - 1
@@ -227,6 +227,51 @@ def reduced_motion():
 def motion(ms):
     """A duration, or 0 when the system asks for reduced motion."""
     return 0 if reduced_motion() else ms
+
+
+class SmoothScroll(QObject):
+    """A mouse wheel glides every list and page to its new place instead of jumping (instant with reduced motion).
+    Touchpads already scroll smoothly and are left alone, as are Ctrl+wheel and sideways scrolling."""
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.glides = {}                # scroll bar -> (its animation, the place it is heading for)
+
+    def eventFilter(self, obj, e):
+        if e.type() != QEvent.Wheel or e.phase() != Qt.NoScrollPhase or e.modifiers() or not e.angleDelta().y():
+            return False
+        area = obj.parent()             # only once the wheel reaches a list's or page's own viewport
+        if not isinstance(area, QAbstractScrollArea) or area.viewport() is not obj or not motion(MOTION_SCROLL):
+            return False
+        if isinstance(area, QAbstractItemView):
+            area.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)  # by item, a list can only jump
+        bar = area.verticalScrollBar()
+        if bar.maximum() == bar.minimum():
+            return False
+        glide, target = self.glides.get(bar, (None, bar.value()))
+        if glide is None:
+            glide = QPropertyAnimation(bar, b"value", bar)
+            glide.setEasingCurve(QEasingCurve.OutCubic)
+            glide.setDuration(MOTION_SCROLL)
+            bar.destroyed.connect(lambda *_, b=bar: self.glides.pop(b, None))
+        if glide.state() != QPropertyAnimation.Running:
+            target = bar.value()        # the user may have dragged the bar meanwhile
+        step = QApplication.wheelScrollLines() * bar.singleStep() * e.angleDelta().y() / 120
+        target = max(bar.minimum(), min(bar.maximum(), round(target - step)))
+        self.glides[bar] = glide, target
+        glide.stop()
+        glide.setStartValue(bar.value())
+        glide.setEndValue(target)
+        glide.start()
+        return True
+
+
+def smooth_scrolling(app):
+    """Every wheel turn in the app glides (SmoothScroll); once per application."""
+    if not hasattr(app, "smooth_scroll"):
+        app.smooth_scroll = SmoothScroll(app)
+        app.installEventFilter(app.smooth_scroll)
+    return app.smooth_scroll
 
 
 def unfold(widget, then=None):

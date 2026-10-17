@@ -37,7 +37,8 @@ from classifile.app.models import DOC, SORTS, CategoryModel, DocumentFilter, Doc
 from classifile.app.widgets import (
     CHECKLIST_MAX, DATE_COLUMN_MIN, PANEL, TIGHT, DETAILS_MAX, DETAILS_MIN, DETAILS_WIDTH, FILE_ICON, GROUP, LIST_MIN, MIN_WINDOW,
     MOTION_STANDARD, NARROW, PAD, RELATED, SEARCH_MAX, SECTION, SIDEBAR_WIDTH, SUPPORTED, TOAST, TOAST_LONG,
-    WIDE, WINDOW, box, motion, qt_palette, readable, set_motion, slide_away, style_sheet, use_theme,
+    WIDE, WINDOW, box, motion, qt_palette, readable, set_motion, slide_away, smooth_scrolling, style_sheet,
+    use_theme,
     Collapsible, DropOverlay, ElidedLabel, Notices, PickerDialog, PreviewOverlay, Toast, wrappable,
 )
 from classifile.copies.engine import CopyError
@@ -690,7 +691,7 @@ class MainWindow(QWidget):
             self.motion.addItem(words, name)
         self.motion.activated.connect(lambda *_: self.set_motion(self.motion.currentData()))
         motion_row = box(QHBoxLayout(), spacing=GROUP)
-        motion_row.addWidget(QLabel("Motion (panels that slide, rows that fold away)"), 1)
+        motion_row.addWidget(QLabel("Motion (sliding panels, folding rows, smooth scrolling)"), 1)
         motion_row.addWidget(self.motion)
         self.close_toggle = QCheckBox("Ask before closing when documents are waiting")
         self.close_toggle.toggled.connect(
@@ -2164,6 +2165,7 @@ class MainWindow(QWidget):
 
 def main():
     app = make_app(sys.argv)
+    smooth_scrolling(app)
     w = MainWindow(Organizer(Catalog.open_default()))
     w.show()
     sys.exit(app.exec())

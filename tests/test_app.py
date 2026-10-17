@@ -1502,6 +1502,44 @@ def test_reduced_motion_makes_every_change_instant(app, samples, make_org, monke
     _close(w, rec)
 
 
+def test_a_wheel_turn_glides_and_is_instant_with_reduced_motion(app, monkeypatch):
+    from PySide6.QtCore import QPointF
+    from PySide6.QtGui import QWheelEvent
+    from PySide6.QtWidgets import QScrollArea, QWidget
+    from classifile.app import widgets
+
+    glide = widgets.smooth_scrolling(app)
+    assert widgets.smooth_scrolling(app) is glide                  # one filter, however often it is asked for
+    area = QScrollArea()
+    tall = QWidget()
+    tall.setFixedHeight(5000)
+    area.setWidget(tall)
+    area.resize(300, 300)
+    area.show()
+    bar = area.verticalScrollBar()
+
+    def wheel(phase=Qt.NoScrollPhase):
+        e = QWheelEvent(QPointF(10, 10), QPointF(area.viewport().mapToGlobal(QPoint(10, 10))), QPoint(0, 0),
+                        QPoint(0, -120), Qt.NoButton, Qt.NoModifier, phase, False)
+        QApplication.sendEvent(area.viewport(), e)
+
+    monkeypatch.setattr(widgets, "reduced_motion", lambda: False)
+    wheel()
+    step = QApplication.wheelScrollLines() * bar.singleStep()
+    assert bar.value() < step                                      # not there at once: it glides
+    _pump(app, lambda: bar.value() == step, timeout=2)
+    wheel()
+    wheel()                                                        # quick turns add up
+    _pump(app, lambda: bar.value() == 3 * step, timeout=2)
+    monkeypatch.setattr(widgets, "reduced_motion", lambda: True)
+    wheel()
+    assert bar.value() == 4 * step                                 # Qt's own jump, at once
+    monkeypatch.setattr(widgets, "reduced_motion", lambda: False)
+    wheel(Qt.ScrollUpdate)                                         # a touchpad: already smooth, left to Qt
+    assert bar.value() == 5 * step
+    area.close()
+
+
 def test_new_folders_by_itself_with_one_summary_and_a_one_click_rename(app, make_org, tmp_path):
     from classifile.app.main import AUTO
     from test_matching import SUBJECTS, _add, _pdf

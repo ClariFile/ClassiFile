@@ -446,6 +446,12 @@
   report. The new Burmese sections are marked for the owner's review.
 - `docs/guide/pilot.md`: one page, English and Burmese, for the first week of the pilot.
 
+**1.0.0-rc.2 for the pilot (2026-10-17)**
+- Smooth scrolling: a mouse wheel turn glides every list and page (160 ms, eased; quick turns add up). Instant
+  with reduced motion; touchpads, Ctrl+wheel and sideways scrolling are left to Qt. Item lists scroll by pixel.
+- Built with `installer.build` (`dist\ClassiFile-1.0.0-rc.2-setup.exe`, about 52 MB); the built app's self-test
+  on the six samples: PASS. The clean-laptop test (`docs/INSTALLER_TEST.md`) is still open.
+
 ## Development results so far
 
 These counts describe development data only. They are not accuracy estimates.
