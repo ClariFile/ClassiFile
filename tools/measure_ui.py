@@ -62,6 +62,7 @@ def build(base):
 
 
 def measure(base):
+    from PySide6.QtCore import QPoint
     from PySide6.QtGui import QFont, QFontDatabase
     from PySide6.QtWidgets import QScrollArea
 
@@ -145,12 +146,15 @@ def measure(base):
     doc = item.ids[0]
     item.toggle_expanded()
     item.picker.field.setText("my draft")
+    pump(lambda: item.expanded.maximumHeight() == (1 << 24) - 1, timeout=2)   # opened, and scrolled into view
     pump()
-    bar.setValue(bar.maximum() // 3)
+    w.decision.findChild(QScrollArea).ensureWidgetVisible(item)   # in view, as when the user types in it
     item.picker.field.setFocus()
     item.picker.field.setCursorPosition(3)
     pump()
     at = bar.value()
+    view = w.decision.findChild(QScrollArea).viewport()
+    on_screen = item.mapTo(view, QPoint()).y()      # where the card in use sits in the window
     del stalls[:]
     t = time.perf_counter()
     w.import_paths([str(p) for p in sorted((base / "more").iterdir())])
@@ -166,7 +170,8 @@ def measure(base):
                     "text": same.picker.field.text() if same else None,
                     "cursor": same.picker.field.cursorPosition() if same else None,
                     "focus_in_field": bool(same and same.picker.field.hasFocus()),
-                    "scroll_before": at, "scroll_after": bar.value()}
+                    "scroll_before": at, "scroll_after": bar.value(),
+                    "card_y_before": on_screen, "card_y_after": same.mapTo(view, QPoint()).y() if same else None}
     w.close()
     return out
 
@@ -174,7 +179,7 @@ def measure(base):
 def report(out):
     i, d = out["imports"], out["draft"]
     kept = d["panel_open"] and d["text"] == "my draft" and d["focus_in_field"] and d["cursor"] == 3 \
-        and d["scroll_before"] == d["scroll_after"]
+        and d["card_y_before"] == d["card_y_after"]
     row = lambda name, key: f"  {name:<34}{out[key][0]:>8} ms  {out[key][1]:>4} statements"
     return "\n".join([
         f"{out['documents']} documents ({out['waiting']} waiting, {out['decision_cards']} decision cards),"
@@ -189,7 +194,7 @@ def report(out):
         row("One search key (slowest)", "search_key_slowest"),
         f"A card in use during the imports: {'kept' if kept else 'not kept'} (panel open {d['panel_open']},"
         f" text {d['text']!r}, cursor {d['cursor']}, focus {d['focus_in_field']},"
-        f" scroll {d['scroll_before']} -> {d['scroll_after']})"])
+        f" card on screen at {d['card_y_before']} -> {d['card_y_after']} px)"])
 
 
 def main(argv=None):

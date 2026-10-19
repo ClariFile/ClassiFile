@@ -3,9 +3,9 @@ import sys
 from pathlib import Path
 
 from PySide6.QtCore import (
-    QEasingCurve, QEvent, QObject, QPoint, QPointF, QPropertyAnimation, QRectF, QSize, Qt, QTimer, Signal,
+    QEasingCurve, QEvent, QObject, QPoint, QPointF, QPropertyAnimation, QRect, QRectF, QSize, Qt, QTimer, Signal,
 )
-from PySide6.QtGui import QColor, QIcon, QPainter, QPalette, QPen, QPixmap
+from PySide6.QtGui import QColor, QIcon, QIconEngine, QPainter, QPalette, QPen, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView, QAbstractScrollArea, QApplication, QDialog, QFrame, QHBoxLayout, QLabel, QLineEdit,
     QListWidget, QListWidgetItem, QPushButton, QScrollArea, QSizePolicy, QToolButton, QVBoxLayout, QWidget,
@@ -45,6 +45,7 @@ QLabel#strong {{ font-weight: {WEIGHT_STRONG}; }}
 QLabel#secondary, QLabel#processing {{ font-size: {TEXT_SECONDARY}px; color: {t['secondary']}; }}
 QLabel#section {{ font-size: {TEXT_CAPTION}px; font-weight: {WEIGHT_STRONG}; color: {t['secondary']};
                  letter-spacing: {SPACED}px; }}
+QLabel#column {{ font-size: {TEXT_CAPTION}px; font-weight: {WEIGHT_STRONG}; color: {t['secondary']}; }}
 QLabel#brand {{ font-size: {TEXT_HEADING}px; font-weight: {WEIGHT_STRONG}; }}
 QPushButton {{ border: {HAIR}px solid {t['control']}; border-radius: {RADIUS_CONTROL}px; background: transparent;
                color: {t['text']}; padding: {RELATED - HAIR}px {GROUP - HAIR}px; min-height: {CONTROL_TEXT}px;
@@ -59,7 +60,7 @@ QPushButton#primary:disabled {{ background: {t['disabled_fill']}; color: {t['dis
                                 border-color: {t['disabled_fill']}; }}
 QToolButton {{ color: {t['text']}; }}
 QToolButton::menu-indicator {{ image: none; width: 0; }}
-QPushButton#link, QToolButton#link {{ border-color: transparent; color: {t['text']};
+QPushButton#link, QToolButton#link {{ border-color: transparent; color: {t['link']};
                                       text-decoration: underline; padding: {RELATED - HAIR}px {RELATED - HAIR}px; }}
 QToolButton#disclosure {{ background: transparent; border: {HAIR}px solid transparent;
                           border-radius: {RADIUS_CONTROL}px; font-weight: {WEIGHT_STRONG};
@@ -73,11 +74,12 @@ QPushButton#icon {{ border-color: transparent; padding: {RELATED - HAIR}px 0; mi
 QPushButton#quiet {{ border-color: transparent; }}
 QPushButton#quiet:checked, QPushButton#accent {{ border-color: {t['control']}; }}
 QPushButton#accent {{ font-weight: {WEIGHT_STRONG}; }}
-/* Focus changes only the border colour: every control keeps its size. */
-QPushButton:focus, QPushButton#link:focus, QPushButton#icon:focus, QPushButton#quiet:focus, QToolButton#more:focus,
-QToolButton#disclosure:focus, QLineEdit:focus, QComboBox:focus {{ outline: none; border-color: {t['accent']}; }}
-QPushButton#accent:focus {{ border-color: {t['text']}; }}
-QPushButton#primary:focus {{ border-color: {t['text']}; }}
+/* Keyboard focus is one ring for every control (FocusRing), shown only after Tab; nothing else draws focus.
+   A text field also shows where typing goes, by its border, however it got the focus. */
+QPushButton:focus, QToolButton:focus, QComboBox:focus, QCheckBox:focus, QRadioButton:focus {{ outline: none; }}
+QLineEdit:focus {{ border-color: {t['accent']}; }}
+QFrame#focusRing {{ border: {RING}px solid {t['accent']}; border-radius: {RADIUS_CONTROL + RING}px;
+                    background: transparent; }}
 QPushButton#nav {{ text-align: left; border: none; background: transparent; color: {t['text']};
                    padding: {NAV_PAD}px {GROUP - BAR}px; border-left: {BAR}px solid transparent; border-radius: 0;
                    max-height: none; }}
@@ -91,12 +93,10 @@ QPushButton#nav[prominent="true"]:hover {{ background: {t['hover']}; }}
 QFrame#settingsCard {{ background: {t['base']}; border: {HAIR}px solid {t['divider']};
                        border-radius: {RADIUS_PANEL}px; }}
 QPushButton#nav:hover {{ background: {t['hover']}; }}
-QPushButton#nav:focus {{ background: {t['hover']}; }}
 /* The lists keep a border of one colour or none, so focus is seen and nothing moves. */
 QTreeView, QListWidget {{ border: {HAIR}px solid transparent; border-radius: {RADIUS_ROW}px;
                           background: {t['base']}; color: {t['text']}; outline: none; }}
 QTreeView#categories {{ background: transparent; }}
-QTreeView:focus, QListWidget:focus {{ border-color: {t['accent']}; }}
 QTreeView::item {{ min-height: {ROW - 2 * HAIR}px; border-bottom: {HAIR}px solid {t['divider']};
                      padding-left: {RELATED}px; color: {t['text']}; }}
 QTreeView::item:hover, QListWidget::item:hover {{ background: {t['hover']}; }}
@@ -141,12 +141,10 @@ QFrame#toast QPushButton {{ color: {t['on_toast']}; border: {HAIR}px solid {t['o
                             background: transparent; }}
 QFrame#bulk {{ border-radius: {RADIUS_CONTROL}px; background: {t['bulk']}; }}
 /* Rows of the decision and auto-filed lists: the list colour; hover is the hover colour;
-   the inspected row has the selection tint and bar; a focused row has the bar alone. The bar is always there
-   (transparent), so nothing moves. */
+   the inspected row has the selection tint and bar. The bar is always there (transparent), so nothing moves. */
 QFrame#row {{ border: none; border-bottom: {HAIR}px solid {t['divider']}; border-left: {BAR}px solid transparent;
               background: {t['base']}; }}
 QFrame#row:hover {{ background: {t['hover']}; }}
-QFrame#row:focus {{ border-left-color: {t['accent']}; }}
 QFrame#row[inspected="true"] {{ background: {t['selection']}; border-left-color: {t['accent']}; }}
 QScrollArea, QWidget#qt_scrollarea_viewport, QWidget#qt_scrollarea_viewport > QWidget {{ background: transparent; }}
 /* scroll areas and what they hold show the surface they sit on */
@@ -263,6 +261,72 @@ class SmoothScroll(QObject):
         glide.setEndValue(target)
         glide.start()
         return True
+
+
+class FocusRing(QObject):
+    """Where the keyboard is: one rounded ring in the accent colour around the focused control, the same for every
+    control. It appears when Tab (or Shift+Tab) moves the focus and follows the focus while the keyboard is in use;
+    a click or a switch back from another window hides it, as a browser's focus-visible does. Text fields are left
+    to their own border. The ring is drawn above the window and takes no clicks; it follows the control when it
+    moves, scrolls or changes size, and shows only its visible part."""
+
+    KEYBOARD = (Qt.TabFocusReason, Qt.BacktabFocusReason, Qt.ShortcutFocusReason)
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.target = self.ring = None
+
+    def eventFilter(self, obj, e):
+        t = e.type()
+        if t == QEvent.FocusIn and isinstance(obj, QWidget):
+            if e.reason() in self.KEYBOARD or (self.target is not None and e.reason() == Qt.OtherFocusReason):
+                self.follow(obj)        # the keyboard, or the app moving the focus on while the keyboard is used
+            else:
+                self.follow(None)
+        elif self.target is not None and t in (QEvent.Move, QEvent.Resize, QEvent.Hide, QEvent.Show)                 and obj is not self.ring and isinstance(obj, QWidget)                 and (obj is self.target or obj.isAncestorOf(self.target)):
+            self.place()
+        elif t == QEvent.MouseButtonPress and self.target is not None:
+            self.follow(None)
+        return False
+
+    def follow(self, widget):
+        if isinstance(widget, (QLineEdit, QAbstractScrollArea)) and not isinstance(widget, QAbstractItemView):
+            widget = None               # text fields and pages show the focus themselves
+        self.target = widget
+        self.place()
+
+    def place(self):
+        w = self.target
+        try:
+            shown = w.visibleRegion().boundingRect() if w is not None and w.isVisible() else QRect()
+            window = w.window() if w is not None else None
+        except RuntimeError:            # the control was deleted meanwhile
+            shown, window, self.target = QRect(), None, None
+        ring = self.ring
+        try:
+            if ring is not None and (shown.isEmpty() or ring.parent() is not window):
+                ring.hide()
+        except RuntimeError:            # its window was closed
+            ring = self.ring = None
+        if shown.isEmpty():
+            return
+        if ring is None or ring.parent() is not window:
+            ring = self.ring = window.findChild(QFrame, "focusRing") or QFrame(window)
+            ring.setObjectName("focusRing")
+            ring.setAttribute(Qt.WA_TransparentForMouseEvents)
+            ring.setFocusPolicy(Qt.NoFocus)
+        gap = RING + 1                  # the ring sits just outside the control, never over its border
+        ring.setGeometry(QRect(w.mapTo(window, shown.topLeft()), shown.size()).adjusted(-gap, -gap, gap, gap))
+        ring.show()
+        ring.raise_()
+
+
+def keyboard_focus(app):
+    """The focus ring (FocusRing) for every window of the app; once per application."""
+    if not hasattr(app, "focus_ring"):
+        app.focus_ring = FocusRing(app)
+        app.installEventFilter(app.focus_ring)
+    return app.focus_ring
 
 
 def smooth_scrolling(app):
@@ -390,27 +454,58 @@ def wrappable(path):
 _ICONS = {}
 
 
-def format_icon(file_name):
-    """A 16 px page glyph in a muted colour per format."""
-    ext = Path(file_name).suffix.lower()
-    if ext not in _ICONS:
-        pix = QPixmap(16, 16)
+class _Painted(QIconEngine):
+    """An icon drawn on a 16-unit square at whatever size and screen scale it is shown: sharp at 125% and 150%,
+    where a 16 px picture would be stretched and blurred."""
+
+    def __init__(self, draw):
+        super().__init__()
+        self.draw = draw
+
+    def paint(self, p, rect, mode, state):
+        p.save()
+        p.setRenderHint(QPainter.Antialiasing)
+        p.translate(rect.topLeft())
+        p.scale(rect.width() / 16, rect.height() / 16)
+        self.draw(p)
+        p.restore()
+
+    def pixmap(self, size, mode, state):
+        pix = QPixmap(size)
         pix.fill(Qt.transparent)
         p = QPainter(pix)
-        p.setRenderHint(QPainter.Antialiasing)
-        colour = QColor(TYPE_COLOR.get(ext, UNKNOWN_TYPE))
-        p.setPen(QPen(colour, 1.4))
-        p.setBrush(QColor(colour.red(), colour.green(), colour.blue(), 50))
-        p.drawPolygon([QPointF(3, 1.5), QPointF(10, 1.5), QPointF(13.5, 5), QPointF(13.5, 14.5), QPointF(3, 14.5)])
-        p.drawLine(QPointF(5.5, 8), QPointF(11, 8))
-        p.drawLine(QPointF(5.5, 11), QPointF(11, 11))
+        self.paint(p, QRect(QPoint(), size), mode, state)
         p.end()
-        _ICONS[ext] = QIcon(pix)
-    return _ICONS[ext]
+        return pix
+
+    def scaledPixmap(self, size, mode, state, scale):
+        pix = self.pixmap(size * scale, mode, state)
+        pix.setDevicePixelRatio(scale)
+        return pix
+
+    def clone(self):
+        return _Painted(self.draw)
+
+
+def painted(key, draw):
+    """The icon drawn by draw(painter), kept until the theme changes."""
+    if key not in _ICONS:
+        _ICONS[key] = QIcon(_Painted(draw))
+    return _ICONS[key]
+
+
+def format_icon(file_name):
+    """A page glyph beside a file name, in the secondary grey: the extension in the name tells the format."""
+    def draw(p):
+        p.setPen(QPen(QColor(THEME["secondary"]), 1.2, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        p.drawPolygon([QPointF(3.5, 1.5), QPointF(10, 1.5), QPointF(13, 4.5), QPointF(13, 14.5), QPointF(3.5, 14.5)])
+        p.drawLine(QPointF(6, 8), QPointF(10.5, 8))
+        p.drawLine(QPointF(6, 11), QPointF(10.5, 11))
+    return painted("page", draw)
 
 
 STATUS = {  # an icon plus a word, never colour alone; the colour is a role of the theme in use
-    "filed": ("Approved", "green", "check"),
+    "filed": ("Approved", "accent", "check"),
     "auto": ("Filed automatically", "secondary", "check"),   # machine-assigned: not the user's approval
     "needs_decision": ("Waiting", "amber", "dot"),
     "queued": ("Reading", "secondary", "ring"),
@@ -422,15 +517,10 @@ STATUS = {  # an icon plus a word, never colour alone; the colour is a role of t
 
 
 def status_icon(status):
-    key = ("status", status)
-    if key not in _ICONS:
-        _, role, shape = STATUS.get(status, ("", "secondary", "ring"))
-        colour = THEME[role]
-        pix = QPixmap(16, 16)
-        pix.fill(Qt.transparent)
-        p = QPainter(pix)
-        p.setRenderHint(QPainter.Antialiasing)
-        c = QColor(colour)
+    _, role, shape = STATUS.get(status, ("", "secondary", "ring"))
+
+    def draw(p):
+        c = QColor(THEME[role])
         if shape == "dot":
             p.setPen(Qt.NoPen)
             p.setBrush(c)
@@ -448,32 +538,7 @@ def status_icon(status):
             p.setPen(QPen(QColor(THEME["base"]), 1.6))   # the mark in the list's own colour
             p.drawLine(QPointF(8, 6.5), QPointF(8, 10))
             p.drawPoint(QPointF(8, 12.2))
-        p.end()
-        _ICONS[key] = QIcon(pix)
-    return _ICONS[key]
-
-
-def category_color(slot):
-    """A category's colour: one of CATEGORY_COLORS, from its slot (the catalog's creation order, so a rename keeps
-    it and the first eight categories all differ), readable on every surface of both themes."""
-    return CATEGORY_COLORS[(slot - 1) % len(CATEGORY_COLORS)]
-
-
-def category_dot(slot):
-    """A small round dot in the category's colour, beside its name."""
-    colour = category_color(slot)
-    key = ("dot", colour)
-    if key not in _ICONS:
-        pix = QPixmap(ICON, ICON)
-        pix.fill(Qt.transparent)
-        p = QPainter(pix)
-        p.setRenderHint(QPainter.Antialiasing)
-        p.setPen(Qt.NoPen)
-        p.setBrush(QColor(colour))
-        p.drawEllipse(QRectF(ICON / 4, ICON / 4, ICON / 2, ICON / 2))
-        p.end()
-        _ICONS[key] = QIcon(pix)
-    return _ICONS[key]
+    return painted(("status", status), draw)
 
 
 def status_word(status):
@@ -891,11 +956,13 @@ class Preview(QWidget):
             return
         self.page = max(0, min(self.pdf.count - 1, index))
         width = max(200, self.scroll.viewport().width() - 8)
+        scale = self.devicePixelRatioF()        # drawn in the screen's own pixels: sharp at 125% and 150%
         kept = self.drawn.pop(self.page, None)
-        if kept is None or kept[0] != width:    # not drawn at this size yet
+        if kept is None or kept[0] != (width, scale):    # not drawn at this size yet
             pix = QPixmap()
-            pix.loadFromData(self.pdf.png(self.page, width))
-            kept = (width, pix)
+            pix.loadFromData(self.pdf.png(self.page, round(width * scale), "ppm"))
+            pix.setDevicePixelRatio(scale)
+            kept = ((width, scale), pix)
             self.draws += 1
         self.drawn[self.page] = kept            # the latest last; the oldest go
         for old in list(self.drawn)[:-PREVIEW_KEEP]:
@@ -920,13 +987,14 @@ class Preview(QWidget):
         area = self.scroll.viewport().size()  # the whole page fits: no scrolling inside the preview
         width = max(40, area.width() - RELATED)
         height = PREVIEW_MAX if self.fit_width else max(40, area.height() - RELATED)
-        fits = pix.width() <= width and pix.height() <= height
-        if resizing or not fits:
-            pix = pix.scaled(width, height, Qt.KeepAspectRatio,
+        size, scale = pix.deviceIndependentSize(), pix.devicePixelRatio()
+        if resizing or size.width() > width or size.height() > height:
+            pix = pix.scaled(round(width * scale), round(height * scale), Qt.KeepAspectRatio,
                              Qt.FastTransformation if resizing else Qt.SmoothTransformation)
+            pix.setDevicePixelRatio(scale)
         self.image.setPixmap(pix)
         if self.fit_width:  # no empty bands above and below the page
-            self.scroll.setFixedHeight(pix.height() + RELATED)
+            self.scroll.setFixedHeight(round(pix.deviceIndependentSize().height()) + RELATED)
 
     def resizeEvent(self, e):
         super().resizeEvent(e)

@@ -197,9 +197,9 @@ class AutoPage(QWidget):
         icon = QLabel()
         icon.setPixmap(format_icon(".pdf").pixmap(FILE_ICON, FILE_ICON))
         h.addWidget(retained(icon))
-        for text, stretch in (("NAME", NAME_STRETCH), ("FILED IN", CATEGORY_STRETCH), ("STATUS", 0)):
+        for text, stretch in (("Name", NAME_STRETCH), ("Category", CATEGORY_STRETCH), ("Status", 0)):
             label = QLabel(text)
-            label.setObjectName("section")
+            label.setObjectName("column")           # like the column names of the document list
             h.addWidget(label, stretch)
             if not stretch:
                 label.setFixedWidth(STATUS_COLUMN)
@@ -207,7 +207,7 @@ class AutoPage(QWidget):
         h.addWidget(retained(action_buttons()[0]))
         for i in range(h.count()):              # spacers only: never seen, never focused
             w = h.itemAt(i).widget()
-            if w is not None and w.objectName() != "section":
+            if w is not None and w.objectName() != "column":
                 w.hide()
         self.header.setFixedHeight(caption)
         holder = QWidget()

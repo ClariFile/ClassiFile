@@ -305,8 +305,8 @@ def run(base):
                     None if menu_keys != {"documents", "category"} else [],
                     "" if menu_keys == {"documents", "category"} else
                     "the menu key cannot be pressed off-screen; try Shift+F10 on a row by hand"))
-    results.append(("Keyboard: focus is always visible", None, "a script cannot see it; since phase 3 a focused "
-                    "list has a teal border, like the buttons and fields"))
+    results.append(("Keyboard: focus is always visible", None, "one teal ring after Tab, none after a click "
+                    "(tests/test_theme.py); look at it by hand with Tab, or in tools.screenshots --views focus"))
 
     # -- a card in use while 20 documents are imported -------------------------------------------------------------
     w.show_view(DECIDE)

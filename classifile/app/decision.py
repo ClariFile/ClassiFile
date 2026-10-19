@@ -25,6 +25,15 @@ REASONS = (("Too narrow", "A lesson or a section", "too narrow"), ("Too broad", 
 ROW_MARGINS = (RELATED - BAR, GROUP - TIGHT, RELATED, GROUP - TIGHT)   # inside a row, after its bar
 
 
+def item_number():
+    """An item's place in the list, right-aligned in a column wide enough for "99.", so every card lines up."""
+    number = QLabel()
+    number.setObjectName("secondary")
+    number.setMinimumWidth(number.fontMetrics().horizontalAdvance("99.") + TIGHT)
+    number.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+    return number
+
+
 def group_items(docs):
     """Waiting documents as decision items. Readable documents whose top suggestion is exactly the same (same
     name key) and whose originals are present form one group item; everything else is a single item, and so is
@@ -102,10 +111,7 @@ class DecisionItem(ListRow):
         icon.setPixmap(format_icon(first["file_name"]).pixmap(FILE_ICON, FILE_ICON))
         self.title = ElidedLabel(f"{len(docs)} documents with the same suggestion" if self.group
                                  else first["file_name"], "strong")
-        self.number = QLabel()                  # the item's place in the list, set by the page
-        self.number.setObjectName("secondary")
-        self.number.setMinimumWidth(self.number.fontMetrics().horizontalAdvance("99.") + TIGHT)
-        self.number.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.number = item_number()             # the item's place in the list, set by the page
 
         self.kind = QLabel()                    # "Suggested category:", then the name in bold
         self.kind.setObjectName("secondary")
@@ -445,8 +451,9 @@ class SubjectItem(ListRow):
         self.docs = docs
         self.ids = [d["id"] for d in docs]
         words = docs[0]["subject"][1]
-        self.number = QLabel()
-        self.number.setObjectName("secondary")
+        self.number = item_number()
+        icon = QLabel()                         # the same lead as a document's card: the text lines up
+        icon.setPixmap(format_icon(".pdf").pixmap(FILE_ICON, FILE_ICON))
         self.title = ElidedLabel(f"{len(docs)} documents look like one new subject", "strong")
         self.more_menu = more_button()
         menu = QMenu(self)
@@ -455,6 +462,7 @@ class SubjectItem(ListRow):
         self.more_menu.setMenu(menu)
         head = box(QHBoxLayout())
         head.addWidget(self.number)
+        head.addWidget(icon)
         head.addWidget(self.title, 1)
         head.addWidget(self.more_menu)
         self.line = QLabel("Shared key words: " + ", ".join(words) if words
@@ -505,8 +513,11 @@ class SubjectItem(ListRow):
             suggested.addWidget(b)
             self.name_links.append(b)
         suggested.addStretch(1)
-        v = box(QVBoxLayout(self), ROW_MARGINS, TIGHT)
-        v.addLayout(head)
+        outer = box(QVBoxLayout(self), ROW_MARGINS, TIGHT)
+        outer.addLayout(head)
+        indent = self.number.minimumWidth() + FILE_ICON + 2 * RELATED   # under the title, as on a document's card
+        v = box(QVBoxLayout(), (indent, 0, 0, 0), TIGHT)
+        outer.addLayout(v)
         v.addWidget(self.line)
         v.addSpacing(RELATED - TIGHT)
         v.addLayout(rows)

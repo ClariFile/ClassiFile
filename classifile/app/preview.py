@@ -23,10 +23,11 @@ class PdfPages:
     def count(self):
         return self.doc.page_count
 
-    def png(self, index, width=900):
+    def png(self, index, width=900, fmt="png"):
+        """The page drawn width pixels wide. fmt "ppm": uncompressed, far quicker to make, for the window."""
         page = self.doc[index]
         zoom = width / max(page.rect.width, 1)
-        return page.get_pixmap(matrix=pymupdf.Matrix(zoom, zoom)).tobytes("png")
+        return page.get_pixmap(matrix=pymupdf.Matrix(zoom, zoom)).tobytes(fmt)
 
     def close(self):
         self.doc.close()

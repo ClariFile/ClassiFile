@@ -2,12 +2,13 @@
 Text at least 4.5:1; icons, control borders, the focus and selection bars at least 3:1. Dividers between rows
 and panels are decorative and not held to 3:1; disabled text is exempt, as WCAG allows. A primary button is told
 by its white label (checked), not by its fill against the page.
-And the owner's rules: teal only on the primary button, the selection bar, the focus outline and links; every large
-surface neutral grey; hover a grey change."""
+And the owner's rules: three colours over neutral greys (teal, amber, red), teal only on the primary button, the
+selection bar, the focus outline, links and the Approved check; every large surface neutral grey; hover a grey
+change."""
 import pytest
 from test_app import app  # noqa: F401  the QApplication fixture
 
-from classifile.app.tokens import CATEGORY_COLORS, OVERLAY, THEMES, TYPE_COLOR, UNKNOWN_TYPE, WHITE
+from classifile.app.tokens import OVERLAY, THEMES, WHITE
 
 SURFACES = ("window", "sidebar", "base", "raised", "inset", "selection", "nav", "hover", "notice", "bulk")
 TEXT = 4.5
@@ -33,7 +34,7 @@ def pairs(t):
         out += [(f"text on {surface}", t["text"], t[surface], TEXT),
                 (f"secondary text on {surface}", t["secondary"], t[surface], TEXT)]
     for surface in ("window", "base", "raised", "notice", "selection", "hover"):
-        out += [(f"{status} text on {surface}", t[status], t[surface], TEXT) for status in ("amber", "red", "green")]
+        out += [(f"{status} text on {surface}", t[status], t[surface], TEXT) for status in ("amber", "red")]
     for surface in ("window", "base", "raised", "selection", "hover"):
         out.append((f"links (teal) on {surface}", t["link"], t[surface], TEXT))
     out += [("primary button text", t["on_primary"], t["primary"], TEXT),
@@ -49,12 +50,8 @@ def pairs(t):
         out.append((f"selection bar beside {surface}", t["accent"], t[surface], GRAPHIC))
     for surface in ("window", "base", "raised", "selection", "hover", "notice"):
         out += [(f"{role} icon on {surface}", t[role], t[surface], GRAPHIC)
-                for role in ("amber", "red", "green", "secondary")]
+                for role in ("amber", "red", "accent", "secondary")]
     out.append(("the mark inside the failed icon", t["base"], t["red"], GRAPHIC))
-    for surface in ("window", "sidebar", "base", "raised", "selection", "nav", "hover"):
-        out += [(f"category dot {c} on {surface}", c, t[surface], GRAPHIC) for c in CATEGORY_COLORS]
-        out += [(f"format glyph {c} on {surface}", c, t[surface], GRAPHIC)
-                for c in list(TYPE_COLOR.values()) + [UNKNOWN_TYPE]]
     return out
 
 
@@ -85,8 +82,8 @@ def test_teal_only_where_the_owner_allows_it_and_large_surfaces_are_neutral(name
     assert t["primary"] == "#0F766E" and t["primary_hover"] == "#115E59"      # the same in both themes
     for block in style_sheet(t).split("}"):
         selector, _, body = block.partition("{")
-        if t["accent"] in body:                 # focus outlines and selection bars only
-            assert re.search(r"focus|selected|nav(\[prominent=\"true\"\])?:checked|inspected|#primary", selector), selector.strip()
+        if t["accent"] in body:                 # focus outlines, selection bars and links only
+            assert re.search(r"focus|selected|nav(\[prominent=\"true\"\])?:checked|inspected|#primary|#link", selector), selector.strip()
         if ":hover" in selector:
             assert t["accent"] not in body and t["selection"] not in body, selector.strip()   # hover is grey
 
@@ -95,7 +92,8 @@ def test_the_themes_are_complete_and_the_style_sheet_takes_nothing_from_the_syst
     from classifile.app.widgets import style_sheet
 
     assert set(THEMES["light"]) == set(THEMES["dark"])                 # every role in both themes
-    assert len(set(CATEGORY_COLORS)) == 8 and all(chroma(c) <= 128 for c in CATEGORY_COLORS)   # muted
+    hues = {k for k, v in THEMES["light"].items() if chroma(v) > 24 and k not in ("selection", "nav")}
+    assert hues == {"accent", "link", "primary", "primary_hover", "amber", "red"}   # teal, amber, red: no more
     for name, t in THEMES.items():
         sheet = style_sheet(t)
         assert "palette(" not in sheet and "rgba(" not in sheet, name  # no system palette, no grey mixes
@@ -104,6 +102,7 @@ def test_the_themes_are_complete_and_the_style_sheet_takes_nothing_from_the_syst
 
 
 def test_switching_the_theme_rebuilds_the_style_sheet_the_palette_and_the_icons(app, make_org):
+    from PySide6.QtCore import QSize
     from PySide6.QtWidgets import QApplication
 
     from classifile.app import widgets
@@ -119,8 +118,8 @@ def test_switching_the_theme_rebuilds_the_style_sheet_the_palette_and_the_icons(
         assert w.table.palette().text().color().name().upper() == t["text"]       # the Fusion lists too
         icon = widgets.status_icon("needs_decision").pixmap(16, 16).toImage()
         assert icon.pixelColor(8, 8).name().upper() == t["amber"]                 # drawn again in the new colours
-    assert widgets.category_dot(3).cacheKey() and widgets.category_color(3) == widgets.category_color(3)
-    assert len({widgets.category_color(s) for s in range(1, 9)}) == 8 == len(CATEGORY_COLORS)  # the first 8 differ
+        crisp = widgets.status_icon("needs_decision").pixmap(QSize(16, 16), 1.5)
+        assert crisp.width() == 24 and crisp.devicePixelRatio() == 1.5           # drawn for the screen's scale
     w.set_appearance("system")
     w.close()
 
@@ -156,4 +155,45 @@ def test_every_settings_option_shows_and_keeps_what_was_picked_at_once(app, make
             app.processEvents()
             assert tick.isChecked() == stored(), tick.text()
     w.set_appearance("system", save=True)
+    w.close()
+
+
+def test_keyboard_focus_is_one_ring_shown_only_after_tab(app, make_org):
+    from PySide6.QtCore import QRect, Qt
+    from PySide6.QtTest import QTest
+    from PySide6.QtWidgets import QFrame
+
+    from classifile.app.main import ALL, SETTINGS, MainWindow
+    from classifile.app.widgets import keyboard_focus
+
+    keyboard_focus(app)
+    w = MainWindow(make_org(), ask_output_root=False)
+    w.show()
+    w.activateWindow()
+    app.processEvents()
+    first, second = w.nav[ALL], w.nav[SETTINGS]
+
+    def ring():
+        r = w.findChild(QFrame, "focusRing")
+        return r.geometry() if r is not None and r.isVisible() else None
+
+    w.search.setFocus(Qt.MouseFocusReason)                  # from somewhere else
+    first.setFocus(Qt.TabFocusReason)
+    app.processEvents()
+    around = QRect(first.mapTo(w, first.rect().topLeft()), first.size())
+    assert ring() is not None and ring().contains(around) and ring() != around     # just outside the control
+    second.setFocus(Qt.TabFocusReason)                      # it follows the keyboard
+    app.processEvents()
+    assert ring().contains(QRect(second.mapTo(w, second.rect().topLeft()), second.size()))
+    QTest.mousePress(second, Qt.LeftButton)                 # a click: no ring
+    QTest.mouseRelease(second, Qt.LeftButton)
+    app.processEvents()
+    assert ring() is None
+    first.setFocus(Qt.TabFocusReason)
+    w.search.setFocus(Qt.TabFocusReason)                    # a text field shows the focus by its own border
+    app.processEvents()
+    assert ring() is None
+    first.setFocus(Qt.ActiveWindowFocusReason)              # back from another window: no ring
+    app.processEvents()
+    assert ring() is None
     w.close()

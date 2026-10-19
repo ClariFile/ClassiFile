@@ -7,7 +7,7 @@ rows already loaded, so a search key or a change of view reads nothing from the 
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, QSize, QSortFilterProxyModel, Qt
 from PySide6.QtGui import QColor
 
-from classifile.app.widgets import ROW, THEME, category_dot, format_icon, status_icon, status_word
+from classifile.app.widgets import ROW, THEME, format_icon, status_icon, status_word
 
 DOC = Qt.UserRole          # a document's id (None while it is still being read) or a category's id
 ALL, RECENT, CATEGORY = "all", "recent", "category"
@@ -75,8 +75,6 @@ class DocumentModel(RowsModel):
         if role == Qt.DisplayRole:
             return (r["file_name"], r["category"] or "—", status_word(status), r["date"])[column]
         if role == Qt.DecorationRole:
-            if column == 1:
-                return category_dot(r["category_slot"]) if r.get("category_slot") else None
             return format_icon(r["file_name"]) if column == 0 else status_icon(status) if column == 2 else None
         if role == Qt.ToolTipRole:
             return r["file_name"] if column == 0 else (r.get("status_reason") or None) if column == 2 else None
@@ -160,8 +158,6 @@ class CategoryModel(RowsModel):
             return r["name"] if column == 0 else f"New · {r['count']}" if r.get("new") else str(r["count"])
         if role == Qt.ToolTipRole:
             return r["name"] + ("\nNew (named by ClassiFile). Right-click to rename it." if r.get("new") else "")
-        if role == Qt.DecorationRole and column == 0:
-            return category_dot(r["slot"])          # the category's own colour, the same everywhere
         if role == Qt.TextAlignmentRole and column == 1:
             return int(Qt.AlignRight | Qt.AlignVCenter)
         if role == Qt.ForegroundRole and column == 1:

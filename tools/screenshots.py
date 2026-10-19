@@ -4,7 +4,7 @@ Usage: python -m tools.screenshots OUT [--size 1280x720] [--theme light|dark] [-
 
 Builds a temporary catalog of made-up household documents (garden, recipes, travel, car, and a few photography
 notes no category covers), files most of them as the user would, lets matching learn, and saves one PNG per
-view in OUT: empty, all, category, decide, decide-details, auto, auto-details, settings, settings-advanced, help,
+view in OUT: empty, all, category, decide, focus (the keyboard focus ring), decide-details, auto, auto-details, settings, settings-advanced, help,
 about, learn (the dialog) and tour. For the README (docs/images) and for before-and-after checks of the layout.
 Nothing outside a temporary folder and OUT is written.
 """
@@ -29,7 +29,7 @@ FILES = {
 }
 NEW_SUBJECT = ("Photography", "aperture shutter lens exposure tripod focus portrait landscape",
                ["Camera settings", "Night photos", "Lens comparison"])
-VIEWS = ("empty", "all", "category", "decide", "decide-details", "auto", "auto-details", "settings",
+VIEWS = ("empty", "all", "category", "decide", "focus", "decide-details", "auto", "auto-details", "settings",
          "settings-advanced", "help", "about", "learn", "tour", "report")
 
 
@@ -89,13 +89,16 @@ def render(out, size=(1280, 720), theme="light", views=VIEWS):
     from classifile.app import make_app
     from classifile.app.guide import ReportDialog, TourDialog
     from classifile.app.learn import LearnDialog
+    from PySide6.QtCore import Qt
     from classifile.app.main import ABOUT, ALL, AUTO, DECIDE, HELP, SETTINGS, MainWindow, problem_report
+    from classifile.app.widgets import keyboard_focus
     from classifile.catalog.db import Catalog
     from classifile.organizer import Organizer
 
     out.mkdir(parents=True, exist_ok=True)
     app = QApplication.instance() or make_app([])
     app.setStyle("windows11")
+    keyboard_focus(app)
     fonts = Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts"
     for name in ("segoeui.ttf", "seguisb.ttf", "seguisym.ttf", "SegoeIcons.ttf", "segmdl2.ttf"):
         if (fonts / name).exists():             # the offscreen platform has no fonts of its own
@@ -146,6 +149,12 @@ def render(out, size=(1280, 720), theme="light", views=VIEWS):
         shot(w, "category")
         w.show_view(DECIDE)
         shot(w, "decide")
+        if "focus" in views and w.decision.items:   # the keyboard focus ring, as after a Tab
+            w.activateWindow()
+            w.search.setFocus(Qt.MouseFocusReason)
+            w.decision.items[0].primary.setFocus(Qt.TabFocusReason)
+            shot(w, "focus")
+            w.search.setFocus(Qt.MouseFocusReason)
         first = w.waiting_docs[0]["id"] if w.waiting_docs else None
         if first:
             w.show_details(first)

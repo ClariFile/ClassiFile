@@ -7,8 +7,12 @@ Sizes are logical pixels (Qt scales them with the display); durations are millis
 # style sheet and the Qt palette are built from the theme in use (widgets.use_theme), so nothing comes from the
 # system palette and nothing mixes greys over it. tests/test_theme.py checks the contrast of every pair: text at
 # least 4.5:1, icons and control borders at least 3:1. Dividers between rows and panels are decorative lines and
-# are not held to 3:1. Teal appears only on the primary button, the selection bar, the focus outline and links;
-# everything else is neutral grey, and hover is a grey change.
+# are not held to 3:1. Hover is a grey change. The ClariFile suite's colours over neutral greys, nothing more:
+# teal, ClassiFile's own (the primary button, the selection bar, the focus outline, links, the Approved check);
+# violet, SummarEase's (only on what opens SummarEase); amber (waiting, warnings); red (failures only).
+# SummarEase's tokens (summarease/tokens.py) use the same role names, greys, amber and red, with violet as accent.
+# Each accent is its app's icon colour: ClassiFile's icon is teal #0D9488, and #0F766E is its darker shade so a
+# white label reads at 4.5:1; SummarEase's icon and accent are both #6C47FF; the ClariFile icon carries both.
 THEMES = {
     "light": {
         "window": "#F6F7F9",        # the page behind everything
@@ -38,7 +42,6 @@ THEMES = {
         "on_toast": "#F9FAFB",
         "amber": "#AA4F09",         # waiting
         "red": "#B91C1C",           # errors
-        "green": "#14793A",         # approved
     },
     "dark": {                       # neutral charcoal: no tint in the backgrounds
         "window": "#1C1E21",
@@ -68,17 +71,12 @@ THEMES = {
         "on_toast": "#E6E8EB",
         "amber": "#D29922",
         "red": "#EA756F",           # #E5534B lightened: it was under 4.5:1 on the raised panels and the selection
-        "green": "#57AB5A",
     },
 }
 WHITE = "white"             # only on the dark overlays (primary buttons take on_primary, white in both themes)
 OVERLAY = "#16181B"         # the drop and full-preview overlays: dark neutral charcoal in both themes
 OVERLAY_LINE = "#9CA3AF"    # the drop overlay's dashed outline: grey, not glowing
-VIOLET = "#6C47FF"          # reserved for SummarEase; unused until it exists
-# The format glyph beside a file name, and a category's dot: the same in both themes, readable on every surface
-TYPE_COLOR = {".pdf": "#9A7878", ".pptx": "#977B5C", ".docx": "#6C81A0", ".odt": "#618872"}
-UNKNOWN_TYPE = "#79808F"
-CATEGORY_COLORS = ("#BB6868", "#9E7947", "#83833B", "#41904E", "#3F8C85", "#5583B2", "#8276C1", "#B75EB7")   # muted
+VIOLET = "#6C47FF"          # SummarEase's colour (its record, C11): unused until ClassiFile can open it
 
 # -- spacing --------------------------------------------------------------------------------------------------
 PAD = 24        # main content padding
@@ -89,6 +87,7 @@ RELATED = 8     # between related controls; label to field; icon to label
 TIGHT = 4       # inside small things: list padding, tags
 HAIR = 1        # borders and lines
 NAV_PAD = 10    # above and below a view's name in the sidebar; left of a category's name
+RING = 2        # the keyboard focus ring
 BAR = 2         # the selection bar at the left of a row; the drop overlay's dashes
 
 # -- text -----------------------------------------------------------------------------------------------------
@@ -130,6 +129,7 @@ DIALOG_MIN = 440        # the category picker's own window
 LEARN_LIST_MAX = 360    # the folders of "Learn from my existing folders" scroll beyond this height
 PICKER_LIST_MIN = 200   # a long category name ends in "…" and never widens the picker
 PICKER_LIST_MAX = 280   # the category picker's list scrolls beyond this height
+SETTING_CHOICE = 240    # every dropdown in Settings
 CHECKLIST_MAX = 220     # the ticks of selected-category mode scroll beyond this height
 PREVIEW_MAX = 560       # tallest details preview; the page is fitted to the panel width below this
 PREVIEW_MIN = 200       # the details preview never shrinks below this; the panel scrolls instead

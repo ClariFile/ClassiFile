@@ -35,9 +35,9 @@ from classifile.app.guide import (
 from classifile.app.learn import LearnDialog
 from classifile.app.models import DOC, SORTS, CategoryModel, DocumentFilter, DocumentModel, sorted_by_name
 from classifile.app.widgets import (
-    CHECKLIST_MAX, DATE_COLUMN_MIN, PANEL, TIGHT, DETAILS_MAX, DETAILS_MIN, DETAILS_WIDTH, FILE_ICON, GROUP, LIST_MIN, MIN_WINDOW,
+    CHECKLIST_MAX, DATE_COLUMN_MIN, PANEL, SETTING_CHOICE, TIGHT, DETAILS_MAX, DETAILS_MIN, DETAILS_WIDTH, FILE_ICON, GROUP, LIST_MIN, MIN_WINDOW,
     MOTION_STANDARD, NARROW, PAD, RELATED, SEARCH_MAX, SECTION, SIDEBAR_WIDTH, SUPPORTED, TOAST, TOAST_LONG,
-    WIDE, WINDOW, box, motion, qt_palette, set_motion, slide_away, smooth_scrolling, style_sheet,
+    WIDE, WINDOW, box, keyboard_focus, motion, qt_palette, set_motion, slide_away, smooth_scrolling, style_sheet,
     use_theme,
     Collapsible, DropOverlay, ElidedLabel, Notices, PickerDialog, PreviewOverlay, Toast, wrappable, wrapped,
 )
@@ -422,7 +422,7 @@ class MainWindow(QWidget):
         hb = box(QHBoxLayout(help_buttons), spacing=RELATED)
         for b in (tour, learn, report, updates):
             hb.addWidget(b)
-        self.help_page = text_page("How ClassiFile works", HELP_TEXT, help_buttons)
+        self.help_page = text_page(None, HELP_TEXT, help_buttons)   # the page title says "Help" already
         self.about_page = text_page(None, ABOUT_TEXT)  # the page title says "About ClassiFile" already
         for page in (self.table, self.empty_state, self.decision, self.auto_page, self.settings_page, self.no_match,
                      self.help_page, self.about_page):
@@ -495,7 +495,7 @@ class MainWindow(QWidget):
         self.add_category.setToolTip("Create a category")
         self.add_category.setAccessibleName("Create a category")
         self.add_category.clicked.connect(self.new_category_clicked)
-        cat_head = box(QHBoxLayout(), (GROUP, SECTION, RELATED, RELATED))
+        cat_head = box(QHBoxLayout(), (GROUP, SECTION, RELATED, 0))   # the + sets the row's height
         cat_head.addWidget(header, 1)
         cat_head.addWidget(self.add_category)
         self.cat_model = CategoryModel(self)      # names with counts; the documents are in the main list
@@ -767,6 +767,8 @@ class MainWindow(QWidget):
         a.addSpacing(RELATED)
         a.addWidget(self.tech)
         self.advanced = Collapsible("Advanced", advanced_body)   # starts closed: details for reporting a problem
+        for combo in (self.auto_level, self.auto_scope, self.appearance, self.motion):
+            combo.setFixedWidth(SETTING_CHOICE)   # one width: their edges line up down the page
         # One titled panel per topic, the most used first: a heading, a plain sentence, then the controls.
         v = box(QVBoxLayout(page), spacing=GROUP)
         v.addWidget(settings_card(
@@ -1006,7 +1008,7 @@ class MainWindow(QWidget):
         """The sidebar's categories with their counts, from two queries, updated in place. Returns the categories."""
         counts = self.org.catalog.category_counts()
         cats = self.org.catalog.categories()
-        self.cat_model.sync([{"key": c["id"], "name": c["name"], "count": counts.get(c["id"], 0), "slot": c["slot"],
+        self.cat_model.sync([{"key": c["id"], "name": c["name"], "count": counts.get(c["id"], 0),
                               "new": bool(c["app_named"])} for c in cats])
         self.cats_empty.setVisible(not cats)
         many = len(cats) >= FIND_CATEGORY_FROM
@@ -1088,12 +1090,12 @@ class MainWindow(QWidget):
         if self.update_note:
             notices.append(("info", self.update_note, "OK", self._dismiss_update_note))
         ready = len(waiting) - len(unreadable)
-        if (ready or self.checks) and self.view[0] != DECIDE:   # on the auto-filed page a quiet line
+        if (ready or self.checks) and self.view[0] != DECIDE:   # a quiet line on pages about something else
             checks = len(self.checks)
             text = (f"{ready} document{'s need' if ready > 1 else ' needs'} your decision" if ready else "")
             text += (("; " if text else "") + f"{checks} filed document{'s' if checks > 1 else ''} to check"
                      if checks else "")
-            notices.append(("quiet" if self.view[0] == AUTO else "info", text[0].upper() + text[1:] + ".",
+            notices.append(("quiet" if self.view[0] in (AUTO, SETTINGS, HELP, ABOUT) else "info", text[0].upper() + text[1:] + ".",
                             "Review", self.review))
         self.notices.show_notices(notices[:3])
 
@@ -2173,6 +2175,7 @@ class MainWindow(QWidget):
 def main():
     app = make_app(sys.argv)
     smooth_scrolling(app)
+    keyboard_focus(app)
     w = MainWindow(Organizer(Catalog.open_default()))
     w.show()
     sys.exit(app.exec())

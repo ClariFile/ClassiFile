@@ -1,6 +1,6 @@
 # ClassiFile status
 
-2026-10-19 · decision record version 2.11
+2026-10-20 · decision record version 2.11
 
 ## Done
 
@@ -471,6 +471,26 @@
 - **Not tested:** install, first run, OCR, filing, upgrade and uninstall of the setup file on any Windows. The
   owner's only computer is not used for it; no disposable Windows was available (Windows Sandbox and Hyper-V are
   not in Windows 11 Home). `docs/INSTALLER_TEST.md` has the checklist.
+
+**Look and speed pass (2026-10-20, the owner's request; after rc.4, not yet built)**
+- **Sharp at 125% and 150%:** the icons drawn in code (file glyph, status marks) are painted at the screen's own
+  scale (a `QIconEngine`), and PDF previews are drawn in the screen's pixels; both were drawn at 100% and stretched.
+  Previews are handed to Qt uncompressed: about 5 ms a page instead of 26 ms.
+- **Fewer colours (owner, 2026-10-20):** neutral greys plus teal (ClassiFile's icon colour: primary button,
+  selection, focus, links, the Approved check), amber (waiting, warnings) and red (failures only). Removed: the
+  category dots (the owner chose to remove them), the colour per file format, green. Violet stays reserved for
+  SummarEase; both apps share greys, amber, red and spacing, each with its own icon's colour as accent. A test
+  fails if another colour enters the themes.
+- **Keyboard focus:** one teal ring, the same around every control, shown only after Tab and hidden after a
+  click or a switch back from another window (it replaced six different focus styles). Text fields keep their own
+  border. `tools.screenshots --views focus` shows it.
+- **Spacing and consistency:** every decision card's number, icon and text line up (the new-subject card started
+  further left); the Settings dropdowns share one width; the auto-filed list's column names look like the document
+  list's; the reminder about waiting documents is a quiet line on Settings, Help and About too; the sidebar's gap
+  under "Categories" is smaller; the lone heading over the Help buttons is gone; all links are teal.
+- `tools.measure_ui` now waits for a card's choices to open before the imports, and judges the card by where it
+  sits on screen: kept (371 → 371 px). Timings: refreshing "Needs your decision" 15 ms (18 before).
+- 293 tests; `tools.check_ui`: no failures.
 
 ## Development results so far
 
