@@ -452,6 +452,12 @@
 - Built with `installer.build` (`dist\ClassiFile-1.0.0-rc.2-setup.exe`, about 52 MB); the built app's self-test
   on the six samples: PASS. The clean-laptop test (`docs/INSTALLER_TEST.md`) is still open.
 
+**1.0.0-rc.3 for the pilot (2026-10-19)**
+- Text fills its card on every page (no readable-line-length cap), so Help, About and Settings no longer leave an
+  empty band at the right.
+- Built with `installer.build` (`dist\ClassiFile-1.0.0-rc.3-setup.exe`, about 52 MB); the built app's self-test
+  on the six samples: PASS. The clean-laptop test (`docs/INSTALLER_TEST.md`) is still open.
+
 ## Development results so far
 
 These counts describe development data only. They are not accuracy estimates.

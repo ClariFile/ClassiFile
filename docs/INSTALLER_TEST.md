@@ -25,7 +25,7 @@ installed first.
 
 5. Expected: the ClassiFile window opens with a short tour (4 steps). Go through it.
 6. When asked for the output folder, make a new folder, for example `Documents\ClassiFile`, and choose it.
-7. Open Help and About. Expected: readable text in cards across the window, the version (for example 1.0.0-rc.2) on
+7. Open Help and About. Expected: text that fills its card across the window, the version (for example 1.0.0-rc.3) on
    About.
 
 ## 3. Offline use
