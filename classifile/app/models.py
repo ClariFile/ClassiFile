@@ -76,7 +76,7 @@ class DocumentModel(RowsModel):
             return (r["file_name"], r["category"] or "—", status_word(status), r["date"])[column]
         if role == Qt.DecorationRole:
             if column == 1:
-                return category_dot(r["category_id"]) if r.get("category_id") else None
+                return category_dot(r["category_slot"]) if r.get("category_slot") else None
             return format_icon(r["file_name"]) if column == 0 else status_icon(status) if column == 2 else None
         if role == Qt.ToolTipRole:
             return r["file_name"] if column == 0 else (r.get("status_reason") or None) if column == 2 else None
@@ -161,7 +161,7 @@ class CategoryModel(RowsModel):
         if role == Qt.ToolTipRole:
             return r["name"] + ("\nNew (named by ClassiFile). Right-click to rename it." if r.get("new") else "")
         if role == Qt.DecorationRole and column == 0:
-            return category_dot(r["key"])           # the category's own colour, the same everywhere
+            return category_dot(r["slot"])          # the category's own colour, the same everywhere
         if role == Qt.TextAlignmentRole and column == 1:
             return int(Qt.AlignRight | Qt.AlignVCenter)
         if role == Qt.ForegroundRole and column == 1:

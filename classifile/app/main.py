@@ -1006,7 +1006,7 @@ class MainWindow(QWidget):
         """The sidebar's categories with their counts, from two queries, updated in place. Returns the categories."""
         counts = self.org.catalog.category_counts()
         cats = self.org.catalog.categories()
-        self.cat_model.sync([{"key": c["id"], "name": c["name"], "count": counts.get(c["id"], 0),
+        self.cat_model.sync([{"key": c["id"], "name": c["name"], "count": counts.get(c["id"], 0), "slot": c["slot"],
                               "new": bool(c["app_named"])} for c in cats])
         self.cats_empty.setVisible(not cats)
         many = len(cats) >= FIND_CATEGORY_FROM

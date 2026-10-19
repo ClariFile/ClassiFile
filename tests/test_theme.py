@@ -119,8 +119,8 @@ def test_switching_the_theme_rebuilds_the_style_sheet_the_palette_and_the_icons(
         assert w.table.palette().text().color().name().upper() == t["text"]       # the Fusion lists too
         icon = widgets.status_icon("needs_decision").pixmap(16, 16).toImage()
         assert icon.pixelColor(8, 8).name().upper() == t["amber"]                 # drawn again in the new colours
-    assert widgets.category_dot("same id").cacheKey() and widgets.category_color("same id") == \
-        widgets.category_color("same id") in CATEGORY_COLORS                      # one colour per category, always
+    assert widgets.category_dot(3).cacheKey() and widgets.category_color(3) == widgets.category_color(3)
+    assert len({widgets.category_color(s) for s in range(1, 9)}) == 8 == len(CATEGORY_COLORS)  # the first 8 differ
     w.set_appearance("system")
     w.close()
 

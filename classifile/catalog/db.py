@@ -373,7 +373,7 @@ class Catalog:
             " JOIN snapshots s ON s.document_id = d.id WHERE d.id = ?", doc_id)
 
     _FILED = ("SELECT d.*, s.sha256, s.file_name, s.imported_at, s.source_path, c.id AS category_id,"
-              " c.name AS category, c.app_named, m.provenance, m.auto_json, m.role, (SELECT group_concat(category_id)"
+              " c.rowid AS category_slot, c.name AS category, c.app_named, m.provenance, m.auto_json, m.role, (SELECT group_concat(category_id)"
               " FROM memberships WHERE document_id = d.id AND role = 'secondary' AND status = 'active') AS also_ids,"
               " p.path AS copy_path,"
               " p.status AS copy_status, p.updated_at AS filed_at FROM documents d"
@@ -568,7 +568,7 @@ class Catalog:
 
     # -- categories --------------------------------------------------------------------------
     def categories(self):
-        return self.all("SELECT * FROM categories WHERE deleted_at IS NULL ORDER BY name COLLATE NOCASE, id")
+        return self.all("SELECT *, rowid AS slot FROM categories WHERE deleted_at IS NULL ORDER BY name COLLATE NOCASE, id")
 
     def category_counts(self):
         """{category id: documents in it}."""

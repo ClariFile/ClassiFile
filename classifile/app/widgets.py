@@ -1,6 +1,5 @@
 """Small shared widgets and the visual style of the main window."""
 import sys
-import zlib
 from pathlib import Path
 
 from PySide6.QtCore import (
@@ -454,15 +453,15 @@ def status_icon(status):
     return _ICONS[key]
 
 
-def category_color(cat_id):
-    """A category's colour: one of CATEGORY_COLORS, the same for that category always (from its id, so a rename
-    keeps it), readable on every surface of both themes."""
-    return CATEGORY_COLORS[zlib.crc32(str(cat_id).encode()) % len(CATEGORY_COLORS)]
+def category_color(slot):
+    """A category's colour: one of CATEGORY_COLORS, from its slot (the catalog's creation order, so a rename keeps
+    it and the first eight categories all differ), readable on every surface of both themes."""
+    return CATEGORY_COLORS[(slot - 1) % len(CATEGORY_COLORS)]
 
 
-def category_dot(cat_id):
+def category_dot(slot):
     """A small round dot in the category's colour, beside its name."""
-    colour = category_color(cat_id)
+    colour = category_color(slot)
     key = ("dot", colour)
     if key not in _ICONS:
         pix = QPixmap(ICON, ICON)

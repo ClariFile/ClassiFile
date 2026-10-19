@@ -1,6 +1,6 @@
 # Decision Record — ClassiFile (Offline Document Organizer)
 
-Version 2.10 · 2026-10-16
+Version 2.11 · 2026-10-19
 
 **Names**
 - **ClariFile:** the suite.
@@ -105,7 +105,7 @@ Version 2.10 · 2026-10-16
 
 **A10 [Requirement] Interface**
 - Categories, categorized documents, minimal status, and decision prompts when necessary.
-- For people other than the owner (2.9): a first-run tour of 3–4 short steps, a Help page and an About page (what ClassiFile is, how it works, privacy, the ClariFile suite and SummarEase, the version, licences and credits, the source link). Every page uses the full window width while text keeps a readable line length; the same Details panel is on every page that lists documents; Settings keeps technical details (matching versions, logs, version numbers) in a collapsed Advanced section.
+- For people other than the owner (2.9): a first-run tour of 3–4 short steps, a Help page and an About page (what ClassiFile is, how it works, privacy, the ClariFile suite and SummarEase, the version, licences and credits, the source link). Every page uses the full window width, and text fills its card (2.11); the same Details panel is on every page that lists documents; Settings keeps technical details (matching versions, logs, version numbers) in a collapsed Advanced section.
 - ClassiFile's scope is suggesting category names and filing documents. It offers no text viewing, copying or exporting; those belong to SummarEase (A11).
 
 **A11 [Requirement] Secondary summarizer: SummarEase (later project)**
@@ -555,3 +555,4 @@ Partial checkpoints are not the completed v1. Evaluation runs alongside developm
 - **2.8 (2026-10-15):** wording the user approved before the CP5 freeze, so the record says what the code does. A7: the update check (a new version replaces the one in use only if, on the full evaluation, it files no more documents wrongly at the level in use and puts the user's category first no less often; both results logged in Settings). B4: one evaluation (`tools.evaluate`) for every number about matching, with the owner's family ids kept in the catalog. B2: "Check these" (Keep here is recorded; nothing is moved by itself). D/CP4: the documented policy (E1) is not built for v1; E5–E7 run on their defaults (also noted under E5–E7). Authorized by the user.
 - **2.9 (2026-10-15):** v1 scope for friends and family, authorized by the user. A7: the first matching version is learned by itself too. B5 and the glossary: "Learn from my existing folders", with the user-example provenance; examples count toward the 3 documents of automatic filing (B2). A10: a first-run tour, Help and About pages, full-width pages with readable text, the same Details panel on every page that lists documents, and an Advanced section in Settings. Photos (JPG, PNG), a household test set and Burmese are v1.1 (docs/LAUNCH.md). Authorized by the user.
 - **2.10 (2026-10-16):** CP5 freeze (D/CP5): matching version 6, Strict with the 3 confirmed documents, the folder rules (3 documents at 0.20; questions at 0.15; a single document waits), the update check and "Check these" as in 2.8; the final evaluation runs once with the frozen version on a catalog copy (`tools.final_eval`). Authorized by the user (the list in docs/LAUNCH.md section 1).
+- **2.11 (2026-10-19):** A10: every page uses the full window width, and text fills its card; the 2.9 wording "text keeps a readable line length" is withdrawn. Authorized by the user.
