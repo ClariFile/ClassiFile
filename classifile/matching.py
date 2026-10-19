@@ -118,7 +118,7 @@ class Matcher:
     def key_words(self, counts, category, n=4):
         """The words a document (its terms()) shares most with a category, heaviest first: the reason a card
         gives. Words found in more than a third of the training documents ("the", a template's standing words)
-        say nothing about a subject and are left out (docs/ACCURACY_ROUND.md, section 5)."""
+        say nothing about a subject and are left out (docs/archive/ACCURACY_ROUND.md, section 5)."""
         idf, centroid = self.bundle["idf"], self.model.centroids.get(category, {})
         total = sum(self.bundle["documents"].values())
         floor = math.log((1 + total) / (1 + total / 3)) + 1

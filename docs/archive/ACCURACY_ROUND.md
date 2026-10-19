@@ -1,3 +1,5 @@
+> Archived (2026-10-19): finished; kept as history. Current state: docs\STATUS.md.
+
 # Accuracy round: can the matcher be made better without more documents?
 
 2026-10-13 · a report for the owner. Nothing in the app was changed. Counts describe development data (and, in

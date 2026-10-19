@@ -517,7 +517,7 @@ class MainWindow(QWidget):
         self.cats.activated.connect(self._category_clicked)   # Enter
         self.cats.setContextMenuPolicy(Qt.CustomContextMenu)
         self.cats.customContextMenuRequested.connect(self._category_menu_at)
-        self.find_category = QLineEdit()          # only with many categories (docs/UI_PROPOSAL.md, phase 5)
+        self.find_category = QLineEdit()          # only with many categories (docs/archive/UI_PROPOSAL.md, phase 5)
         self.find_category.setPlaceholderText("Find category…")
         self.find_category.setAccessibleName("Find category")
         self.find_category.setClearButtonEnabled(True)

@@ -1,4 +1,4 @@
-"""The interface acceptance checks of docs/UI_PROPOSAL.md (section 7), run off-screen on a made-up catalog.
+"""The interface acceptance checks of docs/archive/UI_PROPOSAL.md (section 7), run off-screen on a made-up catalog.
 
 Usage: python -m tools.check_ui [--scale 1.25]
 

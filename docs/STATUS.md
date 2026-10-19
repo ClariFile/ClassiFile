@@ -1,11 +1,11 @@
 # ClassiFile status
 
-2026-10-16 · decision record version 2.10
+2026-10-19 · decision record version 2.11
 
 ## Done
 
 **CP0 Foundation**
-- Environment baseline (docs/ENVIRONMENT.md), project skeleton with the isolated reader, GUI smoke test.
+- Environment baseline (docs/dev/ENVIRONMENT.md), project skeleton with the isolated reader, GUI smoke test.
 - Tools: inventory, family-based splits.
 
 **CP1 First end-to-end slice**
@@ -62,7 +62,7 @@
 - `tools.label_inventory`: a window to fill in the labels of an inventory one file at a time (pages shown,
   the category picker, saved into the CSV after every answer). After a split, `--splits` shows each file from
   its split's folder and `--only <label>` just the files recorded under one label, to give them other labels.
-- `docs/UI_PROPOSAL.md`: measurements and a phased proposal for the interface; phase 1 is built (below).
+- `docs/archive/UI_PROPOSAL.md`: measurements and a phased proposal for the interface; phase 1 is built (below).
 - **Interface phase 1 (responsiveness and search):** the window is updated in place instead of rebuilt.
   Decision cards are kept while their question is unchanged; the document list and the sidebar are models
   (`classifile/app/models.py`) with the view, the search and the sort as a filter; one refresh per document
@@ -101,7 +101,7 @@
 - Tests: the smoke test no longer depends on a time limit or a fixed delay, and the worker test's healthy read
   has a generous limit (both could fail on a busy machine).
 - Not built from the record's CP3 list: selected-category mode and "Also belongs to" (proposed for CP4, see
-  `docs/CP4_PROPOSAL.md`).
+  `docs/archive/CP4_PROPOSAL.md`).
 
 **CP4 Automatic mode (2026-10-13; the owner's decisions are in the record, versions 2.3 and 2.4)**
 - **Automatic filing, built.** A document that is read is filed without a question when its best category
@@ -182,7 +182,7 @@
   for titles, headings and the first page; character n-grams; word pairs; less weight for OCR text and template
   lines; very common words left out. None clearly beats the matcher in use. One combination is a little better
   on development data and met the rule set for validation by one document. The numbers that move most are the
-  documents per folder. Report: `docs/ACCURACY_ROUND.md`. The owner decides whether to adopt anything.
+  documents per folder. Report: `docs/archive/ACCURACY_ROUND.md`. The owner decides whether to adopt anything.
 - The record (2.5) now says that ClassiFile never creates a folder by itself; the discovery replay is not needed.
 - 261 automated tests.
 
@@ -191,7 +191,7 @@
   12 waited (the owner filed them). The matcher put the owner's category first for all 28 files whose category
   existed.
 - The accuracy-round combination was measured on the same 33 and on all 116 documents: no gain on the new files,
-  more wrong at Strict on the 116. Not adopted (`docs/ACCURACY_ROUND.md`, section 9). No code changed.
+  more wrong at Strict on the 116. Not adopted (`docs/archive/ACCURACY_ROUND.md`, section 9). No code changed.
 - Matching version 3 (116 documents, 12 categories) is in use; on the 33 it puts the owner's category first for 32,
   version 2 for 28. A copy of the catalog from before is kept beside it.
 
@@ -202,7 +202,7 @@
   - The replay (`tools.group_eval --folders`) found 21 folders over 12 rounds: 0 mixing subjects, and 1 subject
     split (into 7).
   - It also found 10 second folders for subjects the app already has: 2 distinct pairs.
-  - Report: `docs/AUTO_FOLDERS.md`.
+  - Report: `docs/archive/AUTO_FOLDERS.md`.
 - The levels on the owner's 33-file run, each file asked of a model trained without it: Strict 28 filed, 0 wrong,
   5 waiting; Balanced the same; Lenient 31, 0, 2. Strict stays.
 - **Learning by itself**, with the usual check; the versions are logged in Settings, and a note shows each update.
@@ -498,7 +498,7 @@ These counts describe development data only. They are not accuracy estimates.
   in the first three / documents: 10/10/10, 2/4/4, 3/3/3, 3/3/3, 2/2/2 and 1/1/1. One label names no category;
   its 2 documents are counted under the category the owner filed that label's development files in. Every
   validation document belongs to an existing category, so validation says nothing about new subjects.
-  The strictness trade-off for automatic filing is in `docs/CP4_PROPOSAL.md`. The saved result is
+  The strictness trade-off for automatic filing is in `docs/archive/CP4_PROPOSAL.md`. The saved result is
   `data\validation_matching.json` (local).
 
 - **Selective OCR (E8):** the adopted rule caught 139 of 160 units with content the native text misses.
@@ -559,10 +559,10 @@ These counts describe development data only. They are not accuracy estimates.
 2. **2026-10-13, the matcher measured once** (`tools.match_validation`, model version 1, 83 documents in 10
    categories): the owner's category first for 21 of 23, in the first three for 23; at the five levels fixed
    beforehand, Strict filed 14 with 0 wrong and 9 waiting. The owner chose Strict from this and the development
-   numbers (`docs/CP4_PROPOSAL.md`, record 2.3). Saved: `data\validation_matching.json` (local).
+   numbers (`docs/archive/CP4_PROPOSAL.md`, record 2.3). Saved: `data\validation_matching.json` (local).
 3. **2026-10-13, one representation variant measured once** (`tools.accuracy_round --validation`, 11
    categories): in use 19 first, the variant 20; both 14 filed, 0 wrong. The rule set beforehand was met by one
-   document; the variant was withdrawn on 2026-10-14 after new development files (`docs/ACCURACY_ROUND.md`,
+   document; the variant was withdrawn on 2026-10-14 after new development files (`docs/archive/ACCURACY_ROUND.md`,
    sections 4 and 9). Saved: `data\validation_accuracy_round.json` (local).
 4. **2026-10-15:** `tools.evaluate --set-families` read the family ids of the split CSV and recorded only those
    of files in the catalog; no validation file is in the catalog, so none was recorded and no validation file

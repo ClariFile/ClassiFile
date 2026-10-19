@@ -1,3 +1,5 @@
+> Archived (2026-10-19): finished; kept as history. Current state: docs\STATUS.md.
+
 # More automation: the replay of automatic new folders, and the levels on the 33-file run
 
 2026-10-14 · a report for the owner (decision record 2.6). Counts describe development data and the owner's own

@@ -1,4 +1,4 @@
-"""Design tokens: every size, colour and duration of the interface is named here, once (docs/UI_PROPOSAL.md,
+"""Design tokens: every size, colour and duration of the interface is named here, once (docs/archive/UI_PROPOSAL.md,
 section 4). The style sheet and the widgets use these names; no other interface module holds such a value.
 Sizes are logical pixels (Qt scales them with the display); durations are milliseconds."""
 

@@ -1,3 +1,5 @@
+> Archived (2026-10-19): finished; kept as history. Current state: docs\STATUS.md.
+
 # ClassiFile interface: proposal for the next pass
 
 2026-10-12 · the proposal as written before any change. Phases 1, 2 and 3 have since been built: section 9 says

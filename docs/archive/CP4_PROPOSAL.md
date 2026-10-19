@@ -1,3 +1,5 @@
+> Archived (2026-10-19): finished; kept as history. Current state: docs\STATUS.md.
+
 # CP4 proposal: automatic filing
 
 2026-10-13 · a proposal for the owner, written before CP4 was built. **Decided since (record 2.3):** Strict;

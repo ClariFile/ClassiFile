@@ -1,4 +1,4 @@
-"""How long the window takes to do its everyday work, on a made-up catalog (docs/UI_PROPOSAL.md, section 1).
+"""How long the window takes to do its everyday work, on a made-up catalog (docs/archive/UI_PROPOSAL.md, section 1).
 
 Usage: python -m tools.measure_ui [--base DIR] [--json FILE]
 
