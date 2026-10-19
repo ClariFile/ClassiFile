@@ -472,7 +472,16 @@
   owner's only computer is not used for it; no disposable Windows was available (Windows Sandbox and Hyper-V are
   not in Windows 11 Home). `docs/INSTALLER_TEST.md` has the checklist.
 
-**Look and speed pass (2026-10-20, the owner's request; after rc.4, not yet built)**
+**1.0.0-rc.5 (2026-10-20): a release candidate, not verified on a clean machine**
+- rc.4 plus the look and speed pass below. `dist\ClassiFile-1.0.0-rc.5-setup.exe` (about 52 MB) and
+  `dist\ClassiFile-1.0.0-rc.5-portable.zip` (about 72 MB), from the unchanged installer scripts.
+- Checked without installing, on the build laptop: 293 tests; `tools.check_ui` no failures; the built app's
+  self-test with only its bundled OCR data, on copies of the six samples: PASS, the same counts as rc.4, also from
+  the unpacked portable zip; the app asks for `asInvoker` (no administrator prompt); rc.4 and rc.5 ship the same 234
+  files, so an upgrade leaves no stale file.
+- **Not tested:** install, first run, OCR, filing, upgrade and uninstall of the setup file on any Windows (as rc.4).
+
+**Look and speed pass (2026-10-20, the owner's request; built as rc.5)**
 - **Sharp at 125% and 150%:** the icons drawn in code (file glyph, status marks) are painted at the screen's own
   scale (a `QIconEngine`), and PDF previews are drawn in the screen's pixels; both were drawn at 100% and stretched.
   Previews are handed to Qt uncompressed: about 5 ms a page instead of 26 ms.
