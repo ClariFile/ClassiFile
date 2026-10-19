@@ -4,6 +4,23 @@ A step-by-step check of `ClassiFile-<version>-setup.exe` on a Windows 10 or 11 l
 Python or ClassiFile. About 30 minutes. Note what you see at each step in the table at the end. Nothing needs to be
 installed first.
 
+## Short checklist
+
+Use a spare laptop or a disposable Windows (a virtual machine, or a separate Windows account), never the only
+computer someone depends on. Disposable test documents only.
+
+- [ ] Install: SmartScreen "More info → Run anyway"; no administrator prompt; no folder page (it always goes to
+      `%LOCALAPPDATA%\Programs\ClassiFile`).
+- [ ] First run: tour, an empty output folder; Help and About readable; About shows the version.
+- [ ] Offline (airplane mode): add the documents, the scanned one too; none "couldn't be read"; file them; copies
+      appear in the category folders; an original's Modified time unchanged; nothing new beside originals.
+- [ ] Reopen: same state.
+- [ ] Self-test (step 14): PASS.
+- [ ] Upgrade (step 19): the newer setup over the older keeps categories and documents.
+- [ ] Uninstall: program and shortcuts gone; output folder, `%LOCALAPPDATA%\ClassiFile` and originals stay.
+
+The detailed steps follow.
+
 ## Bring
 
 - The setup file on a USB stick (or downloaded from the GitHub release).
@@ -25,7 +42,7 @@ installed first.
 
 5. Expected: the ClassiFile window opens with a short tour (4 steps). Go through it.
 6. When asked for the output folder, make a new folder, for example `Documents\ClassiFile`, and choose it.
-7. Open Help and About. Expected: text that fills its card across the window, the version (for example 1.0.0-rc.3) on
+7. Open Help and About. Expected: text that fills its card across the window, the version (for example 1.0.0-rc.4) on
    About.
 
 ## 3. Offline use
@@ -67,6 +84,11 @@ installed first.
     - Gone: `%LOCALAPPDATA%\Programs\ClassiFile`.
 18. Optional: install again. Expected: the same categories and documents come back.
 
+## 6. Upgrade (when an older setup file is at hand)
+
+19. Install the older version, file two documents, then run the newer setup without uninstalling.
+    - Expected: no folder question; About shows the new version; the same categories and documents.
+
 ## Results
 
 | Step | Expected | Seen (OK / what happened) |
@@ -80,6 +102,7 @@ installed first.
 | 13 | Same state after reopening, offline | |
 | 15 | Self-test PASS | |
 | 16–17 | Uninstall removes the program, keeps copies, catalog and originals | |
+| 19 | Upgrade keeps categories and documents | |
 
 Send the table, the laptop's Windows version (Settings → System → About) and `classifile-check.txt`. Never send the
 documents themselves.

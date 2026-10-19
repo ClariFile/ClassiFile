@@ -3,8 +3,9 @@
 Usage: .venv\\Scripts\\python -m installer.build [--tessdata FOLDER] [--iscc PATH]
 
 Needs: requirements-build.txt in the venv; Tesseract's English data (eng.traineddata; default: the Tesseract
-install in Program Files); Inno Setup 6 (ISCC.exe; without it only the app folder is built). Writes
-dist\\ClassiFile-<version>\\ (the app folder) and dist\\ClassiFile-<version>-setup.exe; it refuses when either
+install in Program Files); Inno Setup 6 (ISCC.exe; without it only the app folder and zip are built). Writes
+dist\\ClassiFile-<version>\\ (the app folder), dist\\ClassiFile-<version>-portable.zip (the app folder with
+installer\\portable\\, for testing without installing) and dist\\ClassiFile-<version>-setup.exe; it refuses when any
 exists, so an earlier build is never overwritten. Network access is not needed.
 """
 import argparse
@@ -14,6 +15,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import zipfile
 from pathlib import Path
 
 from classifile import __version__
@@ -21,6 +23,7 @@ from classifile import __version__
 ROOT = Path(__file__).resolve().parent.parent
 HERE = ROOT / "installer"
 DIST = ROOT / "dist"
+CRLF = chr(13) + chr(10)          # the launcher and notes as Windows text
 TESSDATA = Path(r"C:\Program Files\Tesseract-OCR\tessdata")
 ISCC = [Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Inno Setup 6" / "ISCC.exe",
         Path(r"C:\Program Files (x86)\Inno Setup 6\ISCC.exe"), Path(r"C:\Program Files\Inno Setup 6\ISCC.exe")]
@@ -35,13 +38,25 @@ def licenses(folder):
         shutil.copyfile(src, folder / name)
 
 
+def write_portable(app, out):
+    """The app folder under ClassiFile/, with the launcher that keeps its catalog beside it (installer/portable/)."""
+    top = out.stem
+    with zipfile.ZipFile(out, "x", zipfile.ZIP_DEFLATED) as z:
+        for f in sorted((HERE / "portable").iterdir()):
+            z.writestr(f"{top}/{f.name}", CRLF.join(f.read_text(encoding="utf-8").splitlines()) + CRLF)
+        for f in sorted(app.rglob("*")):
+            if f.is_file():
+                z.write(f, f"{top}/ClassiFile/{f.relative_to(app).as_posix()}")
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--tessdata", type=Path, default=TESSDATA)
     ap.add_argument("--iscc", type=Path)
     a = ap.parse_args(argv)
     app, setup = DIST / f"ClassiFile-{__version__}", DIST / f"ClassiFile-{__version__}-setup.exe"
-    for p in (app, setup):
+    portable = DIST / f"ClassiFile-{__version__}-portable.zip"
+    for p in (app, setup, portable):
         if p.exists():
             sys.exit(f"Refusing to overwrite {p}: remove it first.")
     eng = a.tessdata / "eng.traineddata"
@@ -55,6 +70,8 @@ def main(argv=None):
         DIST.mkdir(exist_ok=True)
         shutil.move(tmp / "dist" / "ClassiFile", app)
         print(f"App folder: {app}")
+        write_portable(app, portable)
+        print(f"Portable zip: {portable}")
         iscc = a.iscc or next((p for p in ISCC if p.is_file()), None)
         if iscc is None:
             sys.exit("Inno Setup 6 (ISCC.exe) not found: the app folder is built, the setup file is not.")

@@ -1,2 +1,2 @@
 """ClassiFile: an offline document categorizer, part of the ClariFile suite."""
-__version__ = "1.0.0-rc.3"   # pilot release candidate; 1.0.0 after the pilot (docs/LAUNCH.md)
+__version__ = "1.0.0-rc.4"   # pilot release candidate; 1.0.0 after the pilot (docs/LAUNCH.md)

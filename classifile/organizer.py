@@ -1,5 +1,6 @@
 """GUI-independent workflow: import checks -> read + analyze -> record -> user decision -> verified copy."""
 import os
+import sys
 from pathlib import Path
 
 from classifile import evaluation, matching
@@ -33,6 +34,13 @@ def read_and_analyze(path):
     return result, analysis, summarize(result.record, analysis, name)
 
 
+def in_program_folder(path):
+    """True inside the installed app's own folder, where an update replaces files and an uninstall removes them."""
+    if not getattr(sys, "frozen", False):
+        return False
+    return Path(path).resolve().is_relative_to(Path(sys.executable).resolve().parent)
+
+
 class Organizer:
     def __init__(self, catalog):
         self.catalog = catalog
@@ -53,6 +61,8 @@ class Organizer:
         path = Path(path).resolve()
         if not path.is_dir():
             raise ValueError("output folder does not exist")
+        if in_program_folder(path):
+            raise ValueError("output folder is inside ClassiFile's program folder")
         report = move_copies(self.catalog, path) if move else []
         self.catalog.set_setting("output_root", str(path))
         return report

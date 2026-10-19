@@ -1,7 +1,8 @@
 ; Inno Setup script for ClassiFile: a per-user install (no administrator rights), offline after download.
 ; Built by installer/build.py, which passes AppVersion, Source (the PyInstaller folder) and Licenses.
 ; Uninstalling removes only the installed program files. The user's documents, ClassiFile's copies and its
-; catalog (%LOCALAPPDATA%\ClassiFile) are never touched: nothing here deletes them.
+; catalog (%LOCALAPPDATA%\ClassiFile) are never touched: nothing here deletes them. The folder is fixed (no folder
+; page), so the program never lands among the user's files; the app refuses it as an output folder.
 
 #ifndef AppVersion
   #error Run through installer/build.py
@@ -18,6 +19,7 @@ AppSupportURL=https://github.com/ClariFile/ClassiFile/issues
 DefaultDirName={localappdata}\Programs\ClassiFile
 DefaultGroupName=ClassiFile
 DisableProgramGroupPage=yes
+DisableDirPage=yes
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible

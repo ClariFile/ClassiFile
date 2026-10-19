@@ -458,6 +458,20 @@
 - Built with `installer.build` (`dist\ClassiFile-1.0.0-rc.3-setup.exe`, about 52 MB); the built app's self-test
   on the six samples: PASS. The clean-laptop test (`docs/INSTALLER_TEST.md`) is still open.
 
+**1.0.0-rc.4 (2026-10-19): a release candidate, not verified on a clean machine**
+- Category colours follow creation order (record 2.11 commit); the installer has no folder page (always
+  `%LOCALAPPDATA%\Programs\ClassiFile`), and the app refuses its own program folder as an output folder.
+- `dist\ClassiFile-1.0.0-rc.4-portable.zip`: the same app folder with `ClassiFile-test.cmd`, which keeps the catalog
+  in `test-data` beside it (`CLASSIFILE_DATA_DIR`), and `README-PORTABLE.txt` (what it writes, how to remove it).
+- Checked without installing, on the build laptop: 292 tests; the built app's self-test with only its bundled OCR
+  data (PASS, the same counts as rc.3), also from the unpacked portable zip; both executables ask for `asInvoker`
+  (no administrator prompt); every DLL outside the bundle is part of Windows (the Visual C++ runtime is bundled;
+  Qt needs Windows 10 1703 or later for its ICU); rc.3 and rc.4 ship the same 234 files, so an upgrade leaves no
+  stale file; the setup script deletes nothing but its own installed files (no `[UninstallDelete]`, no code).
+- **Not tested:** install, first run, OCR, filing, upgrade and uninstall of the setup file on any Windows. The
+  owner's only computer is not used for it; no disposable Windows was available (Windows Sandbox and Hyper-V are
+  not in Windows 11 Home). `docs/INSTALLER_TEST.md` has the checklist.
+
 ## Development results so far
 
 These counts describe development data only. They are not accuracy estimates.

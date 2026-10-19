@@ -186,3 +186,26 @@ def test_startup_repairs_an_earlier_half_done_filing(samples, make_org):
     d = org.catalog.document(doc)
     assert d["status"] == "needs_decision" and "Choose a category again" in d["status_reason"]
     assert org.catalog.active_primary(doc) is None and org.catalog.category(cat) is None
+
+
+def test_program_folder_is_refused_as_output_folder(make_org, tmp_path, monkeypatch):
+    """In the installed app, its own folder (where an update replaces files) is never an output folder."""
+    org = make_org()
+    program = tmp_path / "Programs" / "ClassiFile"
+    (program / "out").mkdir(parents=True)
+    monkeypatch.setattr("sys.frozen", True, raising=False)
+    monkeypatch.setattr("sys.executable", str(program / "ClassiFile.exe"))
+    for inside in (program, program / "out"):
+        with pytest.raises(ValueError, match="program folder"):
+            org.set_output_root(inside)
+    org.set_output_root(tmp_path / "Programs")                         # beside it is fine
+    assert org.output_root == (tmp_path / "Programs").resolve()
+
+
+def test_data_dir_override_keeps_the_catalog_apart(tmp_path, monkeypatch):
+    """CLASSIFILE_DATA_DIR (the portable test copy's launcher sets it) moves the catalog out of the usual folder."""
+    from classifile.catalog.db import Catalog, default_data_dir
+    monkeypatch.setenv("CLASSIFILE_DATA_DIR", str(tmp_path / "test-data"))
+    assert default_data_dir() == tmp_path / "test-data"
+    Catalog.open_default().close()
+    assert (tmp_path / "test-data" / "catalog.sqlite3").is_file()

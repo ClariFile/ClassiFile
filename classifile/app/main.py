@@ -46,7 +46,7 @@ from classifile.catalog.db import Catalog
 from classifile import __version__
 from classifile.matching import AUTO_DEFAULT, LEVELS
 from classifile.reader import RECORD_VERSION
-from classifile.organizer import Organizer, is_cloud_synced, read_and_analyze
+from classifile.organizer import Organizer, in_program_folder, is_cloud_synced, read_and_analyze
 from classifile.worker import WorkerPool
 
 ALL, DECIDE, RECENT, SETTINGS, AUTO, HELP, ABOUT = "all", "decide", "recent", "settings", "auto", "help", "about"
@@ -1258,13 +1258,20 @@ class MainWindow(QWidget):
     # -- output folder ----------------------------------------------------------------------------------------
     def choose_output_root(self):
         path = self.pick_folder("Choose the output folder for organized copies")
-        if path:
+        if path and not self._refuse_program_folder(path):
             self.org.set_output_root(path)
         self._show_root()
 
+    def _refuse_program_folder(self, path):
+        if in_program_folder(path):
+            self.toast.show_message("Choose a folder outside ClassiFile's program folder: updates replace files there.")
+            return True
+        return False
+
     def change_output_root(self):
         path = self.pick_folder("Choose a new output folder")
-        if not path or (self.org.output_root and Path(path).resolve() == self.org.output_root):
+        if not path or (self.org.output_root and Path(path).resolve() == self.org.output_root) \
+                or self._refuse_program_folder(path):
             return
         to_move = self.org.copies_to_move(path) if self.org.output_root else []
         answer = self.ask_move(len(to_move)) if to_move else "leave"
