@@ -481,6 +481,21 @@
   files, so an upgrade leaves no stale file.
 - **Not tested:** install, first run, OCR, filing, upgrade and uninstall of the setup file on any Windows (as rc.4).
 
+**1.0.0-rc.6 (2026-10-20): a release candidate, not verified on a clean machine**
+- rc.5 plus the polish below. `dist\ClassiFile-1.0.0-rc.6-setup.exe` (about 52 MB) and
+  `dist\ClassiFile-1.0.0-rc.6-portable.zip` (about 72 MB), from the unchanged installer scripts.
+- Polish (the owner's requests): the status column shows "Filed automatically" in full; column captions start
+  where their values start; thin grey scroll bars without arrows; a hairline edge on the details preview's page;
+  the focus ring follows a key pressed since the last click (a focus moving on from a hidden control, such as a
+  filed row folding away, no longer shows it after a click); exits ease out at once; a group's Details line up with
+  the other rows'. Sidebar: the categories in their own quiet panel (a step lighter than the sidebar, a hairline
+  edge) with the empty band above them removed; Help, About and Settings one rounded group with drawn icons,
+  Settings still outlined, the selected one a single teal outline.
+- Checked without installing, on the build laptop: 293 tests; `tools.check_ui` no failures; the built app's
+  self-test with only its bundled OCR data, on copies of the six samples: PASS, the same counts as rc.5, also from
+  the unpacked portable zip; the app asks for `asInvoker`; rc.5 and rc.6 ship the same 234 files.
+- **Not tested:** install, first run, OCR, filing, upgrade and uninstall of the setup file on any Windows (as rc.4).
+
 **Look and speed pass (2026-10-20, the owner's request; built as rc.5)**
 - **Sharp at 125% and 150%:** the icons drawn in code (file glyph, status marks) are painted at the screen's own
   scale (a `QIconEngine`), and PDF previews are drawn in the screen's pixels; both were drawn at 100% and stretched.

@@ -37,7 +37,7 @@ from classifile.app.models import DOC, SORTS, CategoryModel, DocumentFilter, Doc
 from classifile.app.widgets import (
     CHECKLIST_MAX, DATE_COLUMN_MIN, PANEL, SETTING_CHOICE, TIGHT, DETAILS_MAX, DETAILS_MIN, DETAILS_WIDTH, FILE_ICON, GROUP, LIST_MIN, MIN_WINDOW,
     MOTION_STANDARD, NARROW, PAD, RELATED, SEARCH_MAX, SECTION, SIDEBAR_WIDTH, SUPPORTED, TOAST, TOAST_LONG,
-    FONT, ICON, STATUS, TEXT_BODY, WIDE, WINDOW, box, keyboard_focus, motion, qt_palette, set_motion, slide_away, smooth_scrolling, style_sheet,
+    FONT, ICON, STATUS, foot_icon, TEXT_BODY, WIDE, WINDOW, box, keyboard_focus, motion, qt_palette, set_motion, slide_away, smooth_scrolling, style_sheet,
     use_theme,
     Collapsible, DropOverlay, ElidedLabel, Notices, PickerDialog, PreviewOverlay, Toast, wrappable, wrapped,
 )
@@ -495,7 +495,7 @@ class MainWindow(QWidget):
         self.add_category.setToolTip("Create a category")
         self.add_category.setAccessibleName("Create a category")
         self.add_category.clicked.connect(self.new_category_clicked)
-        cat_head = box(QHBoxLayout(), (GROUP, SECTION, RELATED, 0))   # the + sets the row's height
+        cat_head = box(QHBoxLayout(), (GROUP, 0, 0, 0))   # inside the panel, over the names; the + sets the height
         cat_head.addWidget(header, 1)
         cat_head.addWidget(self.add_category)
         self.cat_model = CategoryModel(self)      # names with counts; the documents are in the main list
@@ -533,36 +533,41 @@ class MainWindow(QWidget):
         self.cats_empty.setObjectName("secondary")
         self.cats_empty.setWordWrap(True)
         self.cats_empty.setContentsMargins(GROUP, 0, GROUP, 0)
-        for key, text in ((HELP, "Help"), (ABOUT, "About")):
+        for key, text in ((HELP, "Help"), (ABOUT, "About"), (SETTINGS, "Settings")):
             b = QPushButton(text)
             b.setObjectName("nav")
+            b.setProperty("foot", True)
+            b.setIcon(foot_icon(key))
+            b.setIconSize(QSize(ICON, ICON))
             b.setCheckable(True)
             b.clicked.connect(lambda _=False, k=key: self.show_view(k))
             self.nav_group.addButton(b)
             self.nav[key] = b
-        settings = QPushButton("⚙  Settings")
-        settings.setObjectName("nav")
-        settings.setProperty("prominent", True)  # outlined and set apart: easy to find
+        settings = self.nav[SETTINGS]
+        settings.setProperty("prominent", True)  # outlined: easy to find
         settings.setToolTip("Automatic filing, new folders, learning, output folder and appearance")
-        settings.setCheckable(True)
-        settings.clicked.connect(lambda: self.show_view(SETTINGS))
-        self.nav_group.addButton(settings)
-        self.nav[SETTINGS] = settings
         v = box(QVBoxLayout(side), (0, 0, 0, RELATED), 0)
         v.addLayout(top)
         for key in (ALL, DECIDE, AUTO, RECENT):
             v.addWidget(self.nav[key])
-        v.addLayout(cat_head)
-        find = box(QHBoxLayout(), (GROUP, 0, GROUP, RELATED))
+        cat_box = QFrame()                        # the categories in their own quiet panel, apart from the views
+        cat_box.setObjectName("catBox")
+        c = box(QVBoxLayout(cat_box), TIGHT, 0)
+        c.addLayout(cat_head)
+        find = box(QHBoxLayout(), (0, 0, 0, RELATED))
         find.addWidget(self.find_category)
-        v.addLayout(find)
-        v.addWidget(self.cats_empty)
-        v.addWidget(self.cats_none)
-        v.addWidget(self.cats, 1)
+        c.addLayout(find)
+        c.addWidget(self.cats_empty)
+        c.addWidget(self.cats_none)
+        c.addWidget(self.cats, 1)
         v.addSpacing(RELATED)
-        v.addWidget(self.nav[HELP])
-        v.addWidget(self.nav[ABOUT])
-        v.addWidget(settings)
+        panel = box(QHBoxLayout(), (RELATED, 0, RELATED, 0))
+        panel.addWidget(cat_box)
+        v.addLayout(panel, 1)
+        v.addSpacing(RELATED)
+        for key in (HELP, ABOUT, SETTINGS):     # apart, so no two outlines touch
+            v.addWidget(self.nav[key])
+            v.addSpacing(TIGHT)
         return side
 
     def _table(self):

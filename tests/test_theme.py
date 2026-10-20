@@ -83,7 +83,7 @@ def test_teal_only_where_the_owner_allows_it_and_large_surfaces_are_neutral(name
     for block in style_sheet(t).split("}"):
         selector, _, body = block.partition("{")
         if t["accent"] in body:                 # focus outlines, selection bars and links only
-            assert re.search(r"focus|selected|nav(\[prominent=\"true\"\])?:checked|inspected|#primary|#link", selector), selector.strip()
+            assert re.search(r"focus|selected|nav(\[[a-z]+=\"true\"\])*:checked|inspected|#primary|#link", selector), selector.strip()
         if ":hover" in selector:
             assert t["accent"] not in body and t["selection"] not in body, selector.strip()   # hover is grey
 

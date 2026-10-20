@@ -26,5 +26,4 @@ dist/
 # Local agent tooling (not part of ClassiFile)
 .agents/
 .claude/
-AGENTS.md
 skills-lock.json

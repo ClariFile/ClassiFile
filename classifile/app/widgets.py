@@ -5,7 +5,7 @@ from pathlib import Path
 from PySide6.QtCore import (
     QEasingCurve, QEvent, QObject, QPoint, QPointF, QPropertyAnimation, QRect, QRectF, QSize, Qt, QTimer, Signal,
 )
-from PySide6.QtGui import QColor, QIcon, QIconEngine, QPainter, QPalette, QPen, QPixmap
+from PySide6.QtGui import QColor, QIcon, QIconEngine, QPainter, QPainterPath, QPalette, QPen, QPixmap, QTransform
 from PySide6.QtWidgets import (
     QAbstractItemView, QAbstractScrollArea, QApplication, QDialog, QFrame, QHBoxLayout, QLabel, QLineEdit,
     QListWidget, QListWidgetItem, QPushButton, QScrollArea, QSizePolicy, QToolButton, QVBoxLayout, QWidget,
@@ -85,11 +85,16 @@ QPushButton#nav {{ text-align: left; border: none; background: transparent; colo
                    max-height: none; }}
 QLabel#count {{ font-size: {TEXT_SECONDARY}px; color: {t['secondary']}; }}
 QPushButton#nav:checked {{ background: {t['nav']}; border-left: {BAR}px solid {t['accent']}; }}
-QPushButton#nav[prominent="true"] {{ border: {HAIR}px solid {t['control']}; border-radius: {RADIUS_CONTROL}px;
-                                     margin: 0 {GROUP - TIGHT}px; padding-left: {GROUP - TIGHT}px;
-                                     font-weight: {WEIGHT_STRONG}; background: {t['base']}; }}
-QPushButton#nav[prominent="true"]:checked {{ background: {t['nav']}; border-left: {BAR}px solid {t['accent']}; }}
-QPushButton#nav[prominent="true"]:hover {{ background: {t['hover']}; }}
+/* Help, About and Settings at the foot: one rounded shape, the same width, icon and text place; Settings keeps an
+   outline to be easy to find. Selected is one teal outline with the tint, never a bar inside an outline. */
+QPushButton#nav[foot="true"] {{ margin: 0 {RELATED}px; padding: {NAV_PAD - HAIR}px {RELATED - HAIR}px;
+                               border: {HAIR}px solid transparent; border-radius: {RADIUS_CONTROL}px; }}
+QPushButton#nav[foot="true"][prominent="true"] {{ border-color: {t['control']}; background: {t['base']};
+                                                 font-weight: {WEIGHT_STRONG}; }}
+QPushButton#nav[foot="true"]:hover {{ background: {t['hover']}; }}
+QPushButton#nav[foot="true"]:checked {{ background: {t['nav']}; border-color: {t['accent']}; }}
+QFrame#catBox {{ background: {t['window']}; border: {HAIR}px solid {t['divider']};
+                 border-radius: {RADIUS_PANEL}px; }}   /* a step lighter than the sidebar, a hairline edge */
 QFrame#settingsCard {{ background: {t['base']}; border: {HAIR}px solid {t['divider']};
                        border-radius: {RADIUS_PANEL}px; }}
 QPushButton#nav:hover {{ background: {t['hover']}; }}
@@ -504,6 +509,33 @@ def painted(key, draw):
     if key not in _ICONS:
         _ICONS[key] = QIcon(_Painted(draw))
     return _ICONS[key]
+
+
+def foot_icon(kind):
+    """The glyphs of Help ("?" in a ring), About ("i" in a ring) and Settings (a gear), in the secondary grey."""
+    def draw(p):
+        pen = QPen(QColor(THEME["secondary"]), 1.3, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
+        p.setPen(pen)
+        if kind == "settings":
+            p.drawEllipse(QPointF(8, 8), 4.2, 4.2)
+            p.drawEllipse(QPointF(8, 8), 1.6, 1.6)
+            pen.setWidthF(2.2)
+            p.setPen(pen)
+            for n in range(8):              # the teeth
+                t = QTransform().translate(8, 8).rotate(45 * n)
+                p.drawLine(t.map(QPointF(0, -5.6)), t.map(QPointF(0, -6.6)))
+            return
+        p.drawEllipse(QPointF(8, 8), 6.5, 6.5)
+        if kind == "help":
+            path = QPainterPath(QPointF(6, 6.3))
+            path.cubicTo(QPointF(6, 3.6), QPointF(10.2, 3.6), QPointF(10.2, 6.3))
+            path.cubicTo(QPointF(10.2, 8), QPointF(8, 8), QPointF(8, 9.6))
+            p.drawPath(path)
+            p.drawPoint(QPointF(8, 12))
+        else:
+            p.drawLine(QPointF(8, 7.3), QPointF(8, 11.6))
+            p.drawPoint(QPointF(8, 4.8))
+    return painted(("foot", kind), draw)
 
 
 def format_icon(file_name):
