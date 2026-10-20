@@ -250,6 +250,7 @@ def test_inventory_labels_are_saved_at_once_and_resume(app, tmp_path):
     w.open_path = opened.append
     rows = lambda: [w.picker.list.item(i).text() for i in range(w.picker.list.count())]
     assert w.name.full == "a.pdf" and w.progress.text() == "0 of 3 labelled" and rows() == ["Networks · 2"]
+    _pump(app, lambda: not w.preview.busy)                          # drawn by the preview process
     assert w.preview.page_label.text() == "Page 1 of 2" and not w.save_button.isEnabled()
     w.open_button.click()
     assert opened == [folder / "a.pdf"]
@@ -316,6 +317,7 @@ def test_inventory_relabelling_after_a_split(app, tmp_path):
     opened = []
     w.open_path = opened.append
     assert w.name.full == "a.pdf" and w.progress.text() == "3 of 3 still labelled Broad"
+    _pump(app, lambda: not w.preview.busy)
     assert w.preview.page_label.text() == "Page 1 of 1"            # found in its split's folder
     w.open_button.click()
     assert opened == [folders["development"] / "a.pdf"]

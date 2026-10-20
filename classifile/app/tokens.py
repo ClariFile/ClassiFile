@@ -148,5 +148,6 @@ MOTION_PANEL = 200      # the toast
 MOTION_LEAVE = 150      # a filed row folding away
 MOTION_SCROLL = 160     # a list or page gliding after a wheel turn
 PREVIEW_SETTLE = 150    # after the last resize step, before the page is drawn again at its new size
+PREVIEW_TIMEOUT = 20000 # a page not drawn by then: the preview process is replaced and the page says so
 TOAST = 5000            # how long a message stays
 TOAST_LONG = 10000      # a message that says something went wrong, or more than one thing

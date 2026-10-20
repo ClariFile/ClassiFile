@@ -91,7 +91,7 @@ def render(out, size=(1280, 720), theme="light", views=VIEWS):
     from classifile.app.learn import LearnDialog
     from PySide6.QtCore import Qt
     from classifile.app.main import ABOUT, ALL, AUTO, DECIDE, HELP, SETTINGS, MainWindow, problem_report
-    from classifile.app.widgets import keyboard_focus
+    from classifile.app.widgets import Preview, keyboard_focus
     from classifile.catalog.db import Catalog
     from classifile.organizer import Organizer
 
@@ -132,6 +132,9 @@ def render(out, size=(1280, 720), theme="light", views=VIEWS):
     def shot(w, name):
         if name in views:
             pump()
+            end = time.monotonic() + 10         # page pictures come from the preview process: wait for them
+            while any(p.busy for p in w.findChildren(Preview)) and time.monotonic() < end:
+                pump(0.05)
             w.grab().save(str(out / f"{name}.png"))
 
     with tempfile.TemporaryDirectory(prefix="classifile-shots-", ignore_cleanup_errors=True) as tmp:

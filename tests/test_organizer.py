@@ -192,7 +192,7 @@ def test_remove_refuses_filed_documents(samples, make_org):
 
 
 def test_preview_without_other_programs(samples, office):
-    from classifile.app.preview import first_page_png
+    from classifile.pages import first_page_png
 
     assert first_page_png(samples / SAMPLE["S2"]).startswith(b"\x89PNG")
     assert first_page_png(office / "security.pptx") is None  # no stored thumbnail: the window shows a text card

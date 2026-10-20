@@ -32,7 +32,7 @@ from PySide6.QtWidgets import (
 )
 
 from classifile.app import make_app
-from classifile.app.preview import PdfPages, first_page_png
+from classifile.pages import PdfPages, first_page_png
 from classifile.organizer import read_and_analyze
 from classifile.reader import read_document
 from classifile.reader.common import REPEATED_SHARE, package_part

@@ -8,8 +8,8 @@
   matcher was frozen (record 2.10) and the final evaluation ran once, on 2026-10-16. `data\final-eval` is not read
   again, and `tools.final_eval` refuses a second run whatever its options.
 - **Since rc.6:** the review fixes in "Review fixes (2026-10-20)" below, for an rc.7.
-- **Next:** the clean-machine installer test (`docs/INSTALLER_TEST.md`; never on the owner's own laptop), page
-  previews in a worker process (review finding 13), then the pilot.
+- **Next:** an rc.7 build with the review fixes, the clean-machine installer test (`docs/INSTALLER_TEST.md`;
+  never on the owner's own laptop), then the pilot.
 - Everything under "Done" is history: a "Next" line inside an entry was the next step at the time, not now.
 
 ## Done
@@ -514,6 +514,11 @@
   `tools.final_eval` and `tools.match_validation` keep one fixed record: another `--out` only copies it.
 - Needs your decision says "5 documents in 3 questions" when a group asks once for several; the tour and the
   Learning card say when learning starts (10 documents in two categories) and when a correction is learned.
+- **Previews in a worker process:** page pictures and stored thumbnails are drawn by one long-lived process
+  (`classifile.pages.serve`, through `classifile.worker.Worker`) and waited on by a background thread, so a damaged
+  or slow file can neither freeze nor end the window. A page not drawn within 20 s stops that process (the next
+  request starts a new one) and the page says it can't be previewed. The module moved out of the app package
+  (`classifile/pages.py`) so the process does not load Qt.
 - Record 2.12: installer packaging is no longer deferred.
 - Tests: `tests/test_safety.py` runs the copy, recovery and learning cases on generated documents, so they run
   in every checkout. The older tests that need the private samples still skip without them (review finding 12,

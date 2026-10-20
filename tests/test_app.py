@@ -64,6 +64,11 @@ def _window(make_org, paths=()):
     return w, rec
 
 
+def _drawn(app, preview):
+    """Wait for the page service's answer: previews are drawn in a worker process, off the interface thread."""
+    _pump(app, lambda: not preview.busy)
+
+
 def _doc(w, file_name):
     return next(d["id"] for d in w.org.catalog.all_documents() if d["file_name"] == file_name)
 
@@ -477,19 +482,23 @@ def test_details_preview_and_expand(app, samples, office, make_org):
     w.select_docs([_doc(w, SAMPLE["S4"])])
     w.details_toggle.click()
     p = w.details.preview
+    _drawn(app, p)
     assert w.details.isVisible() and not p.image.pixmap().isNull()
     assert p.page_label.text() == "Page 1 of 25" and not p.prev.isEnabled()
     p.next.click()
-    assert p.page_label.text() == "Page 2 of 25" and p.prev.isEnabled()
+    assert p.page_label.text() == "Page 2 of 25" and p.prev.isEnabled()      # at once, before the picture
+    _drawn(app, p)
     assert not w.details.open_button.isVisible()                   # nothing to open before filing
     p.expand.click()
     big = w.preview_overlay
+    _drawn(app, big.preview)
     assert big.isVisible() and big.preview.page_label.text() == "Page 2 of 25"
     QTest.keyClick(big, Qt.Key_PageDown)
     assert big.preview.page_label.text() == "Page 3 of 25"
     QTest.keyClick(big, Qt.Key_Escape)
     assert not big.isVisible() and w.details.isVisible()
-    w.select_docs([_doc(w, "security.pptx")])                      # no stored thumbnail: the first-lines card
+    w.select_docs([_doc(w, "security.pptx")])                      # no stored thumbnail: a plain sentence
+    _drawn(app, p)
     assert not p.nav.isVisible() or not p.next.isVisible()
     assert p.image.text() == "No page picture is stored in this file."    # never the document's text (A10)
     assert "Open" in p.note.text()
@@ -903,6 +912,7 @@ def test_sidebar_keeps_its_place_and_details_stay_on(app, samples, make_org):
     assert w.details.isVisible() and w.details.title.full == "Details"
     assert "Select a document" in w.details.hint.text() and not w.details.locations_section.isVisible()
     w.select_docs([_doc(w, SAMPLE["S4"])])
+    _drawn(app, w.details.preview)
     assert w.details.title.full == SAMPLE["S4"] and w.details.preview.page_label.text() == "Page 1 of 25"
     assert w.details.locations_section.isVisible()
     w.show_view(RECENT)                                            # still on, on another page
@@ -1382,7 +1392,7 @@ def test_the_preview_draws_once_after_a_resize_and_keeps_recent_pages(app, make_
     w.select_docs([_doc(w, path.name)])
     w.set_details_open(True)
     p = w.details.preview
-    _pump(app, lambda: p.page_label.text() == "Page 1 of 3" and not p.settle.isActive()
+    _pump(app, lambda: p.page_label.text() == "Page 1 of 3" and not p.settle.isActive() and not p.busy
           and w.slide.state() != w.slide.State.Running)
     assert w.auto_page.minimumSizeHint().width() < 400             # no page's wording sets the least width
     drawn, widths = p.draws, set()
@@ -1394,13 +1404,15 @@ def test_the_preview_draws_once_after_a_resize_and_keeps_recent_pages(app, make_
     assert len(widths) > 10 and p.draws == drawn                   # the picture was only scaled: nothing drawn
     assert p.settle.isActive()
     _pump(app, lambda: not p.settle.isActive())
+    _drawn(app, p)
     assert p.draws == drawn + 1                                    # drawn once, at the size it ended on
     p.next.click()
+    _drawn(app, p)
     assert p.page_label.text() == "Page 2 of 3" and p.draws == drawn + 2
     p.prev.click()                                                 # a page already drawn at this size is kept
-    assert p.page_label.text() == "Page 1 of 3" and p.draws == drawn + 2
+    assert p.page_label.text() == "Page 1 of 3" and not p.busy and p.draws == drawn + 2
     p.next.click()
-    assert p.draws == drawn + 2
+    assert not p.busy and p.draws == drawn + 2
     w.show_view(SETTINGS)                                          # Settings: the whole page, controls at the right
     _pump(app, lambda: w.settings_page.isVisible())
     assert w.change_root.geometry().right() > w.settings_page.width() - 40
@@ -1802,6 +1814,7 @@ def test_office_files_without_a_stored_picture_show_no_document_text(app, office
     preview = Preview()
     for path in office.iterdir():                               # the generated files carry no thumbnail
         preview.show_document(path)
+        _drawn(app, preview)
         shown = preview.image.text()
         assert shown == "No page picture is stored in this file.", path.name
 
@@ -1824,3 +1837,29 @@ def test_the_open_choices_reach_the_cards_right_edge(app, make_org, make_pdf):
     assert abs(right(item.expanded) - right(item.more_menu)) <= 2      # no empty band at the right (owner's rule)
     assert item.expanded.width() > 900                                  # the old 680 cap is gone
     _close(w, rec)
+
+
+@pytest.mark.parametrize("how", ["hang", "crash"])
+def test_a_preview_that_hangs_or_crashes_never_stops_the_window(app, make_pdf, how):
+    import preview_probe
+    from classifile.app.widgets import Preview, page_service
+    from classifile.worker import Worker
+
+    path = make_pdf("notes.pdf", "garden soil compost seedling")
+    service = page_service()
+    real = service.worker
+    service.worker = Worker(getattr(preview_probe, how), timeout=1, on_failure=lambda request, reason: None)
+    try:
+        preview = Preview()
+        started = time.monotonic()
+        preview.show_document(path)
+        assert time.monotonic() - started < 0.5 and preview.busy        # the window went on at once
+        _drawn(app, preview)
+        assert preview.image.text() == "This PDF can't be previewed."
+    finally:
+        service.worker.stop()
+        service.worker = real
+    preview.show_document(None)
+    preview.show_document(path)                                          # the real one draws again
+    _drawn(app, preview)
+    assert not preview.image.pixmap().isNull() and preview.page_label.text() == "Page 1 of 1"

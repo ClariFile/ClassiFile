@@ -38,8 +38,9 @@ def failure(path, reason):
 class Worker:
     """One child process that handles one file at a time; replaced after a crash or a timeout."""
 
-    def __init__(self, target, timeout=DEFAULT_TIMEOUT):
-        self.target, self.timeout = target, timeout
+    def __init__(self, target, timeout=DEFAULT_TIMEOUT, on_failure=failure):
+        """on_failure(request, reason): the answer after a crash, a timeout or an error in the child."""
+        self.target, self.timeout, self.on_failure = target, timeout, on_failure
         self.proc = self.conn = None
 
     def _start(self):
@@ -64,7 +65,7 @@ class Worker:
         except (EOFError, OSError):
             reason = "reader process stopped unexpectedly"
         self.stop()
-        return failure(path, reason)
+        return self.on_failure(path, reason)
 
     def stop(self):
         if self.proc is not None:

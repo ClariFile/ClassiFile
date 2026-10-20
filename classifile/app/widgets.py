@@ -15,7 +15,8 @@ QWIDGETSIZE_MAX = (1 << 24) - 1
 
 from classifile.analysis.candidates import name_key
 from classifile.app import ICON_DIR
-from classifile.app.preview import PdfPages, thumbnail_png
+from classifile import pages
+from classifile.worker import Worker
 from classifile.app.tokens import *  # noqa: F401,F403  every size, colour and duration; also passed on to importers
 from classifile.reader import READERS
 
@@ -911,15 +912,54 @@ class DropOverlay(QFrame):
         self.show()
 
 
+class PageService(QObject):
+    """Page pictures drawn in one worker process (classifile.pages.serve), off the interface thread: a damaged or
+    slow file can neither freeze nor end the window, and a page not drawn within PREVIEW_TIMEOUT stops its process
+    (a new one starts with the next request). One request at a time, answered through done. One per application
+    (page_service); the process is started at once, so the first preview does not wait for it."""
+
+    done = Signal(object, object)               # the request's token, its answer (None: failed or timed out)
+
+    def __init__(self):
+        super().__init__()
+        self.worker = Worker(pages.serve, timeout=PREVIEW_TIMEOUT / 1000, on_failure=lambda request, reason: None)
+        self.queue = None                       # the thread that waits on the process, started with a request
+        self.ask(None, ("ping",))
+
+    def ask(self, token, request):
+        if self.queue is None:                  # first use, or again after stop()
+            from concurrent.futures import ThreadPoolExecutor
+            self.queue = ThreadPoolExecutor(1)
+        self.queue.submit(lambda: self.done.emit(token, self.worker.run(request)))
+
+    def stop(self):
+        if self.queue is not None:
+            self.queue.shutdown(wait=False, cancel_futures=True)
+            self.queue = None
+        self.worker.stop()
+
+
+def page_service():
+    app = QApplication.instance()
+    if getattr(app, "page_service", None) is None:
+        app.page_service = PageService()
+        app.aboutToQuit.connect(app.page_service.stop)
+    return app.page_service
+
+
 class Preview(QWidget):
-    """A page preview: PDF pages fitted to the width with page navigation, else the stored thumbnail or a card of
-    the first lines. Page images only; no text views and no other programs."""
+    """A page preview: PDF pages fitted to the width with page navigation, else the stored thumbnail. Page images
+    only; no text views and no other programs. Pictures come from the page service, so the window never waits for
+    one: until a page arrives, the one before stays (stretched to the new size while resizing)."""
 
     expand_requested = Signal()
 
     def __init__(self, expandable=True, fit_width=False):
         super().__init__()
-        self.pdf, self.page, self.source = None, 0, None
+        self.count, self.page, self.source = None, 0, None     # count: pages of the PDF shown (None: no PDF)
+        self.waiting, self.asked = None, 0      # the request this preview waits for: (number, what to do with it)
+        self.service = page_service()
+        self.service.done.connect(self._answer)
         self.fit_width = fit_width
         self.drawn, self.shown, self.draws = {}, None, 0   # page -> (width, picture); the one shown; drawings made
         self.settle = QTimer(self)              # one drawing when the resizing has stopped
@@ -969,20 +1009,41 @@ class Preview(QWidget):
         v.addWidget(self.nav)
         v.addWidget(self.note)
 
+    @property
+    def busy(self):
+        """A picture was asked for and has not arrived."""
+        return self.waiting is not None
+
+    def _ask(self, request, then):
+        self.asked += 1                         # a newer request makes any answer to an older one stale
+        self.waiting = (self.asked, then)
+        self.service.ask((id(self), self.asked), request)
+
+    def _answer(self, token, out):
+        if token is None or token[0] != id(self) or self.waiting is None or token[1] != self.waiting[0]:
+            return                              # another preview's, or one this preview no longer waits for
+        then, self.waiting = self.waiting[1], None
+        then(out)
+
     def close_pdf(self):
-        if self.pdf:
-            self.pdf.close()
-        self.pdf = None
+        self.count, self.waiting = None, None
         self.drawn = {}
         self.settle.stop()
 
-    def show_document(self, source, note=""):
+    def _unavailable(self, text):
+        self.image.setPixmap(QPixmap())
+        self.image.setObjectName("card")
+        self.image.setText(text)
+        restyle(self.image)
+
+    def show_document(self, source, note="", page=0):
         """source: the file to preview (the filed copy, or the original). Page pictures only: without one, a
-        plain sentence, never the document's text (viewing text belongs to SummarEase, record A10)."""
-        if source == self.source and self.pdf:
-            return self.show_page(self.page)
+        plain sentence, never the document's text (viewing text belongs to SummarEase, record A10). page: the
+        PDF page to open at."""
+        if source == self.source and self.count:
+            return self.show_page(page or self.page)
         self.close_pdf()
-        self.source, self.page = source, 0
+        self.source, self.page = source, page
         self.image.setPixmap(QPixmap())
         self.image.setObjectName("")
         self.note.setText(note)
@@ -991,49 +1052,63 @@ class Preview(QWidget):
             self.nav.hide()
             return
         if Path(source).suffix.lower() == ".pdf":
-            try:
-                self.pdf = PdfPages(source)
-            except Exception:
-                self.image.setText("This PDF can't be previewed.")
-                self.nav.hide()
-                return
-            self.show_page(0)
+            self.nav.hide()
+            self._ask(("count", str(source)), self._got_count)
             return
-        png = thumbnail_png(source)
         self.nav.setVisible(self.expand.isVisible())
         self.prev.hide()
         self.next.hide()
         self.page_label.setText("")
+        self._ask(("thumbnail", str(source)), self._got_thumbnail)
+
+    def _got_count(self, n):
+        if not isinstance(n, int) or n < 1:
+            return self._unavailable("This PDF can't be previewed.")
+        self.count = n
+        self.show_page(self.page)
+
+    def _got_thumbnail(self, png):
         if png:
             self._set(png)
-        else:  # no stored thumbnail, and no other programs are started for one
-            self.image.setObjectName("card")
-            self.image.setText("No page picture is stored in this file.")
-            restyle(self.image)
+        else:   # no stored thumbnail (or it couldn't be read), and no other programs are started for one
+            self._unavailable("No page picture is stored in this file.")
 
     def show_page(self, index):
-        if not self.pdf:
+        if not self.count:
             return
-        self.page = max(0, min(self.pdf.count - 1, index))
-        width = max(200, self.scroll.viewport().width() - 8)
-        scale = self.devicePixelRatioF()        # drawn in the screen's own pixels: sharp at 125% and 150%
-        kept = self.drawn.pop(self.page, None)
-        if kept is None or kept[0] != (width, scale):    # not drawn at this size yet
-            pix = QPixmap()
-            pix.loadFromData(self.pdf.png(self.page, round(width * scale), "ppm"))
-            pix.setDevicePixelRatio(scale)
-            kept = ((width, scale), pix)
-            self.draws += 1
-        self.drawn[self.page] = kept            # the latest last; the oldest go
-        for old in list(self.drawn)[:-PREVIEW_KEEP]:
-            del self.drawn[old]
-        self._fit(kept[1])
-        self.page_label.setText(f"Page {self.page + 1} of {self.pdf.count}")
+        self.page = max(0, min(self.count - 1, index))
+        self.page_label.setText(f"Page {self.page + 1} of {self.count}")
         self.prev.show()
         self.next.show()
         self.prev.setEnabled(self.page > 0)
-        self.next.setEnabled(self.page < self.pdf.count - 1)
+        self.next.setEnabled(self.page < self.count - 1)
         self.nav.show()
+        size = (max(200, self.scroll.viewport().width() - 8), self.devicePixelRatioF())  # the screen's own pixels
+        kept = self.drawn.pop(self.page, None)
+        if kept is not None:
+            self.drawn[self.page] = kept        # the latest last; the oldest go
+            if kept[0] == size:
+                self.waiting = None             # what was asked for before is no longer wanted
+                return self._fit(kept[1])
+            self._fit(kept[1], resizing=True)   # stretched until it is drawn at the new size
+        page = self.page
+        self._ask(("page", str(self.source), page, round(size[0] * size[1])),
+                  lambda out: self._got_page(page, size, out))
+
+    def _got_page(self, page, size, out):
+        if not out:
+            return self._unavailable("This page can't be previewed.")
+        pix = QPixmap()
+        pix.loadFromData(out)
+        pix.setDevicePixelRatio(size[1])
+        self.draws += 1
+        self.drawn.pop(page, None)
+        self.drawn[page] = (size, pix)
+        for old in list(self.drawn)[:-PREVIEW_KEEP]:
+            del self.drawn[old]
+        self.image.setObjectName("")
+        restyle(self.image)
+        self._fit(pix)
 
     def _set(self, png):
         pix = QPixmap()
@@ -1058,13 +1133,13 @@ class Preview(QWidget):
 
     def resizeEvent(self, e):
         super().resizeEvent(e)
-        if self.pdf and self.shown is not None:
+        if self.count and self.shown is not None:
             self._fit(self.shown, resizing=True)    # no drawing per step
             self.settle.start()
 
     def showEvent(self, e):
         super().showEvent(e)
-        if self.pdf:  # sized while hidden: fit again now that the real size is known
+        if self.count:  # sized while hidden: fit again now that the real size is known
             self.show_page(self.page)
 
 
@@ -1092,8 +1167,7 @@ class PreviewOverlay(QFrame):
         self.raise_()
         self.show()
         self.preview.source = None
-        self.preview.show_document(source)
-        self.preview.show_page(page)
+        self.preview.show_document(source, page=page)
         self.setFocus()
 
     def keyPressEvent(self, e):

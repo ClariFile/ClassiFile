@@ -109,11 +109,11 @@ def render(out, scale=None, size=(1280, 720), theme="dark"):
         pump()
         w.grab().save(str(out / f"{prefix}decision-expanded.png"))
         w.show_details(item.ids[0])  # beside the item, on the same page
-        pump()
+        pump(lambda: not w.details.preview.busy, 10)     # pictures come from the preview process
         w.grab().save(str(out / f"{prefix}decision-details.png"))
         w.show_view(ALL)
         w.show_details(cst)
-        pump()
+        pump(lambda: not w.details.preview.busy, 10)
         w.grab().save(str(out / f"{prefix}details.png"))
         if scale is not None:
             w.close()

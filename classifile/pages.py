@@ -1,6 +1,7 @@
 """Previews without other programs: PDF pages are rendered with PyMuPDF; PPTX, DOCX and ODT files show the
 thumbnail the saving application stored inside the file, when there is one. Page images only, never text views.
-Files are only read, from memory."""
+Files are only read, from memory. The window asks for them through serve(), in a worker process (classifile.worker),
+so a damaged or slow file can neither freeze nor end the window. Nothing here imports Qt."""
 from pathlib import Path
 
 import pymupdf
@@ -59,3 +60,29 @@ def first_page_png(path, width=260):
         return thumbnail_png(path)
     except Exception:
         return None
+
+
+_open = {}      # in the preview process: the PDF last asked about, kept open for its next pages
+
+
+def serve(request):
+    """The preview process's answer to one request: ("ping",) -> True (started ahead of the first preview);
+    ("thumbnail", path) -> PNG bytes, or b"" without a stored picture; ("count", path) -> pages;
+    ("page", path, index, width) -> the page drawn width pixels wide, as PPM bytes. A file that cannot be read
+    raises; the worker then answers with its failure value."""
+    kind = request[0]
+    if kind == "ping":
+        return True
+    path = Path(request[1])
+    if kind == "thumbnail":
+        return thumbnail_png(path) or b""
+    key = (str(path), path.stat().st_mtime_ns)   # a file changed since is opened again
+    if key not in _open:
+        for pages in _open.values():
+            pages.close()
+        _open.clear()
+        _open[key] = PdfPages(path)
+    pages = _open[key]
+    if kind == "count":
+        return pages.count
+    return pages.png(request[2], request[3], "ppm")
