@@ -4,12 +4,11 @@
 
 ## Now (read this first)
 
-- **Where it stands:** v1 release candidate 1.0.0-rc.6, built and checked without installing. CP5 is done: the
+- **Where it stands:** v1 release candidate 1.0.0-rc.7, built and checked without installing. CP5 is done: the
   matcher was frozen (record 2.10) and the final evaluation ran once, on 2026-10-16. `data\final-eval` is not read
   again, and `tools.final_eval` refuses a second run whatever its options.
-- **Since rc.6:** the review fixes in "Review fixes (2026-10-20)" below, for an rc.7.
-- **Next:** an rc.7 build with the review fixes, the clean-machine installer test (`docs/INSTALLER_TEST.md`;
-  never on the owner's own laptop), then the pilot.
+- **Next:** the clean-machine installer test (`docs/INSTALLER_TEST.md`; never on the owner's own laptop), then
+  the pilot.
 - Everything under "Done" is history: a "Next" line inside an entry was the next step at the time, not now.
 
 ## Done
@@ -491,7 +490,16 @@
   files, so an upgrade leaves no stale file.
 - **Not tested:** install, first run, OCR, filing, upgrade and uninstall of the setup file on any Windows (as rc.4).
 
-**Review fixes (2026-10-20, from an outside review the owner asked to be worked through; not built yet)**
+**1.0.0-rc.7 (2026-10-20): a release candidate, not verified on a clean machine**
+- rc.6 plus the review fixes below. `dist\ClassiFile-1.0.0-rc.7-setup.exe` (about 52 MB) and
+  `dist\ClassiFile-1.0.0-rc.7-portable.zip` (about 72 MB), from the unchanged installer scripts.
+- Checked without installing, on the build laptop: 308 tests; `tools.check_ui` no failures; the built app's
+  self-test with only its bundled OCR data, on copies of the six samples: PASS, the same counts as rc.6, also from
+  the unpacked portable zip; the app asks for `asInvoker`; rc.6 and rc.7 ship the same 234 files.
+- **Not tested:** install, first run, OCR, filing, upgrade and uninstall of the setup file on any Windows (as
+  rc.4); the preview process inside the built app (the self-test reads files, it shows no window).
+
+**Review fixes (2026-10-20, from an outside review the owner asked to be worked through; built as rc.7)**
 - **Recovery never removes the last good copy:** an old copy goes only while its replacement is there and
   unchanged now (one check in the shared function, for moves, renames and a change of output folder); a move
   resumed at startup makes a missing replacement again first.
