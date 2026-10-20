@@ -51,12 +51,18 @@ def test_final_eval_counts_once_with_the_frozen_version(make_org, tmp_path, caps
     out = tmp_path / "result.json"
     args = [str(held), "--labels", str(labels), "--out", str(out), "--catalog", str(catalog)]
     final_eval.FROZEN_VERSION, frozen = version, final_eval.FROZEN_VERSION
+    final_eval.RECORD, record = tmp_path / "record.json", final_eval.RECORD     # never the real record
+    measure, calls = final_eval.measure, []
+    final_eval.measure = lambda *a, **k: calls.append(1) or measure(*a, **k)
     try:
-        assert final_eval.main(args) == 0 and out.exists()
+        assert final_eval.main(args) == 0 and out.exists() and final_eval.RECORD.exists()
         with pytest.raises(SystemExit, match="already run"):  # once only
             final_eval.main(args)
+        other = tmp_path / "another name.json"                  # another report name: a copy, never a second run
+        assert final_eval.main(args[:4] + [str(other)] + args[5:]) == 0
+        assert calls == [1] and json.loads(other.read_text(encoding="utf-8")) == json.loads(out.read_text(encoding="utf-8"))
     finally:
-        final_eval.FROZEN_VERSION = frozen
+        final_eval.FROZEN_VERSION, final_eval.RECORD, final_eval.measure = frozen, record, measure
     capsys.readouterr()
     final_eval.main(["--report", str(out)])
     printed = capsys.readouterr().out

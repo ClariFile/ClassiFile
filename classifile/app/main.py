@@ -14,7 +14,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from PySide6.QtCore import (
-    QCoreApplication, QEasingCurve, QEvent, QItemSelection, QItemSelectionModel, QObject, QPoint,
+    QCoreApplication, QEasingCurve, QEvent, QItemSelection, QItemSelectionModel, QLockFile, QObject, QPoint,
     QPropertyAnimation, QSize, Qt, QTimer, QUrl, Signal,
 )
 from PySide6.QtGui import QDesktopServices, QFont, QFontMetrics, QKeySequence, QShortcut
@@ -42,8 +42,8 @@ from classifile.app.widgets import (
     Collapsible, DropOverlay, ElidedLabel, Notices, PickerDialog, PreviewOverlay, Toast, wrappable, wrapped,
 )
 from classifile.copies.engine import CopyError
-from classifile.catalog.db import Catalog
-from classifile import __version__
+from classifile.catalog.db import Catalog, default_data_dir
+from classifile import __version__, matching
 from classifile.matching import AUTO_DEFAULT, LEVELS
 from classifile.reader import RECORD_VERSION
 from classifile.organizer import Organizer, in_program_folder, is_cloud_synced, read_and_analyze
@@ -189,7 +189,8 @@ class MainWindow(QWidget):
         self.read_total = 0         # documents in the current reading run, for "Reading 3 of 12…"
         self.read_results = []      # finished reads not recorded yet: taken one per turn of the event loop
         self.filing = {}            # doc_id -> category id, while its copy is being made
-        self.batch, self.batch_name, self.new_category = [], "", None
+        self.actions = {}           # doc_id -> its filing action (shared by the documents filed together): the
+                                    # category, its name, whether it is new, the results so far, feedback per doc
         self.auto_batch = []        # (doc_id, category id) the app has just filed by itself, until it says so
         self.auto_running = 0       # automatic filings under way
         self.failure = None         # (doc ids, sentence): stays as a notice until those documents are resolved
@@ -197,7 +198,6 @@ class MainWindow(QWidget):
         self.updating = False       # matching is updating by itself in the background
         self.learning = None        # "Learn from my existing folders" under way: its counts
         self.update_note = None     # the note at the top after matching updated by itself (A7, record 2.6)
-        self.feedback = {}          # doc_id -> reason ("" = none given): the suggested names were set aside
         self.moving = 0             # moves and renames under way (they copy files, so they run off this thread)
         self.picker_dialog = None
         self.deferred = []          # "Leave pending": moved to the end of the decision page for this session
@@ -876,9 +876,6 @@ class MainWindow(QWidget):
         existing = self.existing_category(name)
         return existing["name"] if existing else name
 
-    def first_lines(self, doc_id):
-        return self.org.catalog.first_page_lines(doc_id)
-
     def short_date(self, iso):
         return short_date(iso)
 
@@ -976,7 +973,9 @@ class MainWindow(QWidget):
             shown = self.auto_page.shown_documents()
         elif key not in TEXT_PAGES:
             total, shown = self.filter.total(), self.filter.rowCount()
-        self.page_title.setText(title + (f" · {total}" if total else ""))
+        questions = len(self.decision.items) if key == DECIDE else total
+        self.page_title.setText(title + ("" if not total else f" · {total}" if questions in (total, 0) else
+                                         f" · {total} documents in {questions} questions"))  # a group asks once
         searchable = key not in TEXT_PAGES and not empty and (key not in (DECIDE, AUTO) or bool(shown or q))
         self.toolbar.setVisible(searchable)
         self.sort.setVisible(key not in (DECIDE, AUTO))     # those pages keep their own order
@@ -1058,6 +1057,7 @@ class MainWindow(QWidget):
         if docs is not None:
             self.doc_rows = docs
         shown = lambda r: ("filing" if r["id"] in self.filing else
+                           "copy_missing" if r["status"] == "filed" and r.get("copy_status") == "missing" else
                            "auto" if r["status"] == "filed" and r["provenance"] == "machine-assigned" else r["status"])
         rows = [dict(r) | {"key": r["id"], "date": short_date(r["imported_at"]), "shown_status": shown(r)}
                 for r in self.doc_rows]
@@ -1237,7 +1237,7 @@ class MainWindow(QWidget):
 
     def expand_preview(self, doc_id, page=0):
         d = self.org.catalog.document(doc_id)
-        self.preview_overlay.open(d["file_name"], self.preview_source(doc_id), self.first_lines(doc_id), page)
+        self.preview_overlay.open(d["file_name"], self.preview_source(doc_id), page)
 
     # -- responsive breakpoints -------------------------------------------------------------------------------
     def resizeEvent(self, e):
@@ -1480,12 +1480,12 @@ class MainWindow(QWidget):
         except ValueError as e:
             self.toast.show_message(str(e).capitalize())
             return
-        self.batch, self.batch_name = [], name
-        self.new_category = None if existing else cat_id  # removed again if every copy fails
-        for d in docs:
+        action = {"cat": cat_id, "name": name, "ids": {d["id"] for d in docs}, "results": [],
+                  "new": not existing,                      # a new category goes again if every copy fails
+                  "feedback": {} if feedback is None else {d["id"]: feedback for d in docs}}
+        for d in docs:                          # each action keeps its own results: two at once never mix
             self.filing[d["id"]] = cat_id
-            if feedback is not None:
-                self.feedback[d["id"]] = feedback
+            self.actions[d["id"]] = action
         for d in docs:
             self.pool.submit(self._file_job, d["id"], cat_id)
         self.refresh()
@@ -1499,20 +1499,22 @@ class MainWindow(QWidget):
         self.bridge.file_done.emit(doc_id, out)
 
     def _file_done(self, doc_id, out):
-        cat_id = self.filing.pop(doc_id, None)
-        self.batch.append((doc_id, out))
-        if any(c == cat_id for c in self.filing.values()):  # wait for the rest of this filing action
+        self.filing.pop(doc_id, None)
+        action = self.actions.pop(doc_id)
+        action["results"].append((doc_id, out))
+        if len(action["results"]) < len(action["ids"]):     # wait for the rest of this filing action
             self.refresh(recheck=False)
             return
+        cat_id = action["cat"]
         cat = self.org.catalog.category(cat_id)
-        cat_name = cat["name"] if cat else self.batch_name
-        ok = [i for i, o in self.batch if not isinstance(o, Exception)]
-        bad = [(i, o) for i, o in self.batch if isinstance(o, Exception)]
-        for i, _ in self.batch:
-            reason = self.feedback.pop(i, None)
-            if reason is not None and i in ok:
+        cat_name = cat["name"] if cat else action["name"]
+        ok = [i for i, o in action["results"] if not isinstance(o, Exception)]
+        bad = [(i, o) for i, o in action["results"] if isinstance(o, Exception)]
+        for i in ok:
+            reason = action["feedback"].get(i)
+            if reason is not None:
                 self.org.catalog.add_feedback(i, cat_id, reason or None)
-        discarded = bool(not ok and cat_id == self.new_category and self.org.discard_unused_category(cat_id))
+        discarded = bool(not ok and action["new"] and self.org.discard_unused_category(cat_id))
         if bad:
             first_name = self.org.catalog.document(bad[0][0])["file_name"]
             reason = bad[0][1]
@@ -1528,7 +1530,6 @@ class MainWindow(QWidget):
             what = self.org.catalog.document(ok[0])["file_name"] if len(ok) == 1 else f"{len(ok)} documents"
             self.toast.show_message(f"Filed {what} in {cat_name}", "Show",
                                     lambda c=cat_id, d=ok: self._show_filed(c, d))
-        self.batch = []
         if ok:
             self.recheck_waiting()
             self.update_if_due()
@@ -1814,6 +1815,26 @@ class MainWindow(QWidget):
         if self.details.isVisible() and self.details.doc_id == doc_id:
             self.details.show_doc(doc_id)
 
+    def restore_copy(self, doc_id):
+        """Details, "Make a new copy": a filed document whose copy has gone gets a new verified one."""
+        name = self.org.catalog.document(doc_id)["file_name"]
+        try:
+            self.org.restore_copy(doc_id)
+        except (CopyError, ValueError) as e:
+            self.failure = ([doc_id], f"{name}: {e}")
+        else:
+            if self.failure and doc_id in self.failure[0]:
+                self.failure = None
+            self.toast.show_message(f"Made a new copy of {name}.")
+        self.refresh()
+        if self.details.isVisible() and self.details.doc_id == doc_id:
+            self.details.show_doc(doc_id)
+
+    def copy_gone(self, doc_id):
+        """Details noticed a filed copy that is not there now: flagged, so the list says so too."""
+        self.org.flag_missing_copy(doc_id)
+        QTimer.singleShot(0, self.refresh)
+
     def open_doc(self, doc_id):
         path = self.filed_copy(doc_id)
         if path:
@@ -1887,27 +1908,34 @@ class MainWindow(QWidget):
     def _show_matching(self):
         m = self.org.matching_status()
         since = m["since"]
+        every = matching.AUTO_UPDATE_EVERY
         if "version" not in m:
-            text = ("ClassiFile hasn't learned your categories yet. It learns from the documents you filed, then "
-                    "offers the categories that fit a new document best."
-                    + (f" {since} filed document{'s are' if since != 1 else ' is'} ready to learn from." if since
-                       else ""))
+            cats = len(set(self.org.catalog.explicit_labels().values()))
+            text = (f"ClassiFile hasn't learned your categories yet. It starts by itself once {every} documents are "
+                    f"filed in at least two categories: {since} so far, in {cats} "
+                    f"categor{'y' if cats == 1 else 'ies'}. Learning from your folders gets there sooner"
+                    + ("; Update matching starts it now." if cats >= 2 else "."))
         else:
             text = (f"Learned from {m['documents']} documents in {m['categories']} categories on "
                     f"{short_date(m['created_at'])}. "
-                    + (f"{since} document{'s' if since != 1 else ''} filed or moved since." if since
+                    + (f"{since} document{'s' if since != 1 else ''} filed or moved since: it learns them by itself "
+                       f"at {every}, or now with Update matching." if since
                        else "Nothing was filed or moved since."))
         self.matching_label.setText(text)
         self._show_learned()
         self.tech.setText(
             f"ClassiFile {__version__} · matching version {m.get('version', 'none yet')} · catalog schema "
             f"{self.org.catalog.schema_version} · extraction record {RECORD_VERSION}\nData folder: "
-            f"{wrappable(self.org.catalog.path.parent)}")
+            f"{wrappable(self.org.catalog.path.parent)}"
+            + ((f"\n{n} document{'s' if n != 1 else ''} left out of learning: in one family, but filed in different"
+                " categories. File them in one category to include them.")
+               if (n := len(self.org.catalog.family_conflicts())) else ""))
         lines = []
         for r in self.org.catalog.matcher_log():
             found = json.loads(r["check_json"]) if r["check_json"] else None
-            who = "by itself" if r["trigger"] == "automatic" else "by you"
-            what = {"active": "in use", "previous": "replaced"}.get(r["status"], "not kept: it did worse")
+            who = {"automatic": "by itself", "forget": "after Forget"}.get(r["trigger"], "by you")
+            what = {"active": "in use", "previous": "replaced", "forgotten": "emptied by Forget"}.get(
+                r["status"], "not kept: it did worse")
             check = check_text(found) and f"; {check_text(found)}"
             lines.append(f"Version {r['version']} · {short_date(r['created_at'])} · {who} · {r['documents']} "
                          f"documents · {what}{check}")
@@ -2180,13 +2208,31 @@ class MainWindow(QWidget):
         super().closeEvent(e)
 
 
+def catalog_lock(catalog_path):
+    """One ClassiFile per catalog: a lock file beside it, held while the app runs, so a second window (a second
+    double-click, or the portable and installed app on one data folder) never recovers or files over the first's
+    live work. Another catalog opens freely. A lock left by a process that ended is taken over. None: held."""
+    Path(catalog_path).parent.mkdir(parents=True, exist_ok=True)
+    lock = QLockFile(str(catalog_path) + ".lock")
+    lock.setStaleLockTime(0)                    # never stale by age: only a holder that has ended frees it
+    return lock if lock.tryLock(0) else None
+
+
 def main():
     app = make_app(sys.argv)
     smooth_scrolling(app)
     keyboard_focus(app)
-    w = MainWindow(Organizer(Catalog.open_default()))
+    path = default_data_dir() / "catalog.sqlite3"
+    lock = catalog_lock(path)                   # before the catalog is opened, migrated or recovered
+    if lock is None:
+        QMessageBox.information(None, "ClassiFile is already open",
+                                "ClassiFile is already open. Switch to its window on the taskbar.")
+        sys.exit(0)
+    w = MainWindow(Organizer(Catalog(path)))
     w.show()
-    sys.exit(app.exec())
+    code = app.exec()
+    lock.unlock()
+    sys.exit(code)
 
 
 if __name__ == "__main__":

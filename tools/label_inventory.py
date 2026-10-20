@@ -173,11 +173,11 @@ class LabelInventoryWindow(QWidget):
             self.name.setText("That was the last file.")
             self.facts.setText("Close the window, or go back to change a label.")
             self.picker.field.clear()
-            self.preview.show_document(None, [])
+            self.preview.show_document(None)
             return
         r = self.rows[self.at]
         self.name.setText(r["file_name"])
-        self.preview.show_document(self.path(r), [])
+        self.preview.show_document(self.path(r))
         family = [x["file_name"] for x in self.all_rows if x["family_id"] and x["family_id"] == r["family_id"] and x is not r]
         facts = [f"File {self.at + 1} of {len(self.rows)}"] + ([f"{r['pages']} page" + ("" if r["pages"] == "1" else "s")] if r.get("pages") else [])
         if family:

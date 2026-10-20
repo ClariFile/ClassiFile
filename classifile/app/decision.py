@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
 from classifile.analysis.candidates import name_key, top_names
 from classifile.app.reasons import reason_text, similar_reason
 from classifile.app.widgets import (
-    BAR, BUTTON_TEXT_MAX, CHOICES_MAX, CONTROL, FILE_ICON, GROUP, NAME_FIELD_MAX, RELATED, TEXT_MIN, TIGHT,
+    BAR, BUTTON_TEXT_MAX, CONTROL, FILE_ICON, GROUP, NAME_FIELD_MAX, RELATED, TEXT_MIN, TIGHT,
     CategoryPicker, ElidedLabel, ListRow, box, collapse, format_icon, restyle, scroll_area_of, unfold, wrappable,
     wrapped,
 )
@@ -306,7 +306,6 @@ class DecisionItem(ListRow):
     def _expanded_area(self):
         area = QFrame()
         area.setObjectName("choices")
-        area.setMaximumWidth(CHOICES_MAX)
         self.picker = CategoryPicker()
         self.picker.changed.connect(self._update_confirm)
         self.picker.activated.connect(self.confirm_action)
@@ -324,15 +323,19 @@ class DecisionItem(ListRow):
         links.addStretch(1)
         self.reasons = QWidget()                # shown after "None of these fit": optional, one click
         self.reason_group = QButtonGroup(self)
-        grid = box(QGridLayout(self.reasons))
-        grid.addWidget(QLabel("What was wrong with the suggestions? (optional)"), 0, 0, 1, 3)
+        lines = box(QVBoxLayout(self.reasons))
+        lines.addWidget(QLabel("What was wrong with the suggestions? (optional)"))
+        rows = [box(QHBoxLayout()) for _ in range(2)]   # three, then two; each button keeps its own width
         for n, (label, hint, key) in enumerate(REASONS):
             b = QPushButton(label)
             b.setCheckable(True)
             b.setToolTip(hint)
             b.setProperty("reason", key)
             self.reason_group.addButton(b)
-            grid.addWidget(b, 1 + n // 3, n % 3)
+            rows[n // 3].addWidget(b)
+        for row in rows:
+            row.addStretch(1)
+            lines.addLayout(row)
         self.confirm = QPushButton("File")
         self.confirm.setObjectName("primary")
         self.confirm.clicked.connect(self.confirm_action)

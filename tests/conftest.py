@@ -154,3 +154,35 @@ def office(tmp_path):
     for make, name in ((make_docx, "handbook.docx"), (make_pptx, "security.pptx"), (make_odt, "handbook.odt")):
         make(dest / name)
     return dest
+
+
+@pytest.fixture
+def make_pdf(tmp_path):
+    """Generated one-page PDFs with the given words, in a source folder of their own: the copy, recovery and
+    learning invariants run without the private sample documents."""
+    import pymupdf
+
+    def make(name, text, folder="sources"):
+        dest = tmp_path / folder
+        dest.mkdir(parents=True, exist_ok=True)
+        doc = pymupdf.open()
+        doc.new_page().insert_text((72, 72), text)
+        doc.save(dest / name)
+        doc.close()
+        return dest / name
+    return make
+
+
+@pytest.fixture
+def filed_pdf(make_pdf, make_org):
+    """filed_pdf(org, name, words, category name) -> document id: a generated PDF imported and filed."""
+    from classifile.analysis.candidates import name_key
+    from classifile.organizer import read_and_analyze
+
+    def file(org, name, text, category):
+        path = make_pdf(name, text)
+        doc, _ = org.record(path, *read_and_analyze(path))
+        cat = org.catalog.category_by_key(name_key(category))
+        org.file(doc, cat["id"] if cat else org.create_category(category))
+        return doc
+    return file

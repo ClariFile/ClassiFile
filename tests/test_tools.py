@@ -203,10 +203,12 @@ def test_shared_names_bound_puts_documents_with_any_common_suggestion_together()
     assert groups["a"] == groups["b"] and len({groups["a"], groups["c"], groups["d"]}) == 3
 
 
-def test_apply_split_moves_everything_or_nothing(tmp_path):
+def test_apply_split_moves_everything_or_nothing(tmp_path, monkeypatch):
     import hashlib
 
     from tools import apply_split
+
+    monkeypatch.setattr(apply_split, "JOURNAL", tmp_path / "journal.json")     # never the real data folder
 
     src = tmp_path / "incoming"
     src.mkdir()
@@ -239,6 +241,36 @@ def test_apply_split_moves_everything_or_nothing(tmp_path):
     assert sum(len(list(f.iterdir())) for f in folders.values()) == 3
     with pytest.raises(ValueError, match="not in the previous split"):
         apply_split.apply(again, None, folders, {})
+
+
+def test_apply_split_puts_every_file_back_when_a_move_fails_or_the_run_stops(tmp_path, monkeypatch):
+    import hashlib
+
+    from tools import apply_split
+
+    monkeypatch.setattr(apply_split, "JOURNAL", tmp_path / "journal.json")
+    src = tmp_path / "incoming"
+    src.mkdir()
+    rows = []
+    for name in ("a.pdf", "b.pdf", "c.pdf"):
+        (src / name).write_bytes(name.encode())
+        rows.append({"relative_path": name, "sha256": hashlib.sha256(name.encode()).hexdigest(),
+                     "split": "development"})
+    folders = {k: tmp_path / k for k in ("development", "validation", "final_evaluation")}
+    for n in range(3):                                  # a failure at each move: all back, no journal left
+        with pytest.raises(ValueError, match="every file was put back"):
+            apply_split.apply(rows, src, folders, _fail_at=n)
+        assert sorted(p.name for p in src.iterdir()) == ["a.pdf", "b.pdf", "c.pdf"]
+        assert not (tmp_path / "journal.json").exists()
+    moves = apply_split.plan(rows, src, folders)        # the run stopped after one move: its journal stays
+    (tmp_path / "journal.json").write_text(__import__("json").dumps([[str(s), str(d)] for s, d in moves]))
+    folders["development"].mkdir(exist_ok=True)
+    (src / "a.pdf").rename(folders["development"] / "a.pdf")
+    with pytest.raises(ValueError, match="--recover"):
+        apply_split.apply(rows, src, folders)            # nothing more moves until it is put back
+    assert apply_split.recover() == []
+    assert sorted(p.name for p in src.iterdir()) == ["a.pdf", "b.pdf", "c.pdf"]
+    assert not (tmp_path / "journal.json").exists()
 
 
 def test_file_labels_files_only_waiting_development_rows(make_org, tmp_path):

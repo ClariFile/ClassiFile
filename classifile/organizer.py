@@ -182,10 +182,21 @@ class Organizer:
         return "learned"
 
     def forget_folder(self, folder):
-        """Forget the examples learned from one of the user's folders: the text ClassiFile stored for them goes;
-        the files and the categories stay. Returns how many were forgotten."""
+        """Forget the examples learned from one of the user's folders (B5): the text ClassiFile stored for them
+        goes, and so does what matching learned from them: every version trained on them is emptied, and a new
+        one is trained at once from the examples and choices that remain (trigger "forget"). The update check
+        (A7) is skipped here on purpose (the owner's choice, 2026-10-20): forgetting must not wait on a version
+        that does better. With too little left to learn from, matching pauses until the next update. The files
+        and the categories stay. Returns how many were forgotten."""
         ids = self.catalog.example_documents(str(folder))
         self.remove(ids)
+        if self.catalog.forget_in_matchers(ids):
+            texts, labels = self.catalog.texts(), self.catalog.explicit_labels()
+            if len({c for d, c in labels.items() if texts.get(d)}) >= 2:
+                self.catalog.add_matcher(matching.train(texts, labels), None, True, "forget")
+        self._matcher, self._ranked, self._words, self._groups = False, {}, {}, (None, [])
+        for d in ids:
+            self._counts.pop(d, None)
         return len(ids)
 
     def create_category(self, name, by="user"):
@@ -277,15 +288,19 @@ class Organizer:
         before = edited()
         self.catalog.start_move(doc_id, cat_id)  # the intent first: startup finishes a move that stopped
         try:
+            # A verified copy in the new category first, also when a move that stopped after its switch is resumed
+            # and the new copy has gone since: then it is made again from an old copy or the original.
+            if not self._verified_copy(doc, cat_id):    # a copy already there is used only if it verifies
+                source = next(filter(None, (self._verified_copy(doc, c["category_id"])
+                                            for c in self.catalog.document_copies(doc_id)
+                                            if c["category_id"] != cat_id)), None) or Path(doc["source_path"])
+                if not source.is_file():
+                    raise CopyError("Neither the filed copy nor the original file can be found, so the "
+                                    "document stays where it is.")
+                make_copy(self.catalog, doc_id, doc["sha256"], source, cat_id, root)
+            if _crash_at == "after-copy":
+                raise _Crash
             if current["category_id"] != cat_id:
-                if not self._verified_copy(doc, cat_id):  # a copy already there is used only if it verifies
-                    source = self._verified_copy(doc, current["category_id"]) or Path(doc["source_path"])
-                    if not source.is_file():
-                        raise CopyError("Neither the filed copy nor the original file can be found, so the "
-                                        "document stays where it is.")
-                    make_copy(self.catalog, doc_id, doc["sha256"], source, cat_id, root)
-                if _crash_at == "after-copy":
-                    raise _Crash
                 self.catalog.replace_primary(doc_id, cat_id, "user-corrected")
                 self.catalog.remove_secondary(doc_id, cat_id)   # it also belonged there: now it is its own
                 if _crash_at == "after-switch":
@@ -293,12 +308,38 @@ class Organizer:
             keep = {cat_id} | {c for c, _ in self.catalog.secondary_categories(doc_id)}
             for c in self.catalog.document_copies(doc_id):
                 if c["category_id"] not in keep:        # the copies of "also belongs to" stay where they are
-                    _retire_old_copy(self.catalog, c)
+                    _retire_old_copy(self.catalog, c, cat_id)   # only while the new copy verifies
         except CopyError:
             self.catalog.end_move(doc_id)
             raise
         self.catalog.end_move(doc_id)
         return "edited" if edited() > before else "moved"
+
+    def flag_missing_copy(self, doc_id):
+        """The filed copy of a document, if its file is gone or changed, is flagged (missing or edited)."""
+        doc, primary = self.catalog.document(doc_id), self.catalog.active_primary(doc_id)
+        if doc and primary:
+            self._verified_copy(doc, primary["category_id"])
+
+    def restore_copy(self, doc_id):
+        """A filed document whose copy has gone: a new verified copy in its category, made from another verified
+        copy (of "also belongs to") or from the original if its hash still matches. Nothing is overwritten and
+        nothing found at the old place is adopted: the new copy takes another name if that one is taken.
+        Returns the new copy's path."""
+        doc, primary = self.catalog.document(doc_id), self.catalog.active_primary(doc_id)
+        if doc is None or doc["status"] != "filed" or not primary:
+            raise ValueError("Only filed documents have a copy to make again.")
+        root = self.output_root
+        if root is None or not root.is_dir():
+            raise CopyError(f"The output folder {root} can't be found. Choose it again with Change…")
+        if self._verified_copy(doc, primary["category_id"]):
+            return Path(self.catalog.published_copy(doc["sha256"], primary["category_id"])["path"])
+        source = next(filter(None, (self._verified_copy(doc, c["category_id"])
+                                    for c in self.catalog.document_copies(doc_id))), None) or Path(doc["source_path"])
+        if not source.is_file():
+            raise CopyError("The original file can't be found either. Use Locate file… on it first, or import it "
+                            "again.")
+        return make_copy(self.catalog, doc_id, doc["sha256"], source, primary["category_id"], root)[1]
 
     def also(self, doc_id, cat_id):
         """ "Also belongs to" (A6, B5): a secondary membership with its own verified copy, made from the verified

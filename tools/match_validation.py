@@ -30,8 +30,10 @@ from classifile.catalog.db import Catalog, default_data_dir
 from classifile.matching import lead, record_text
 from classifile.organizer import Organizer
 from classifile.reader import READERS, read_document, sha256_file
-from tools import refuse_final_eval
+from tools import DATA, once, refuse_final_eval
 from tools.match_eval import STRICTNESS
+
+RECORD = DATA / "validation_matching.json"   # the one record of the measurement, whatever --out says
 
 
 def measure(folder, rows, catalog_path, progress=lambda n, total: None):
@@ -111,7 +113,8 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("folder", nargs="?", type=Path)
     ap.add_argument("--labels", type=Path, help="the splits CSV with sha256, primary_label and split")
-    ap.add_argument("--out", type=Path, default=Path("data") / "validation_matching.json")
+    ap.add_argument("--out", type=Path, help="also save the result here (the record stays data/validation_matching"
+                                             ".json; a later run only copies it)")
     ap.add_argument("--report", type=Path, help="print from a saved result; no document is read")
     ap.add_argument("--catalog", type=Path, default=default_data_dir() / "catalog.sqlite3")
     a = ap.parse_args(argv)
@@ -120,15 +123,15 @@ def main(argv=None):
         return 0
     if not a.folder or not a.labels:
         ap.error("give the validation folder and --labels, or --report")
-    if a.out.exists():
-        sys.exit(f"Validation was already measured ({a.out}). Print it with --report; it is not measured twice.")
     with open(a.labels, newline="", encoding="utf-8-sig") as f:
         rows = [r for r in csv.DictReader(f) if r["split"] != "final_evaluation"]
-    saved = measure(a.folder, rows, a.catalog, lambda n, total: print(f"\rreading {n} of {total}", end="", flush=True))
-    print()
-    with open(a.out, "x", encoding="utf-8") as f:
-        json.dump(saved, f)
-    report(saved)
+
+    def run():
+        saved = measure(a.folder, rows, a.catalog, lambda n, total: print(f"\rreading {n} of {total}", end="",
+                                                                          flush=True))
+        print()
+        return saved
+    report(once(RECORD, a.out, run, "Validation was already measured."))
     return 0
 
 

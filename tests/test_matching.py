@@ -226,10 +226,18 @@ def test_validation_is_measured_once_without_importing_anything(make_org, tmp_pa
         w = csv.DictWriter(f, fieldnames=["sha256", "primary_label", "split"])
         w.writeheader()
         w.writerows(rows)
-    assert match_validation.main(args) == 0 and json.loads(out.read_text(encoding="utf-8")) == json.loads(
-        json.dumps(saved))
-    with pytest.raises(SystemExit, match="already measured"):        # never a second look
-        match_validation.main(args)
+    match_validation.RECORD, record = tmp_path / "record.json", match_validation.RECORD   # never the real one
+    measure, calls = match_validation.measure, []
+    match_validation.measure = lambda *a, **k: calls.append(1) or measure(*a, **k)
+    try:
+        assert match_validation.main(args) == 0 and json.loads(out.read_text(encoding="utf-8")) == json.loads(
+            json.dumps(saved))
+        with pytest.raises(SystemExit, match="already measured"):    # never a second look
+            match_validation.main(args)
+        other = tmp_path / "another name.json"                      # another report name: a copy, not a measurement
+        assert match_validation.main(args[:4] + [str(other)] + args[5:]) == 0 and calls == [1]
+    finally:
+        match_validation.RECORD, match_validation.measure = record, measure
     assert match_validation.main(["--report", str(out)]) == 0        # printing again reads no document
 
 

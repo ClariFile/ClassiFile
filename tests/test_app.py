@@ -491,7 +491,7 @@ def test_details_preview_and_expand(app, samples, office, make_org):
     assert not big.isVisible() and w.details.isVisible()
     w.select_docs([_doc(w, "security.pptx")])                      # no stored thumbnail: the first-lines card
     assert not p.nav.isVisible() or not p.next.isVisible()
-    assert p.image.objectName() == "card" and "Network Security Fundamentals" in p.image.text()
+    assert p.image.text() == "No page picture is stored in this file."    # never the document's text (A10)
     assert "Open" in p.note.text()
     _close(w, rec)
 
@@ -1091,7 +1091,7 @@ def test_cards_offer_the_best_matching_categories_once_matching_is_updated(app, 
     assert all(not i.matches for i in w.decision.items)            # nothing is learned until the user asks
     w.show_view(SETTINGS)
     assert "hasn't learned your categories yet" in w.matching_label.text()
-    assert "9 filed documents are ready" in w.matching_label.text()
+    assert "once 10 documents are filed in at least two categories: 9 so far, in 3 categories" in         w.matching_label.text() and "Update matching starts it now" in w.matching_label.text()
     w.matching_button.click()
     assert not w.matching_button.isEnabled()                       # off the interface thread
     _pump(app, lambda: w.matching_button.isEnabled())
@@ -1124,7 +1124,7 @@ def test_cards_offer_the_best_matching_categories_once_matching_is_updated(app, 
     assert w.toast.label.text() == f"Filed {known} in {second}"
     assert [d["file_name"] for d in w.waiting()] == ["unknown.pdf"]
     w.show_view(SETTINGS)
-    assert "1 document filed or moved since." in w.matching_label.text()
+    assert "1 document filed or moved since: it learns them by itself at 10" in w.matching_label.text()
     w.matching_button.click()
     _pump(app, lambda: w.matching_button.isEnabled())
     assert w.toast.label.text().startswith("Matching updated (version 2): 10 documents in 3 categories; your "
@@ -1745,4 +1745,82 @@ def test_tour_steps_and_learning_from_existing_folders_in_the_window(app, make_o
     assert [l.text() for l in w.learned.findChildren(QLabel)] == [
         "Networks → Networks · 3 documents"]
     assert source_state(mine) == before
+    _close(w, rec)
+
+
+def test_two_filing_actions_at_once_keep_their_own_messages_and_feedback(app, make_org, make_pdf):
+    from classifile.organizer import read_and_analyze
+
+    w, rec = _window(make_org)
+    ids = {}
+    for name, words in (("a1.pdf", "garden soil compost"), ("a2.pdf", "garden seedling mulch"),
+                        ("b1.pdf", "travel hotel booking")):
+        path = make_pdf(name, words)
+        ids[name], _ = w.org.record(path, *read_and_analyze(path))
+    w.refresh()
+    jobs, said = {}, []
+    w.pool.submit = lambda fn, doc_id, cat_id: jobs.__setitem__(doc_id, (fn, doc_id, cat_id))
+    w.toast.show_message = lambda text, *a, **k: said.append(text)
+    w.file_docs([ids["a1.pdf"], ids["a2.pdf"]], "Alpha", feedback="")   # the suggestions set aside, no reason
+    w.file_docs([ids["b1.pdf"]], "Beta")
+    for name in ("a1.pdf", "b1.pdf", "a2.pdf"):                          # finished in this order
+        fn, *args = jobs[ids[name]]
+        fn(*args)
+    assert said == ["Filed b1.pdf in Beta", "Filed 2 documents in Alpha"]
+    alpha = w.org.catalog.category_by_key("alpha")["id"]
+    rows = w.org.catalog.all("SELECT document_id, category_id FROM suggestion_feedback ORDER BY document_id")
+    assert sorted((r["document_id"], r["category_id"]) for r in rows) == sorted(
+        [(ids["a1.pdf"], alpha), (ids["a2.pdf"], alpha)])                 # none against Beta
+    assert w.actions == {} and w.filing == {}
+    _close(w, rec)
+
+
+def test_a_missing_filed_copy_is_shown_and_can_be_made_again(app, make_org, filed_pdf):
+    org = make_org()
+    doc = filed_pdf(org, "notes.pdf", "garden soil compost seedling", "Garden")
+    copy = org.output_root / "Garden" / "notes.pdf"
+    copy.unlink()                                               # the user deleted the filed copy
+    w, rec = _window(make_org)                                  # the next start flags it
+    w.org.startup()
+    w.refresh()
+    w.show_view(ALL)
+    assert _cell(w, _rows(w).index("notes.pdf"), 2) == "Filed copy missing"
+    w.show_details(doc)
+    assert w.details.restore_button.isVisible() and "no longer where" in w.details.state.value.text()
+    copy.write_text("something else now")                       # an unrelated file appeared at the old place
+    w.restore_copy(doc)
+    assert copy.read_text() == "something else now"             # never adopted, never overwritten
+    new = w.org.output_root / "Garden" / "notes (2).pdf"
+    assert new.exists() and _cell(w, _rows(w).index("notes.pdf"), 2) == "Approved"
+    assert not w.details.restore_button.isVisible()
+    _close(w, rec)
+
+
+def test_office_files_without_a_stored_picture_show_no_document_text(app, office):
+    from classifile.app.widgets import Preview
+
+    preview = Preview()
+    for path in office.iterdir():                               # the generated files carry no thumbnail
+        preview.show_document(path)
+        shown = preview.image.text()
+        assert shown == "No page picture is stored in this file.", path.name
+
+
+def test_the_open_choices_reach_the_cards_right_edge(app, make_org, make_pdf):
+    from classifile.organizer import read_and_analyze
+
+    w, rec = _window(make_org)
+    w.resize(1536, 864)
+    path = make_pdf("notes.pdf", "garden soil compost seedling")
+    w.org.record(path, *read_and_analyze(path))
+    w.refresh()
+    w.show_view(DECIDE)
+    item = w.decision.items[0]
+    item.toggle_expanded()
+    item.none_fit.click()                                       # the reasons too
+    _pump(app, lambda: item.expanded.maximumHeight() > 10 ** 6)  # unfolded
+    app.processEvents()
+    right = lambda widget: widget.mapTo(item, widget.rect().topRight()).x()
+    assert abs(right(item.expanded) - right(item.more_menu)) <= 2      # no empty band at the right (owner's rule)
+    assert item.expanded.width() > 900                                  # the old 680 cap is gone
     _close(w, rec)

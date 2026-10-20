@@ -551,6 +551,7 @@ def format_icon(file_name):
 STATUS = {  # an icon plus a word, never colour alone; the colour is a role of the theme in use
     "filed": ("Approved", "accent", "check"),
     "auto": ("Filed automatically", "secondary", "check"),   # machine-assigned: not the user's approval
+    "copy_missing": ("Filed copy missing", "amber", "alert"),   # filed, but its copy is not where it was put
     "needs_decision": ("Waiting", "amber", "dot"),
     "queued": ("Reading", "secondary", "ring"),
     "reading": ("Reading", "secondary", "ring"),
@@ -975,8 +976,9 @@ class Preview(QWidget):
         self.drawn = {}
         self.settle.stop()
 
-    def show_document(self, source, first_lines, note=""):
-        """source: the file to preview (the filed copy, or the original). first_lines: for the card."""
+    def show_document(self, source, note=""):
+        """source: the file to preview (the filed copy, or the original). Page pictures only: without one, a
+        plain sentence, never the document's text (viewing text belongs to SummarEase, record A10)."""
         if source == self.source and self.pdf:
             return self.show_page(self.page)
         self.close_pdf()
@@ -1004,9 +1006,9 @@ class Preview(QWidget):
         self.page_label.setText("")
         if png:
             self._set(png)
-        else:  # no stored thumbnail and no other programs: the first lines as a card
+        else:  # no stored thumbnail, and no other programs are started for one
             self.image.setObjectName("card")
-            self.image.setText("\n".join(first_lines[:10]) or "No preview")
+            self.image.setText("No page picture is stored in this file.")
             restyle(self.image)
 
     def show_page(self, index):
@@ -1084,13 +1086,13 @@ class PreviewOverlay(QFrame):
         v.addWidget(self.preview, 1)
         self.hide()
 
-    def open(self, name, source, first_lines, page=0):
+    def open(self, name, source, page=0):
         self.title.setText(name)
         self.setGeometry(self.parent().rect())
         self.raise_()
         self.show()
         self.preview.source = None
-        self.preview.show_document(source, first_lines)
+        self.preview.show_document(source)
         self.preview.show_page(page)
         self.setFocus()
 

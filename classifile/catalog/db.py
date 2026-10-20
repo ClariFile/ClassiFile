@@ -381,7 +381,8 @@ class Catalog:
               " JOIN memberships m ON m.document_id = d.id AND m.status = 'active'"
               " JOIN categories c ON c.id = m.category_id"
               " LEFT JOIN copies p ON p.id = (SELECT id FROM copies WHERE document_id = d.id AND category_id = c.id"
-              " AND status IN ('published', 'edited') ORDER BY id DESC LIMIT 1) ")
+              " AND status IN ('published', 'edited', 'missing')"   # a missing copy shows until a new one exists
+              " ORDER BY status = 'missing', id DESC LIMIT 1) ")
 
     def documents(self, category_id=None):
         """Documents in a category, whether it is their own or one they also belong to (with category, copy path
@@ -469,11 +470,6 @@ class Catalog:
                        " WHERE s.document_id = ?", doc_id)
         return json.loads(row[0]) if row and row[0] else None
 
-    def first_page_lines(self, doc_id):
-        row = self.one("SELECT e.first_page_lines_json FROM extractions e JOIN snapshots s ON e.snapshot_id = s.id"
-                       " WHERE s.document_id = ?", doc_id)
-        return json.loads(row[0]) if row and row[0] else []
-
     def texts(self, doc_id=None):
         """{document id: its full extracted text} (native text, speaker notes and OCR text of every unit), for one
         document or for all. Internal: for matching only, never shown or logged."""
@@ -489,7 +485,27 @@ class Catalog:
     def explicit_labels(self):
         """{document id: category id} for filed documents whose category the user chose or corrected (A7): the
         latest explicit choice. Placements the app made by itself are no confirmation and are left out. The user's
-        examples from their own folders count too (record 2.9); a document filed since takes its filed category."""
+        examples from their own folders count too (record 2.9); a document filed since takes its filed category.
+        The one definition of what may teach matching: training, the update check, the evaluation and the count of
+        confirmed documents all read it. Unresolved family conflicts are left out (B4, family_conflicts)."""
+        labels = self._chosen_labels()
+        conflicts = self.family_conflicts(labels)
+        return {d: c for d, c in labels.items() if d not in conflicts}
+
+    def family_conflicts(self, labels=None):
+        """Documents the owner gave one family id (versions or format twins of the same material) that are filed
+        in different categories: left out of learning until they share a category or their family is changed
+        (B4). No winner is chosen for them. Returns their ids."""
+        labels = self._chosen_labels() if labels is None else labels
+        family = dict(self.all("SELECT s.document_id, f.family_id FROM snapshots s JOIN family_labels f"
+                               " ON f.sha256 = s.sha256"))
+        cats = {}
+        for d, c in labels.items():
+            if d in family:
+                cats.setdefault(family[d], set()).add(c)
+        return {d for d in labels if d in family and len(cats[family[d]]) > 1}
+
+    def _chosen_labels(self):
         examples = dict(self.all("SELECT x.document_id, x.category_id FROM examples x JOIN categories c ON"
                                  " c.id = x.category_id WHERE c.deleted_at IS NULL"))
         return examples | dict(self.all(
@@ -511,6 +527,20 @@ class Catalog:
                 (now(), "active" if keep else "rejected", sum(bundle["documents"].values()),
                  len(bundle["documents"]),
                  json.dumps(found) if found else None, json.dumps(bundle), trigger)).lastrowid
+
+    def forget_in_matchers(self, doc_ids):
+        """Every version trained on any of these documents keeps its number and its line in the log, but loses
+        what it learned (vocabulary, category vectors, training list): status "forgotten", never used again.
+        Numbers are never reused. Returns the versions emptied."""
+        gone = {str(d) for d in doc_ids}
+        emptied = []
+        with self.lock, self.db:
+            for version, bundle in self.db.execute("SELECT version, bundle_json FROM matchers").fetchall():
+                if gone & set(json.loads(bundle).get("training", {})):
+                    self.db.execute("UPDATE matchers SET status = 'forgotten', bundle_json = ?, check_json = NULL"
+                                    " WHERE version = ?", ('{"training": {}}', version))
+                    emptied.append(version)
+        return emptied
 
     def set_matcher_check(self, version, found):
         """Store what the evaluation found for a version again (it was measured anew, nothing else changed)."""

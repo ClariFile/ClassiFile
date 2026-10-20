@@ -31,9 +31,11 @@ from classifile.analysis.candidates import analyze, name_key, top_names
 from classifile.catalog.db import Catalog, default_data_dir
 from classifile.organizer import Organizer
 from classifile.reader import READERS, read_document, sha256_file
+from tools import DATA, once
 from tools.evaluate import pct
 
 FROZEN_VERSION = 6      # the matching version frozen in record 2.10
+RECORD = DATA / "final_evaluation.json"   # the one record of the run, whatever --out says
 
 
 def measure(folder, rows, catalog_path, frozen=FROZEN_VERSION, progress=lambda n, total: None):
@@ -176,7 +178,8 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("folder", nargs="?", type=Path)
     ap.add_argument("--labels", type=Path, help="the splits CSV with sha256, family_id, primary_label and split")
-    ap.add_argument("--out", type=Path, default=Path("data") / "final_evaluation.json")
+    ap.add_argument("--out", type=Path, help="also save the result here (the record stays data/final_evaluation"
+                                             ".json; a later run only copies it)")
     ap.add_argument("--report", type=Path, help="print from a saved result; no document is read")
     ap.add_argument("--catalog", type=Path, default=default_data_dir() / "catalog.sqlite3")
     a = ap.parse_args(argv)
@@ -185,15 +188,15 @@ def main(argv=None):
         return 0
     if not a.folder or not a.labels:
         ap.error("give the final-evaluation folder and --labels, or --report")
-    if a.out.exists():
-        sys.exit(f"The final evaluation was already run ({a.out}). Print it with --report; it is not run twice.")
     with open(a.labels, newline="", encoding="utf-8-sig") as f:
         rows = list(csv.DictReader(f))
-    saved = measure(a.folder, rows, a.catalog, FROZEN_VERSION, progress=lambda n, t: print(f"\rreading {n} of {t}", end="", flush=True))
-    print()
-    with open(a.out, "x", encoding="utf-8") as f:
-        json.dump(saved, f)
-    report(saved)
+
+    def run():
+        saved = measure(a.folder, rows, a.catalog, FROZEN_VERSION,
+                        progress=lambda n, t: print(f"\rreading {n} of {t}", end="", flush=True))
+        print()
+        return saved
+    report(once(RECORD, a.out, run, "The final evaluation was already run."))
     return 0
 
 

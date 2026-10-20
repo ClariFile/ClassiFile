@@ -82,7 +82,13 @@ def make_copy(catalog, doc_id, sha, source_path, cat_id, output_root, _crash_at=
         return "already filed", Path(existing["path"])
 
     dest_dir = Path(output_root) / catalog.category(cat_id)["folder_name"]
-    dest_dir.mkdir(parents=True, exist_ok=True)
+    try:                                        # a failure here is a plain CopyError too, so filing rolls back
+        dest_dir.mkdir(parents=True, exist_ok=True)
+    except FileExistsError:
+        raise CopyError(f"A file named {dest_dir.name} is in the way of the category's folder in {dest_dir.parent}. "
+                        "Rename or move that file, then try again.") from None
+    except OSError as e:
+        raise CopyError(_plain(e, source_path, dest_dir)) from None
     temp = dest_dir / f"{TEMP_PREFIX}{uuid.uuid4().hex}{TEMP_SUFFIX}"
     copy_id = catalog.plan_copy(doc_id, sha, cat_id, temp)
 
@@ -148,9 +154,29 @@ def _inside(path, root):
         return False
 
 
-def _retire_old_copy(catalog, c):
-    """The copy now has a verified twin in the new output folder: remove the old file only if it is unchanged.
-    Edited copies stay where they are and are flagged. Returns the outcome."""
+def verified_twin(catalog, c, cat_id=None):
+    """Another published copy of c's snapshot in cat_id (default: c's own category) whose file is there now and
+    unchanged, or None. A twin whose file is gone or edited is flagged on the way."""
+    cat_id = c["category_id"] if cat_id is None else cat_id
+    for t in catalog.copies("published"):
+        if t["id"] == c["id"] or t["snapshot_sha256"] != c["snapshot_sha256"] or t["category_id"] != cat_id:
+            continue
+        path = Path(t["path"])
+        if not path.exists():
+            catalog.update_copy(t["id"], status="missing")
+        elif _hash(path) != t["hash_at_creation"]:
+            catalog.update_copy(t["id"], status="edited")
+        else:
+            return t
+    return None
+
+
+def _retire_old_copy(catalog, c, twin_cat=None):
+    """Remove an old copy once its replacement is verified now: a published twin in twin_cat (default: the same
+    category) that is present and unchanged. Without one, the old copy stays published ("kept"): a record alone
+    never justifies a removal. An edited old copy stays where it is and is flagged. Returns the outcome."""
+    if verified_twin(catalog, c, twin_cat) is None:
+        return "kept"
     old = Path(c["path"])
     if not old.exists():
         catalog.update_copy(c["id"], status="moved")

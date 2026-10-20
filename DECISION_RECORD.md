@@ -1,6 +1,6 @@
 # Decision Record — ClassiFile (Offline Document Organizer)
 
-Version 2.11 · 2026-10-19
+Version 2.12 · 2026-10-20
 
 **Names**
 - **ClariFile:** the suite.
@@ -516,7 +516,6 @@ Partial checkpoints are not the completed v1. Evaluation runs alongside developm
 - Additional representations, unless E2 or E3 justify them.
 - Automatic version linking.
 - Elaborate category management: merging and aliases. The minimum the workflow needs (rename, delete an empty category) is in B5 since 2.0.
-- Installer packaging.
 - Burmese and other languages.
 - Both GitHub repositories already exist in the ClariFile organization: ClassiFile (this project, `https://github.com/ClariFile/ClassiFile.git`) and SummarEase (empty until its development starts). The reader stays isolated so SummarEase can reuse it.
 
@@ -556,3 +555,4 @@ Partial checkpoints are not the completed v1. Evaluation runs alongside developm
 - **2.9 (2026-10-15):** v1 scope for friends and family, authorized by the user. A7: the first matching version is learned by itself too. B5 and the glossary: "Learn from my existing folders", with the user-example provenance; examples count toward the 3 documents of automatic filing (B2). A10: a first-run tour, Help and About pages, full-width pages with readable text, the same Details panel on every page that lists documents, and an Advanced section in Settings. Photos (JPG, PNG), a household test set and Burmese are v1.1 (docs/LAUNCH.md). Authorized by the user.
 - **2.10 (2026-10-16):** CP5 freeze (D/CP5): matching version 6, Strict with the 3 confirmed documents, the folder rules (3 documents at 0.20; questions at 0.15; a single document waits), the update check and "Check these" as in 2.8; the final evaluation runs once with the frozen version on a catalog copy (`tools.final_eval`). Authorized by the user (the list in docs/LAUNCH.md section 1).
 - **2.11 (2026-10-19):** A10: every page uses the full window width, and text fills its card; the 2.9 wording "text keeps a readable line length" is withdrawn. Authorized by the user.
+- **2.12 (2026-10-20):** F: "Installer packaging" removed from Deferred. The Windows installer exists (release candidates since 1.0.0-rc.4, docs/LAUNCH.md section 2); its clean-machine test is still outstanding. No requirement or decision changed. Authorized by the user.

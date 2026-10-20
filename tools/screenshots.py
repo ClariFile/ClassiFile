@@ -4,7 +4,7 @@ Usage: python -m tools.screenshots OUT [--size 1280x720] [--theme light|dark] [-
 
 Builds a temporary catalog of made-up household documents (garden, recipes, travel, car, and a few photography
 notes no category covers), files most of them as the user would, lets matching learn, and saves one PNG per
-view in OUT: empty, all, category, decide, focus (the keyboard focus ring), decide-details, auto, auto-details, settings, settings-advanced, help,
+view in OUT: empty, all, category, decide, choices (a row's "Choose another…" open, with the reasons), focus (the keyboard focus ring), decide-details, auto, auto-details, settings, settings-advanced, help,
 about, learn (the dialog) and tour. For the README (docs/images) and for before-and-after checks of the layout.
 Nothing outside a temporary folder and OUT is written.
 """
@@ -29,7 +29,7 @@ FILES = {
 }
 NEW_SUBJECT = ("Photography", "aperture shutter lens exposure tripod focus portrait landscape",
                ["Camera settings", "Night photos", "Lens comparison"])
-VIEWS = ("empty", "all", "category", "decide", "focus", "decide-details", "auto", "auto-details", "settings",
+VIEWS = ("empty", "all", "category", "decide", "choices", "focus", "decide-details", "auto", "auto-details", "settings",
          "settings-advanced", "help", "about", "learn", "tour", "report")
 
 
@@ -149,6 +149,12 @@ def render(out, size=(1280, 720), theme="light", views=VIEWS):
         shot(w, "category")
         w.show_view(DECIDE)
         shot(w, "decide")
+        if "choices" in views and w.decision.items:  # the expanded choices: they reach the card's right edge
+            item = next(i for i in w.decision.items if hasattr(i, "none_fit"))
+            item.toggle_expanded()
+            item.none_fit.click()
+            shot(w, "choices")
+            item.toggle_expanded()
         if "focus" in views and w.decision.items:   # the keyboard focus ring, as after a Tab
             w.activateWindow()
             w.search.setFocus(Qt.MouseFocusReason)

@@ -1,6 +1,16 @@
 # ClassiFile status
 
-2026-10-20 · decision record version 2.11
+2026-10-20 · decision record version 2.12
+
+## Now (read this first)
+
+- **Where it stands:** v1 release candidate 1.0.0-rc.6, built and checked without installing. CP5 is done: the
+  matcher was frozen (record 2.10) and the final evaluation ran once, on 2026-10-16. `data\final-eval` is not read
+  again, and `tools.final_eval` refuses a second run whatever its options.
+- **Since rc.6:** the review fixes in "Review fixes (2026-10-20)" below, for an rc.7.
+- **Next:** the clean-machine installer test (`docs/INSTALLER_TEST.md`; never on the owner's own laptop), page
+  previews in a worker process (review finding 13), then the pilot.
+- Everything under "Done" is history: a "Next" line inside an entry was the next step at the time, not now.
 
 ## Done
 
@@ -481,6 +491,34 @@
   files, so an upgrade leaves no stale file.
 - **Not tested:** install, first run, OCR, filing, upgrade and uninstall of the setup file on any Windows (as rc.4).
 
+**Review fixes (2026-10-20, from an outside review the owner asked to be worked through; not built yet)**
+- **Recovery never removes the last good copy:** an old copy goes only while its replacement is there and
+  unchanged now (one check in the shared function, for moves, renames and a change of output folder); a move
+  resumed at startup makes a missing replacement again first.
+- **One session per catalog:** a lock file beside the catalog, taken before it is opened; a second window on the
+  same data folder says ClassiFile is already open. `tools.file_labels` takes the same lock.
+- **A file in the way of a category folder** gives a plain reason and leaves the document waiting; filing can be
+  tried again without a restart.
+- **Forget** also empties every matching version trained on the forgotten examples (numbers and log lines stay)
+  and trains a new one at once from what remains, without the update check (the owner's choice).
+- **Family conflicts:** documents with one owner family id filed in different categories teach nothing until they
+  share one (B4); `Catalog.explicit_labels` is the one definition for training, the check, the evaluation and
+  the confirmed-document count. Settings, Advanced, says how many are left out.
+- **Two filing actions at once** keep their own messages and feedback.
+- **A missing filed copy** shows as "Filed copy missing" in the lists and Details, with Make a new copy (verified,
+  never overwriting, never adopting a file found at the old place).
+- **No document text as a preview:** an Office file without a stored picture says so (A10).
+- **Full width:** the open "Choose another…" panel reaches the card's edge (the 680 px cap is gone); its reason
+  buttons keep their own width. `tools.screenshots --views choices` renders it.
+- `tools.apply_split` is all or nothing after a failed move too, with a journal and `--recover`.
+  `tools.final_eval` and `tools.match_validation` keep one fixed record: another `--out` only copies it.
+- Needs your decision says "5 documents in 3 questions" when a group asks once for several; the tour and the
+  Learning card say when learning starts (10 documents in two categories) and when a correction is learned.
+- Record 2.12: installer packaging is no longer deferred.
+- Tests: `tests/test_safety.py` runs the copy, recovery and learning cases on generated documents, so they run
+  in every checkout. The older tests that need the private samples still skip without them (review finding 12,
+  partly done).
+
 **1.0.0-rc.6 (2026-10-20): a release candidate, not verified on a clean machine**
 - rc.5 plus the polish below. `dist\ClassiFile-1.0.0-rc.6-setup.exe` (about 52 MB) and
   `dist\ClassiFile-1.0.0-rc.6-portable.zip` (about 72 MB), from the unchanged installer scripts.
@@ -627,7 +665,8 @@ These counts describe development data only. They are not accuracy estimates.
    was read.
 
 Validation has informed one operating choice (Strict) and one rejected variant. It has not been used to tune a
-threshold since. `data\final-eval` has never been read.
+threshold since. `data\final-eval` was read once, by the final evaluation (2026-10-16, CP5), and is not read
+again.
 
 ## Open
 
@@ -682,10 +721,8 @@ threshold since. `data\final-eval` has never been read.
 
 ## Next
 
-1. The owner reviews the Burmese guide, answers the last "Check these" document, and runs `tools.offline_check`
-   once with networking switched off.
-2. CP5: one final "Update matching", the freeze, and the final evaluation once (`data\final-eval` stays untouched
-   until then). Then the installer (docs/LAUNCH.md, section 2). SummarEase is a separate project.
+See "Now" at the top. Still open from before: the owner's review of the Burmese guide, and one run of
+`tools.offline_check` with the laptop's networking switched off.
 
 ## Changes to the decision record, approved by the owner (record 2.8, 2026-10-15)
 

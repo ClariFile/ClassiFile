@@ -142,7 +142,8 @@ TOUR = [
      "Drop documents on the window, or press Add documents. If you already keep documents in folders, ClassiFile "
      "can learn from them first: Learn from my existing folders."),
     ("It files when it is sure",
-     "Once a category holds 3 documents you confirmed, ClassiFile files clear matches by itself. You'll find them "
+     "ClassiFile starts learning once 10 documents are filed in at least two categories (learning from your folders "
+     "gets there sooner). Then, once a category holds 3 documents you confirmed, it files clear matches by itself, "
      "in Filed automatically: press Looks right, or Move to… if one is wrong."),
     ("It asks when it isn't",
      "Documents it is unsure about wait in Needs your decision, with the categories that fit best. Help, in the "

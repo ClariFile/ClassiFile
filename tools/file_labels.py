@@ -53,11 +53,20 @@ def main(argv=None):
     a = ap.parse_args(argv)
     with open(a.splits, newline="", encoding="utf-8-sig") as f:
         rows = list(csv.DictReader(f))
-    catalog = Catalog.open_default()
+    from classifile.app.main import catalog_lock
+    from classifile.catalog.db import default_data_dir
+
+    path = default_data_dir() / "catalog.sqlite3"
+    lock = catalog_lock(path)                   # the app's own lock: never alongside an open ClassiFile
+    if lock is None:
+        print("ClassiFile is open. Close it, then run this again.")
+        return 1
+    catalog = Catalog(path)
     try:
         done = file_labels(Organizer(catalog), rows)
     finally:
         catalog.close()
+        lock.unlock()
     for outcome, n in sorted(done.items()):
         print(f"{n:4}  {outcome}")
     return 0

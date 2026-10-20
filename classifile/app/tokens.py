@@ -123,7 +123,6 @@ NARROW = 1024           # below this the sidebar collapses to a menu button
 DETAILS_WIDTH = 420     # details panel: at least this wide by default, up to DETAILS_MAX on large screens
 DETAILS_MIN = 360
 DETAILS_MAX = 560
-CHOICES_MAX = 680       # the "Choose another…" panel of a decision item
 SEARCH_MAX = 480        # the search field
 NAME_FIELD_MAX = 340    # the name field of a new-subject question
 DIALOG_MIN = 440        # the category picker's own window

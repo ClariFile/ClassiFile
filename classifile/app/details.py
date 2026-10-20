@@ -92,8 +92,11 @@ class DetailsPanel(QFrame):
         self.folder_button.clicked.connect(lambda: self.c.show_doc_in_folder(self.doc_id))
         self.locate_button = QPushButton("Locate file…")
         self.locate_button.clicked.connect(lambda: self.c.locate_doc(self.doc_id))
+        self.restore_button = QPushButton("Make a new copy")
+        self.restore_button.setToolTip("A new verified copy in this category, from the original or another copy")
+        self.restore_button.clicked.connect(lambda: self.c.restore_copy(self.doc_id))
         buttons = box(QHBoxLayout())
-        for b in (self.open_button, self.folder_button, self.locate_button):
+        for b in (self.open_button, self.folder_button, self.locate_button, self.restore_button):
             buttons.addWidget(b)
         buttons.addStretch(1)
         self.why_caption = QLabel("WHY THIS CATEGORY")
@@ -133,13 +136,13 @@ class DetailsPanel(QFrame):
 
     def _all_parts(self):
         return (self.name, self.same_name, self.copy_name, self.category, self.also, self.state, self.open_button,
-                self.folder_button, self.locate_button, self.why_caption, self.why, self.locations_section)
+                self.folder_button, self.locate_button, self.restore_button, self.why_caption, self.why, self.locations_section)
 
     def show_nothing(self):
         """Open with no document selected: say what to do."""
         self.doc_id, self.shown = None, None
         self.title.setText("Details")
-        self.preview.show_document(None, [])
+        self.preview.show_document(None)
         self.hint.setText("Select a document to see its pages and details here.")
         self.hint.show()
         for w in self._all_parts():
@@ -159,6 +162,10 @@ class DetailsPanel(QFrame):
         missing = not filed and self.c.org.original_missing(doc_id)
         waiting = next((w for w in self.c.waiting_docs if w["id"] == doc_id), None) if not filed else None
         copy = Path(d["copy_path"]).name if filed and d.get("copy_path") else None
+        gone = filed and bool(d.get("copy_path")) and (d.get("copy_status") == "missing"
+                                                       or not Path(d["copy_path"]).exists())
+        if gone and d.get("copy_status") != "missing":
+            self.c.copy_gone(doc_id)            # noticed now: the list says so too
         self.name.set(d["file_name"])
         self.same_name.setVisible(copy == d["file_name"])
         self.copy_name.set(copy if copy != d["file_name"] else None)
@@ -171,6 +178,8 @@ class DetailsPanel(QFrame):
                 state += f" · {self.c.short_date(d['filed_at'])}"
             if d.get("copy_status") == "edited":
                 state += "\nThis copy was changed after filing and is flagged."
+            if gone:
+                state += "\nThe filed copy is no longer where ClassiFile put it. Make a new copy to file it again."
         else:
             suggested = self._suggested(waiting)
             new = bool(suggested) and not waiting.get("matches") and self.c.existing_category(suggested) is None
@@ -182,16 +191,17 @@ class DetailsPanel(QFrame):
             if missing:
                 state += "\nThe original file has moved. Locate it to file this document."
         self.state.set(state)
-        self.preview.show_document(self.c.preview_source(doc_id), self.c.first_lines(doc_id),
+        self.preview.show_document(self.c.preview_source(doc_id),
                                    "" if filed or d["file_name"].lower().endswith(".pdf")
                                    else "File it, then use Open to see the full document.")
         has_copy = filed and self.c.filed_copy(doc_id) is not None
         self.open_button.setVisible(has_copy)
         self.folder_button.setVisible(has_copy)
         self.locate_button.setVisible(missing)
+        self.restore_button.setVisible(gone)
         locations = [f"Original: {wrappable(d['source_path'])}"]
         if d.get("copy_path"):
-            locations.append(f"Filed copy: {wrappable(d['copy_path'])}")
+            locations.append(f"Filed copy: {wrappable(d['copy_path'])}" + (" (not there now)" if gone else ""))
         self.locations.setText("\n".join(locations))
         self.why.setText(self._why(d, waiting))
         for w in (self.why_caption, self.why):
