@@ -111,7 +111,7 @@ QListWidget::item:selected, QTreeView#categories::item:selected:first, QTreeView
 QTreeView::branch:selected {{ background: transparent; }}
 QHeaderView, QHeaderView::section {{ background: {t['base']}; }}
 QHeaderView::section {{ border: none; border-bottom: {HAIR}px solid {t['divider']};
-                        padding: {RELATED}px {RELATED}px; font-size: {TEXT_CAPTION}px;
+                        padding: {RELATED}px {RELATED}px {RELATED}px {RELATED + TIGHT}px; font-size: {TEXT_CAPTION}px;
                         font-weight: {WEIGHT_STRONG}; color: {t['secondary']}; }}
 QLineEdit, QComboBox {{ border: {HAIR}px solid {t['control']}; border-radius: {RADIUS_CONTROL}px;
                         padding: {RELATED - HAIR}px {RELATED}px; min-height: {CONTROL_TEXT}px;
@@ -146,6 +146,14 @@ QFrame#row {{ border: none; border-bottom: {HAIR}px solid {t['divider']}; border
               background: {t['base']}; }}
 QFrame#row:hover {{ background: {t['hover']}; }}
 QFrame#row[inspected="true"] {{ background: {t['selection']}; border-left-color: {t['accent']}; }}
+QScrollBar:vertical {{ background: transparent; width: {SCROLLBAR}px; margin: 0; }}
+QScrollBar:horizontal {{ background: transparent; height: {SCROLLBAR}px; margin: 0; }}
+QScrollBar::handle {{ background: {t['control']}; border-radius: {(SCROLLBAR - 2 * TIGHT) // 2}px; }}
+QScrollBar::handle:vertical {{ min-height: {CONTROL}px; margin: {TIGHT}px; }}
+QScrollBar::handle:horizontal {{ min-width: {CONTROL}px; margin: {TIGHT}px; }}
+QScrollBar::handle:hover, QScrollBar::handle:pressed {{ background: {t['secondary']}; }}
+QScrollBar::add-line, QScrollBar::sub-line {{ width: 0; height: 0; border: none; background: none; }}
+QScrollBar::add-page, QScrollBar::sub-page {{ background: none; }}
 QScrollArea, QWidget#qt_scrollarea_viewport, QWidget#qt_scrollarea_viewport > QWidget {{ background: transparent; }}
 /* scroll areas and what they hold show the surface they sit on */
 QFrame#details {{ border-left: {HAIR}px solid {t['divider']}; background: {t['raised']}; }}
@@ -265,28 +273,32 @@ class SmoothScroll(QObject):
 
 class FocusRing(QObject):
     """Where the keyboard is: one rounded ring in the accent colour around the focused control, the same for every
-    control. It appears when Tab (or Shift+Tab) moves the focus and follows the focus while the keyboard is in use;
-    a click or a switch back from another window hides it, as a browser's focus-visible does. Text fields are left
-    to their own border. The ring is drawn above the window and takes no clicks; it follows the control when it
-    moves, scrolls or changes size, and shows only its visible part."""
-
-    KEYBOARD = (Qt.TabFocusReason, Qt.BacktabFocusReason, Qt.ShortcutFocusReason)
+    control. It appears when a key moves the focus and follows the focus while the keyboard is in use; a click or
+    a switch back from another window hides it, as a browser's focus-visible does. Qt gives a focus that moves on
+    from a hidden control (a filed row folding away) the same reason as Tab, so what counts is a key pressed since
+    the last click, not the reason. Text fields are left to their own border. The ring is drawn above the window
+    and takes no clicks; it follows the control when it moves, scrolls or changes size, and shows only its
+    visible part."""
 
     def __init__(self, parent):
         super().__init__(parent)
         self.target = self.ring = None
+        self.keys = False               # a key was pressed since the last click or window switch
 
     def eventFilter(self, obj, e):
         t = e.type()
-        if t == QEvent.FocusIn and isinstance(obj, QWidget):
-            if e.reason() in self.KEYBOARD or (self.target is not None and e.reason() == Qt.OtherFocusReason):
-                self.follow(obj)        # the keyboard, or the app moving the focus on while the keyboard is used
-            else:
-                self.follow(None)
+        if t == QEvent.KeyPress:
+            self.keys = True
+        elif t == QEvent.FocusIn and isinstance(obj, QWidget):
+            if e.reason() in (Qt.MouseFocusReason, Qt.ActiveWindowFocusReason):
+                self.keys = False
+            self.follow(obj if self.keys else None)
         elif self.target is not None and t in (QEvent.Move, QEvent.Resize, QEvent.Hide, QEvent.Show)                 and obj is not self.ring and isinstance(obj, QWidget)                 and (obj is self.target or obj.isAncestorOf(self.target)):
             self.place()
-        elif t == QEvent.MouseButtonPress and self.target is not None:
-            self.follow(None)
+        elif t == QEvent.MouseButtonPress:
+            self.keys = False
+            if self.target is not None:
+                self.follow(None)
         return False
 
     def follow(self, widget):
@@ -365,15 +377,15 @@ def collapse(widget, then):
     fold.setDuration(duration)
     fold.setStartValue(widget.height())
     fold.setEndValue(0)
-    fold.setEasingCurve(QEasingCurve.InCubic)
+    fold.setEasingCurve(QEasingCurve.OutQuint)      # an exit starts at once: ease-in would feel slow
     fold.finished.connect(then)
     fold.start(QPropertyAnimation.DeleteWhenStopped)
 
 
 def slide_away(widget, parent):
     """A closing panel: it is hidden at once (nothing waits for the motion), and a picture of it slides out
-    to the right edge of parent, then goes."""
-    duration = motion(MOTION_STANDARD)
+    to the right edge of parent, then goes. Quicker than the panel's arrival: the user is done with it."""
+    duration = motion(MOTION_LEAVE)
     if duration and widget.isVisible():
         ghost = QLabel(parent)
         ghost.setPixmap(widget.grab())
@@ -384,7 +396,7 @@ def slide_away(widget, parent):
         away = QPropertyAnimation(ghost, b"pos", ghost)
         away.setDuration(duration)
         away.setEndValue(QPoint(parent.width(), ghost.y()))
-        away.setEasingCurve(QEasingCurve.InCubic)
+        away.setEasingCurve(QEasingCurve.OutQuint)
         away.finished.connect(ghost.deleteLater)
         away.start()
     widget.hide()
@@ -545,6 +557,19 @@ def status_word(status):
     return STATUS.get(status, ("",))[0]
 
 
+def edged(pix):
+    """A copy of a page picture with a hairline edge in the divider colour, one screen pixel wide."""
+    pix = QPixmap(pix)
+    scale = pix.devicePixelRatio()
+    pix.setDevicePixelRatio(1)                  # drawn in the picture's own pixels
+    p = QPainter(pix)
+    p.setPen(QColor(THEME["divider"]))
+    p.drawRect(pix.rect().adjusted(0, 0, -1, -1))
+    p.end()
+    pix.setDevicePixelRatio(scale)
+    return pix
+
+
 class ElidedLabel(QLabel):
     """One line that ends in "…" when it doesn't fit; the full text shows on hover."""
 
@@ -616,7 +641,8 @@ class Notices(QWidget):
             quiet = kind == "quiet"
             frame = QFrame()
             frame.setObjectName("" if quiet else "notice")
-            h = box(QHBoxLayout(frame), (BAR, 0, 0, 0) if quiet else (GROUP, RELATED, RELATED, RELATED), GROUP)
+            h = box(QHBoxLayout(frame), (BAR, 0, 0, 0) if quiet else (GROUP, RELATED, RELATED, RELATED),
+                    TIGHT if quiet else GROUP)  # quiet: the link follows its sentence
             icon = QLabel()
             icon.setPixmap(status_icon("failed" if kind == "error" else "needs_decision").pixmap(FILE_ICON, FILE_ICON))
             label = QLabel(text)
@@ -625,9 +651,9 @@ class Notices(QWidget):
             frame.setParent(self)
             label.setParent(frame)
             label.ensurePolished()                  # measure with the notice font, not the default
-            label.setMaximumWidth(label.fontMetrics().horizontalAdvance(text) + GROUP)  # wraps only when short
+            label.setMaximumWidth(label.fontMetrics().horizontalAdvance(text) + RELATED)  # wraps only when short
             h.addWidget(icon)
-            h.addSpacing(RELATED - GROUP)       # icon to label
+            h.addSpacing(RELATED - h.spacing())     # icon to label
             h.addWidget(label, 1)
             if action:
                 button = QPushButton(action)
@@ -992,7 +1018,7 @@ class Preview(QWidget):
             pix = pix.scaled(round(width * scale), round(height * scale), Qt.KeepAspectRatio,
                              Qt.FastTransformation if resizing else Qt.SmoothTransformation)
             pix.setDevicePixelRatio(scale)
-        self.image.setPixmap(pix)
+        self.image.setPixmap(edged(pix))
         if self.fit_width:  # no empty bands above and below the page
             self.scroll.setFixedHeight(round(pix.deviceIndependentSize().height()) + RELATED)
 

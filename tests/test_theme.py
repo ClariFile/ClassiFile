@@ -171,29 +171,37 @@ def test_keyboard_focus_is_one_ring_shown_only_after_tab(app, make_org):
     w.show()
     w.activateWindow()
     app.processEvents()
-    first, second = w.nav[ALL], w.nav[SETTINGS]
-
     def ring():
         r = w.findChild(QFrame, "focusRing")
         return r.geometry() if r is not None and r.isVisible() else None
 
+    first, second = w.nav[ALL], w.nav[SETTINGS]
+
+    def around(widget):
+        return QRect(widget.mapTo(w, widget.rect().topLeft()), widget.size())
+
+    def by_key(widget, reason=Qt.TabFocusReason):
+        QTest.keyClick(w, Qt.Key_Shift)                     # a key that does nothing: the keyboard is in use
+        widget.setFocus(reason)
+        app.processEvents()
+
     w.search.setFocus(Qt.MouseFocusReason)                  # from somewhere else
-    first.setFocus(Qt.TabFocusReason)
-    app.processEvents()
-    around = QRect(first.mapTo(w, first.rect().topLeft()), first.size())
-    assert ring() is not None and ring().contains(around) and ring() != around     # just outside the control
-    second.setFocus(Qt.TabFocusReason)                      # it follows the keyboard
-    app.processEvents()
-    assert ring().contains(QRect(second.mapTo(w, second.rect().topLeft()), second.size()))
+    by_key(first)
+    assert ring() is not None and ring().contains(around(first)) and ring() != around(first)  # just outside it
+    by_key(second)                                          # it follows the keyboard
+    assert ring().contains(around(second))
     QTest.mousePress(second, Qt.LeftButton)                 # a click: no ring
     QTest.mouseRelease(second, Qt.LeftButton)
     app.processEvents()
     assert ring() is None
-    first.setFocus(Qt.TabFocusReason)
-    w.search.setFocus(Qt.TabFocusReason)                    # a text field shows the focus by its own border
+    first.setFocus(Qt.MouseFocusReason)
+    first.hide()                                            # Qt moves the focus on "as by Tab": still no ring
     app.processEvents()
     assert ring() is None
-    first.setFocus(Qt.ActiveWindowFocusReason)              # back from another window: no ring
-    app.processEvents()
+    first.show()
+    by_key(first)
+    by_key(w.search)                                        # a text field shows the focus by its own border
+    assert ring() is None
+    by_key(first, Qt.ActiveWindowFocusReason)               # back from another window: no ring
     assert ring() is None
     w.close()

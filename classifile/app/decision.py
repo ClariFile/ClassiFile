@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
 from classifile.analysis.candidates import name_key, top_names
 from classifile.app.reasons import reason_text, similar_reason
 from classifile.app.widgets import (
-    BAR, BUTTON_TEXT_MAX, CHOICES_MAX, FILE_ICON, GROUP, NAME_FIELD_MAX, RELATED, TEXT_MIN, TIGHT,
+    BAR, BUTTON_TEXT_MAX, CHOICES_MAX, CONTROL, FILE_ICON, GROUP, NAME_FIELD_MAX, RELATED, TEXT_MIN, TIGHT,
     CategoryPicker, ElidedLabel, ListRow, box, collapse, format_icon, restyle, scroll_area_of, unfold, wrappable,
     wrapped,
 )
@@ -471,6 +471,7 @@ class SubjectItem(ListRow):
         wrapped(self.line)
         rows = box(QGridLayout())
         rows.setColumnStretch(1, 1)
+        rows.setColumnMinimumWidth(3, CONTROL + RELATED)  # under the head's ⋯ (an empty column gets no spacing)
         self.ticks, self.detail_links = {}, {}
         for n, d in enumerate(docs):            # each document: a tick, its file name, and its pages on request
             tick = QCheckBox()

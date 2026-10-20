@@ -89,6 +89,7 @@ HAIR = 1        # borders and lines
 NAV_PAD = 10    # above and below a view's name in the sidebar; left of a category's name
 RING = 2        # the keyboard focus ring
 BAR = 2         # the selection bar at the left of a row; the drop overlay's dashes
+SCROLLBAR = 14   # a scroll bar's track; its handle is 6 wide inside it
 
 # -- text -----------------------------------------------------------------------------------------------------
 FONT = "Segoe UI"

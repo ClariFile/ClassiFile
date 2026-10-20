@@ -17,7 +17,7 @@ from PySide6.QtCore import (
     QCoreApplication, QEasingCurve, QEvent, QItemSelection, QItemSelectionModel, QObject, QPoint,
     QPropertyAnimation, QSize, Qt, QTimer, QUrl, Signal,
 )
-from PySide6.QtGui import QDesktopServices, QKeySequence, QShortcut
+from PySide6.QtGui import QDesktopServices, QFont, QFontMetrics, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QButtonGroup, QCheckBox, QComboBox, QFileDialog, QFrame, QHBoxLayout,
     QHeaderView, QInputDialog, QLabel, QLayout, QLineEdit, QMenu, QMessageBox, QPushButton, QSizePolicy, QSplitter,
@@ -37,7 +37,7 @@ from classifile.app.models import DOC, SORTS, CategoryModel, DocumentFilter, Doc
 from classifile.app.widgets import (
     CHECKLIST_MAX, DATE_COLUMN_MIN, PANEL, SETTING_CHOICE, TIGHT, DETAILS_MAX, DETAILS_MIN, DETAILS_WIDTH, FILE_ICON, GROUP, LIST_MIN, MIN_WINDOW,
     MOTION_STANDARD, NARROW, PAD, RELATED, SEARCH_MAX, SECTION, SIDEBAR_WIDTH, SUPPORTED, TOAST, TOAST_LONG,
-    WIDE, WINDOW, box, keyboard_focus, motion, qt_palette, set_motion, slide_away, smooth_scrolling, style_sheet,
+    FONT, ICON, STATUS, TEXT_BODY, WIDE, WINDOW, box, keyboard_focus, motion, qt_palette, set_motion, slide_away, smooth_scrolling, style_sheet,
     use_theme,
     Collapsible, DropOverlay, ElidedLabel, Notices, PickerDialog, PreviewOverlay, Toast, wrappable, wrapped,
 )
@@ -579,7 +579,10 @@ class MainWindow(QWidget):
         table.setStyle(self.list_style)
         header = table.header()
         header.setSectionResizeMode(0, QHeaderView.Stretch)
-        for col, width in ((1, 200), (2, 110), (3, 110)):
+        font = QFont(FONT)
+        font.setPixelSize(TEXT_BODY)               # the style sheet's, which may not be applied yet
+        status = max(QFontMetrics(font).horizontalAdvance(w) for w, *_ in STATUS.values())
+        for col, width in ((1, 200), (2, status + ICON + 3 * RELATED + TIGHT), (3, 110)):   # no status cut off
             header.setSectionResizeMode(col, QHeaderView.Interactive)
             table.setColumnWidth(col, width)
         header.setStretchLastSection(False)

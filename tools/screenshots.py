@@ -152,9 +152,11 @@ def render(out, size=(1280, 720), theme="light", views=VIEWS):
         if "focus" in views and w.decision.items:   # the keyboard focus ring, as after a Tab
             w.activateWindow()
             w.search.setFocus(Qt.MouseFocusReason)
+            app.focus_ring.keys = True           # as after a key
             w.decision.items[0].primary.setFocus(Qt.TabFocusReason)
             shot(w, "focus")
             w.search.setFocus(Qt.MouseFocusReason)
+            app.focus_ring.follow(None)         # as a click would: the later views show no ring
         first = w.waiting_docs[0]["id"] if w.waiting_docs else None
         if first:
             w.show_details(first)
