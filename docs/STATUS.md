@@ -1,10 +1,10 @@
 # ClassiFile status
 
-2026-10-20 · decision record version 2.12
+2026-10-26 · decision record version 2.12
 
 ## Now (read this first)
 
-- **Where it stands:** v1 release candidate 1.0.0-rc.7, built and checked without installing. CP5 is done: the
+- **Where it stands:** v1 release candidate 1.0.0-rc.8, built and checked without installing. CP5 is done: the
   matcher was frozen (record 2.10) and the final evaluation ran once, on 2026-10-16. `data\final-eval` is not read
   again, and `tools.final_eval` refuses a second run whatever its options.
 - **Next:** the clean-machine installer test (`docs/INSTALLER_TEST.md`; never on the owner's own laptop), then
@@ -490,7 +490,16 @@
   files, so an upgrade leaves no stale file.
 - **Not tested:** install, first run, OCR, filing, upgrade and uninstall of the setup file on any Windows (as rc.4).
 
-**The rest of the outside review (2026-10-26; after rc.7, not in a build yet)**
+**1.0.0-rc.8 (2026-10-26): a release candidate, not verified on a clean machine**
+- rc.7 plus the rest of the outside review below. `dist\ClassiFile-1.0.0-rc.8-setup.exe` (about 52 MB) and
+  `dist\ClassiFile-1.0.0-rc.8-portable.zip` (about 72 MB), from the unchanged installer scripts.
+- Checked without installing, on the build laptop: 309 tests; `tools.check_ui` no failures; the built app's
+  self-test with only its bundled OCR data, on copies of the six samples: PASS, the same counts as rc.7, also from
+  the unpacked portable zip; the app asks for `asInvoker`; rc.7 and rc.8 ship the same 234 files.
+- **Not tested:** install, first run, OCR, filing, upgrade and uninstall of the setup file on any Windows (as
+  rc.4); the preview process inside the built app (the self-test reads files, it shows no window).
+
+**The rest of the outside review (2026-10-26; built as rc.8)**
 - **Full width:** notice text (the "need your decision" line and the others) has no width cap any more; it runs to
   its action button or to the notice's edge. `test_empty_state_and_settings` checks it.
 - **What matching learns from:** Settings, Advanced, says how many documents (and independent families) matching

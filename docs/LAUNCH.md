@@ -86,7 +86,7 @@ LGPL-3.0 with GPL-3.0 for Qt and PySide6, and Tesseract's Apache-2.0.
   uninstall entry, and the catalog byte-for-byte unchanged.
 - **Left:** the clean-machine test on a laptop that never had Python: `docs/INSTALLER_TEST.md`. Deferred by the owner
   (2026-10-19) until a spare laptop or a disposable Windows is at hand; never on the owner's only computer. Until
-  then every build stays a release candidate (rc.4 to rc.7: checked without installing, `docs/STATUS.md`).
+  then every build stays a release candidate (rc.4 to rc.8: checked without installing, `docs/STATUS.md`).
 
 ## 3. A user README (written 2026-10-15: `README.md`, and the guide in `docs/guide/`, English and Burmese)
 
