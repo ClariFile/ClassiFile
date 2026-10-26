@@ -37,7 +37,7 @@ from classifile.app.models import DOC, SORTS, CategoryModel, DocumentFilter, Doc
 from classifile.app.widgets import (
     CHECKLIST_MAX, DATE_COLUMN_MIN, PANEL, SETTING_CHOICE, TIGHT, DETAILS_MAX, DETAILS_MIN, DETAILS_WIDTH, FILE_ICON, GROUP, LIST_MIN, MIN_WINDOW,
     MOTION_STANDARD, NARROW, PAD, RELATED, SEARCH_MAX, SECTION, SIDEBAR_WIDTH, SUPPORTED, TOAST, TOAST_LONG,
-    FONT, ICON, STATUS, foot_icon, TEXT_BODY, WIDE, WINDOW, box, keyboard_focus, motion, qt_palette, set_motion, slide_away, smooth_scrolling, style_sheet,
+    CONTROL, FONT, ICON, STATUS, foot_icon, TEXT_BODY, WIDE, WINDOW, box, button_motion, keyboard_focus, motion, qt_palette, set_motion, slide_away, smooth_scrolling, style_sheet,
     use_theme,
     Collapsible, DropOverlay, ElidedLabel, Notices, PickerDialog, PreviewOverlay, Toast, wrappable, wrapped,
 )
@@ -363,7 +363,7 @@ class MainWindow(QWidget):
         self.menu_button.setObjectName("icon")
         self.menu_button.setToolTip("Show the sidebar")
         self.menu_button.setAccessibleName("Show the sidebar")
-        self.menu_button.clicked.connect(lambda: self.sidebar.setVisible(not self.sidebar.isVisible()))
+        self.menu_button.clicked.connect(lambda: self.set_sidebar(True))
         self.page_title = ElidedLabel(object_name="pageTitle")
         self.processing = QLabel()
         self.processing.setObjectName("processing")
@@ -477,9 +477,16 @@ class MainWindow(QWidget):
         brand_icon.setPixmap(app_icon().pixmap(FILE_ICON, FILE_ICON))
         brand = QLabel("ClassiFile")
         brand.setObjectName("brand")
-        top = box(QHBoxLayout(), (GROUP, PAD, GROUP, GROUP))
+        hide = QPushButton("☰")                  # the same button as the one that brings it back
+        hide.setObjectName("icon")
+        hide.setToolTip("Hide the sidebar")
+        hide.setAccessibleName("Hide the sidebar")
+        hide.clicked.connect(lambda: self.set_sidebar(False))
+        lift = (CONTROL - FILE_ICON) // 2        # the button is taller than the name: the name stays where it was
+        top = box(QHBoxLayout(), (GROUP, PAD - lift, RELATED, GROUP - lift))
         top.addWidget(brand_icon)
         top.addWidget(brand, 1)
+        top.addWidget(hide)
         self.nav_group = QButtonGroup(self)
         self.nav_group.setExclusive(True)
         self.nav = {}
@@ -713,7 +720,7 @@ class MainWindow(QWidget):
             self.motion.addItem(words, name)
         self.motion.activated.connect(lambda *_: self.set_motion(self.motion.currentData()))
         motion_row = box(QHBoxLayout(), spacing=GROUP)
-        motion_row.addWidget(QLabel("Motion (sliding panels, folding rows, smooth scrolling)"), 1)
+        motion_row.addWidget(QLabel("Motion (sliding panels, folding rows, scrolling, buttons)"), 1)
         motion_row.addWidget(self.motion)
         self.close_toggle = QCheckBox("Ask before closing when documents are waiting")
         self.close_toggle.toggled.connect(
@@ -1265,12 +1272,34 @@ class MainWindow(QWidget):
 
     def _apply_breakpoints(self):
         narrow = self.width() < NARROW
-        if narrow != getattr(self, "_was_narrow", None):
-            self.sidebar.setVisible(not narrow)
+        if narrow != getattr(self, "_was_narrow", None):   # narrow: hidden; wide: as the user left it
+            self.sidebar.setVisible(not narrow and self._setting("ui_sidebar", True))
             self._was_narrow = narrow
-        self.menu_button.setVisible(narrow)
+        self.menu_button.setVisible(self.sidebar.isHidden())
         self._fit_columns()
         self._place_details()
+
+    def set_sidebar(self, open_):
+        """The sidebar's menu button: it slides in from the left edge, or a picture of it slides out there (both
+        instant with reduced motion). The page takes or gives back its room at once, so nothing is laid out
+        again on the way. Kept for the next start while the window is wide; narrow, it starts hidden."""
+        if open_ == self.sidebar.isVisible():
+            return
+        if self.width() >= NARROW:
+            self._save("ui_sidebar", open_)
+        self.menu_button.setVisible(not open_)
+        if not open_:
+            return slide_away(self.sidebar, self, left=True)
+        self.sidebar.show()
+        QCoreApplication.sendPostedEvents(self, QEvent.LayoutRequest)    # placed now, then slid from the edge
+        duration = motion(MOTION_STANDARD)
+        if duration:
+            slide = QPropertyAnimation(self.sidebar, b"pos", self.sidebar)
+            slide.setDuration(duration)
+            slide.setStartValue(QPoint(-self.sidebar.width(), self.sidebar.y()))
+            slide.setEndValue(self.sidebar.pos())
+            slide.setEasingCurve(QEasingCurve.OutCubic)
+            slide.start(QPropertyAnimation.DeleteWhenStopped)
 
     def _fit_columns(self):
         """The list's columns for the room it has now; the details panel beside it takes some. Category grows
@@ -2232,6 +2261,7 @@ def catalog_lock(catalog_path):
 def main():
     app = make_app(sys.argv)
     smooth_scrolling(app)
+    button_motion(app)
     keyboard_focus(app)
     path = default_data_dir() / "catalog.sqlite3"
     lock = catalog_lock(path)                   # before the catalog is opened, migrated or recovered

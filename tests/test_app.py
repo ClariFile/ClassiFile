@@ -13,7 +13,7 @@ from classifile.app.main import (  # noqa: E402
     ABOUT, ALL, DECIDE, DOC, HELP, RECENT, SETTINGS, MainWindow, problem_report, safe_reason,
 )
 from classifile.app.guide import ReportDialog  # noqa: E402
-from classifile.app.widgets import GROUP, PANEL, RELATED, reduced_motion  # noqa: E402
+from classifile.app.widgets import GROUP, PANEL, QWIDGETSIZE_MAX, RELATED, reduced_motion  # noqa: E402
 from classifile.app.reasons import reason_text  # noqa: E402
 from conftest import SAMPLE, EXPECT, source_state  # noqa: E402
 
@@ -150,6 +150,7 @@ def test_empty_state_and_settings(app, make_org):
     assert not w.advanced.content.isVisible()                                   # versions and logs: closed
     w.advanced.toggle.click()
     assert w.advanced.content.isVisible() and "catalog schema" in w.tech.text()
+    _pump(app, lambda: w.advanced.content.maximumHeight() == QWIDGETSIZE_MAX, timeout=2)   # grown to its height
     for key, page, words in ((HELP, w.help_page, "What never happens"), (ABOUT, w.about_page, "AGPL-3.0")):
         w.nav[key].click()
         assert w.stack.currentWidget() is page and not w.toolbar.isVisible()
@@ -1571,6 +1572,92 @@ def test_a_wheel_turn_glides_and_is_instant_with_reduced_motion(app, monkeypatch
     wheel(Qt.ScrollUpdate)                                         # a touchpad: already smooth, left to Qt
     assert bar.value() == 5 * step
     area.close()
+
+
+def test_buttons_fade_and_sink_under_the_mouse_only_and_never_with_reduced_motion(app, monkeypatch):
+    from PySide6.QtCore import QPointF
+    from PySide6.QtCore import QEvent
+    from PySide6.QtGui import QEnterEvent, QMouseEvent
+    from PySide6.QtTest import QTest
+    from PySide6.QtWidgets import QPushButton, QWidget
+    from classifile.app import widgets
+
+    assert widgets.button_motion(app) is widgets.button_motion(app)     # one filter for the app
+    page = QWidget()
+    plain, primary, toggle = QPushButton("Plain", page), QPushButton("Add documents", page), QPushButton("On", page)
+    primary.setObjectName("primary")
+    toggle.setCheckable(True)
+    toggle.setChecked(True)
+    for i, b in enumerate((plain, primary, toggle)):
+        b.setGeometry(10, 10 + 50 * i, 160, 36)
+    page.show()
+
+    def hover(b, on):
+        QApplication.sendEvent(b, QEnterEvent(QPointF(5, 5), QPointF(5, 5), QPointF(5, 5)) if on
+                               else QEvent(QEvent.Leave))
+
+    def mouse(b, kind):
+        QApplication.sendEvent(b, QMouseEvent(kind, QPointF(5, 5), QPointF(5, 5), Qt.LeftButton,
+                                              Qt.LeftButton if kind == QEvent.MouseButtonPress else Qt.NoButton,
+                                              Qt.NoModifier))
+
+    monkeypatch.setattr(widgets, "reduced_motion", lambda: False)
+    sheet = widgets.style_sheet(widgets.THEME)
+    for b, kind in ((plain, "plain"), (primary, "primary")):
+        hover(b, True)
+        assert b.property("fade").startswith(kind)                     # on its way to the hover colour,
+        assert f'[fade="{kind}{widgets.FADE_STEPS}"]' in sheet          # in steps of the window's style sheet
+        _pump(app, lambda: b.property("fade") is None, timeout=2)      # there: the style sheet's :hover holds it
+        hover(b, False)
+        assert b.property("fade") is not None
+        _pump(app, lambda: b.property("fade") is None, timeout=2)
+    hover(toggle, True)
+    assert toggle.property("fade") is None                             # a checked button is left to the style sheet
+    mouse(plain, QEvent.MouseButtonPress)
+    assert isinstance(plain.graphicsEffect(), widgets._Sink)           # it sinks
+    _pump(app, lambda: plain.graphicsEffect().scale < 1, timeout=2)
+    assert plain.graphicsEffect().scale >= widgets.PRESS_SCALE
+    mouse(plain, QEvent.MouseButtonRelease)
+    _pump(app, lambda: plain.graphicsEffect() is None, timeout=2)      # back, and drawn as itself again
+    plain.setFocus()
+    QTest.keyClick(plain, Qt.Key_Space)
+    assert plain.graphicsEffect() is None                              # a key press never animates
+    monkeypatch.setattr(widgets, "reduced_motion", lambda: True)
+    hover(plain, True)
+    mouse(plain, QEvent.MouseButtonPress)
+    assert plain.property("fade") is None and plain.graphicsEffect() is None   # colours change, nothing moves
+    mouse(plain, QEvent.MouseButtonRelease)
+    page.close()
+
+
+def test_the_sidebar_hides_slides_back_and_stays_as_left(app, make_org):
+    from PySide6.QtWidgets import QPushButton
+    from classifile.app import widgets
+
+    w, rec = _window(make_org)
+    w.resize(1536, 864)
+    _pump(app, lambda: w.width() == 1536)
+    assert w.sidebar.isVisible() and not w.menu_button.isVisible()
+    hide = next(b for b in w.sidebar.findChildren(QPushButton) if b.accessibleName() == "Hide the sidebar")
+    w.set_motion("full")
+    hide.click()
+    ghosts = [c for c in w.children() if isinstance(c, QLabel) and c.testAttribute(Qt.WA_TransparentForMouseEvents)]
+    assert w.sidebar.isHidden() and w.menu_button.isVisible() and ghosts   # a picture of it slides out left
+    _pump(app, lambda: w.workspace.x() == 0)                           # the page has the whole width at once
+    w.menu_button.click()
+    assert w.sidebar.isVisible() and not w.menu_button.isVisible()
+    _pump(app, lambda: w.sidebar.x() == 0 and w.workspace.x() == w.sidebar.width(), timeout=2)
+    hide.click()
+    _close(w, rec)
+    w2, rec = _window(make_org)                                        # the next start: still hidden
+    w2.resize(1536, 864)
+    _pump(app, lambda: w2.width() == 1536)
+    assert w2.sidebar.isHidden() and w2.menu_button.isVisible()
+    w2.set_motion("reduce")
+    w2.menu_button.click()
+    assert w2.sidebar.isVisible() and w2.sidebar.x() == 0              # at once with reduced motion
+    widgets.set_motion("system")
+    _close(w2, rec)
 
 
 def test_new_folders_by_itself_with_one_summary_and_a_one_click_rename(app, make_org, tmp_path):

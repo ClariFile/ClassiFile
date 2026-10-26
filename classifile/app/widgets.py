@@ -3,12 +3,14 @@ import sys
 from pathlib import Path
 
 from PySide6.QtCore import (
-    QEasingCurve, QEvent, QObject, QPoint, QPointF, QPropertyAnimation, QRect, QRectF, QSize, Qt, QTimer, Signal,
+    QEasingCurve, QEvent, QObject, QPoint, QPointF, QPropertyAnimation, QRect, QRectF, QSize, Qt, QTimer,
+    QVariantAnimation, Signal,
 )
 from PySide6.QtGui import QColor, QIcon, QIconEngine, QPainter, QPainterPath, QPalette, QPen, QPixmap, QTransform
 from PySide6.QtWidgets import (
-    QAbstractItemView, QAbstractScrollArea, QApplication, QDialog, QFrame, QHBoxLayout, QLabel, QLineEdit,
-    QListWidget, QListWidgetItem, QPushButton, QScrollArea, QSizePolicy, QToolButton, QVBoxLayout, QWidget,
+    QAbstractItemView, QAbstractScrollArea, QApplication, QDialog, QFrame, QGraphicsEffect, QHBoxLayout, QLabel,
+    QLineEdit, QListWidget, QListWidgetItem, QPushButton, QScrollArea, QSizePolicy, QToolButton, QVBoxLayout,
+    QWidget,
 )
 
 QWIDGETSIZE_MAX = (1 << 24) - 1
@@ -33,6 +35,30 @@ def box(layout, margins=0, spacing=RELATED):
     return layout
 
 THEME = dict(THEMES["light"], name="light")    # the theme in use; use_theme() changes it in place
+
+
+FADES = {  # a hover fade's kind -> the selectors it must outrank, (at rest, hovered) colour names, border too
+    "plain": (("QPushButton", "QToolButton#more", "QPushButton#nav", 'QPushButton#nav[foot="true"]'),
+              (None, "hover"), False),
+    "prominent": (('QPushButton#nav[foot="true"][prominent="true"]',), ("base", "hover"), False),
+    "primary": (("QPushButton#primary",), ("primary", "primary_hover"), True),
+}
+
+
+def _fade_rules(t):
+    """The steps of a hover fade (ButtonMotion), as rules on the "fade" property: step 0 is the colour at rest,
+    FADE_STEPS the hover colour. None at rest: the hover colour, fully transparent."""
+    rules = []
+    for kind, (selectors, (rest, hover), border) in FADES.items():
+        end = QColor(t[hover])
+        start = QColor(t[rest]) if rest else QColor(end.red(), end.green(), end.blue(), 0)
+        for k in range(FADE_STEPS + 1):
+            f = k / FADE_STEPS
+            mix = QColor(*(round(a + (b - a) * f) for a, b in zip(start.getRgb(), end.getRgb())))
+            colour = mix.name(QColor.HexArgb)
+            names = ", ".join(f'{sel}[fade="{kind}{k}"]' for sel in selectors)
+            rules.append(f"{names} {{ background: {colour};" + (f" border-color: {colour};" if border else "") + " }")
+    return "\n".join(rules)
 
 
 def style_sheet(t):
@@ -99,6 +125,10 @@ QFrame#catBox {{ background: {t['window']}; border: {HAIR}px solid {t['divider']
 QFrame#settingsCard {{ background: {t['base']}; border: {HAIR}px solid {t['divider']};
                        border-radius: {RADIUS_PANEL}px; }}
 QPushButton#nav:hover {{ background: {t['hover']}; }}
+/* Pressed: a step darker at once, also with reduced motion (ButtonMotion adds the sink, and the hover's fade). */
+QPushButton:pressed, QPushButton#nav:pressed, QPushButton#nav[foot="true"]:pressed, QToolButton#more:pressed {{
+    background: {t['pressed']}; }}
+{_fade_rules(t)}
 /* The lists keep a border of one colour or none, so focus is seen and nothing moves. */
 QTreeView, QListWidget {{ border: {HAIR}px solid transparent; border-radius: {RADIUS_ROW}px;
                           background: {t['base']}; color: {t['text']}; outline: none; }}
@@ -355,6 +385,140 @@ def smooth_scrolling(app):
     return app.smooth_scroll
 
 
+def _css_ease():
+    """CSS's "ease", for a change of colour: a quick start, a long soft landing."""
+    curve = QEasingCurve(QEasingCurve.BezierSpline)
+    curve.addCubicBezierSegment(QPointF(0.25, 0.1), QPointF(0.25, 1), QPointF(1, 1))
+    return curve
+
+
+class _Sink(QGraphicsEffect):
+    """A button drawn a little smaller about its centre, while it is pressed and coming back."""
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.scale = 1.0
+
+    def draw(self, painter):
+        pixmap = self.sourcePixmap(Qt.LogicalCoordinates, mode=QGraphicsEffect.NoPad)
+        offset = self.sourceBoundingRect(Qt.LogicalCoordinates).topLeft()
+        centre = QRectF(offset, pixmap.deviceIndependentSize()).center()
+        painter.save()
+        painter.setRenderHint(QPainter.SmoothPixmapTransform)
+        painter.translate(centre)
+        painter.scale(self.scale, self.scale)
+        painter.translate(-centre)
+        painter.drawPixmap(offset, pixmap)
+        painter.restore()
+
+
+class ButtonMotion(QObject):
+    """Buttons answer the pointer: the hover colour fades in quickly and out softly instead of switching, and a
+    click sinks the button a little (PRESS_SCALE) and lets it come back. Only the mouse does this: a key press
+    never animates. Nothing moves with reduced motion; the style sheet's hover and pressed colours still change
+    at once. A fade steps the button's "fade" property through rules of the window's style sheet (_fade_rules)
+    and clears it at the end, where the style sheet's own state gives the same colour."""
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.fades, self.sinks = {}, {}     # button -> its running animation
+
+    def eventFilter(self, obj, e):
+        t = e.type()
+        if t not in (QEvent.Enter, QEvent.Leave, QEvent.MouseButtonPress, QEvent.MouseButtonRelease) \
+                or not isinstance(obj, (QPushButton, QToolButton)):
+            return False
+        if t in (QEvent.Enter, QEvent.Leave):
+            self.fade(obj, t == QEvent.Enter)
+        elif e.button() == Qt.LeftButton:
+            self.sink(obj, t == QEvent.MouseButtonPress)
+        return False
+
+    @staticmethod
+    def kind(button):
+        """Its fade in FADES, or None for a button left to the style sheet: a checked or disabled one, a
+        disclosure, a button on the toast."""
+        if button.isChecked() or not button.isEnabled():
+            return None
+        name = button.objectName()
+        if isinstance(button, QToolButton) and name != "more":
+            return None
+        w = button.parentWidget()
+        while w is not None:
+            if w.objectName() == "toast":
+                return None
+            w = w.parentWidget()
+        if name == "primary":
+            return "primary"
+        return "prominent" if name == "nav" and button.property("prominent") else "plain"
+
+    def fade(self, button, entering):
+        anim = self.fades.get(button)
+        kind = self.kind(button)
+        duration = motion(MOTION_HOVER_IN if entering else MOTION_HOVER_OUT)
+        step = None
+        if anim is not None:
+            step = anim.currentValue() if anim.state() == anim.State.Running else None
+            anim.stop()
+        if kind is None or not duration:
+            return self._step(button, None)
+        if anim is None:
+            anim = self.fades[button] = QVariantAnimation(button)
+            anim.setEasingCurve(_css_ease())
+            anim.valueChanged.connect(lambda k, b=button: self._step(b, k))
+            anim.finished.connect(lambda b=button: self._step(b, None))
+            button.destroyed.connect(lambda *_, b=button: self.fades.pop(b, None))
+        button.setProperty("fading", kind)
+        anim.setStartValue(step if step is not None else 0 if entering else FADE_STEPS)
+        anim.setEndValue(FADE_STEPS if entering else 0)
+        anim.setDuration(duration)
+        anim.start()
+
+    def _step(self, button, k):
+        """Shows step k of the fade, or (None) gives the button back to the style sheet's own states."""
+        if k is not None and (button.isChecked() or button.isDown()):   # clicked meanwhile: that state shows
+            self.fades[button].stop()
+            k = None
+        value = None if k is None else f"{button.property('fading')}{k}"
+        if button.property("fade") != value:
+            button.setProperty("fade", value)
+            restyle(button)
+
+    def sink(self, button, pressed):
+        anim = self.sinks.get(button)
+        if anim is None:
+            if not pressed or button.objectName() == "nav" or not button.isEnabled() \
+                    or not motion(MOTION_PRESS):
+                return                      # the sidebar's rows are a place, not a push
+            effect = _Sink(button)
+            button.setGraphicsEffect(effect)
+            anim = self.sinks[button] = QVariantAnimation(button)
+            anim.setEasingCurve(QEasingCurve.OutCubic)
+            anim.valueChanged.connect(lambda s, e=effect: (setattr(e, "scale", s), e.update()))
+            anim.finished.connect(lambda b=button: self._settle(b))
+            button.destroyed.connect(lambda *_, b=button: self.sinks.pop(b, None))
+        least = max(PRESS_SCALE, 1 - 2 * PRESS_INSET / max(1, button.width()))
+        anim.stop()
+        anim.setStartValue(button.graphicsEffect().scale if button.graphicsEffect() else 1.0)
+        anim.setEndValue(least if pressed else 1.0)
+        anim.setDuration(MOTION_PRESS if pressed else MOTION_RELEASE)
+        anim.start()
+
+    def _settle(self, button):
+        anim = self.sinks.get(button)
+        if anim is not None and anim.endValue() == 1.0:   # back at full size: the button draws itself again
+            self.sinks.pop(button).deleteLater()
+            button.setGraphicsEffect(None)
+
+
+def button_motion(app):
+    """Hover fades and the click sink for every button of the app (ButtonMotion); once per application."""
+    if not hasattr(app, "button_motion"):
+        app.button_motion = ButtonMotion(app)
+        app.installEventFilter(app.button_motion)
+    return app.button_motion
+
+
 def unfold(widget, then=None):
     """Show a hidden widget, growing it to its full height over a moment; then() when it has its full height."""
     widget.show()
@@ -388,9 +552,10 @@ def collapse(widget, then):
     fold.start(QPropertyAnimation.DeleteWhenStopped)
 
 
-def slide_away(widget, parent):
+def slide_away(widget, parent, left=False):
     """A closing panel: it is hidden at once (nothing waits for the motion), and a picture of it slides out
-    to the right edge of parent, then goes. Quicker than the panel's arrival: the user is done with it."""
+    to the right edge of parent (the left one for the sidebar), then goes. Quicker than the panel's arrival:
+    the user is done with it."""
     duration = motion(MOTION_LEAVE)
     if duration and widget.isVisible():
         ghost = QLabel(parent)
@@ -401,7 +566,7 @@ def slide_away(widget, parent):
         ghost.raise_()
         away = QPropertyAnimation(ghost, b"pos", ghost)
         away.setDuration(duration)
-        away.setEndValue(QPoint(parent.width(), ghost.y()))
+        away.setEndValue(QPoint(-ghost.width() if left else parent.width(), ghost.y()))
         away.setEasingCurve(QEasingCurve.OutQuint)
         away.finished.connect(ghost.deleteLater)
         away.start()
@@ -649,8 +814,32 @@ class Collapsible(QWidget):
         v.addWidget(content)
 
     def set_open(self, open_):
+        """Opens by growing to its height and closes by folding back (both instant with reduced motion)."""
         self.toggle.setIcon(QIcon(CHEVRON_DOWN if open_ else CHEVRON_RIGHT))
-        self.content.setVisible(open_)
+        content, fold = self.content, getattr(self, "fold", None)
+        start = content.height() if fold is not None and fold.state() == fold.State.Running else None
+        if fold is None:
+            fold = self.fold = QPropertyAnimation(content, b"maximumHeight", self)
+            fold.finished.connect(self._settle)
+        fold.stop()
+        duration = motion(MOTION_QUICK if open_ else MOTION_LEAVE)
+        if not duration or (start is None and open_ == content.isVisible()):
+            content.setMaximumHeight(QWIDGETSIZE_MAX)
+            return content.setVisible(open_)
+        if open_ and not content.isVisible():
+            content.setMaximumHeight(0)
+            content.show()
+            start = 0
+        fold.setDuration(duration)
+        fold.setStartValue(content.height() if start is None else start)
+        full = content.heightForWidth(self.width())    # wrapped text: its height at this width
+        fold.setEndValue((full if full > 0 else content.sizeHint().height()) if open_ else 0)
+        fold.setEasingCurve(QEasingCurve.OutCubic if open_ else QEasingCurve.OutQuint)
+        fold.start()
+
+    def _settle(self):
+        self.content.setVisible(self.toggle.isChecked())
+        self.content.setMaximumHeight(QWIDGETSIZE_MAX)
 
 
 class Notices(QWidget):

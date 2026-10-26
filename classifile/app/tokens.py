@@ -142,11 +142,18 @@ DATE_COLUMN_MIN = 760   # the document list itself: narrower (the details panel 
 PREVIEW_KEEP = 8        # drawn pages kept, so paging back draws nothing
 
 # -- motion ---------------------------------------------------------------------------------------------------
-MOTION_STANDARD = 180   # the details panel sliding in and out
+MOTION_STANDARD = 180   # the details panel and the sidebar sliding in
 MOTION_QUICK = 120      # a row's choices opening
 MOTION_PANEL = 200      # the toast
 MOTION_LEAVE = 150      # a filed row folding away
 MOTION_SCROLL = 160     # a list or page gliding after a wheel turn
+MOTION_HOVER_IN = 100   # a button taking its hover colour: quick, the pointer is already there
+MOTION_HOVER_OUT = 180  # and giving it back: softer, nothing waits for it
+FADE_STEPS = 6          # colours between rest and hover (a frame or two each at these durations)
+MOTION_PRESS = 100      # a button sinking under a click
+MOTION_RELEASE = 160    # and coming back
+PRESS_SCALE = 0.97      # how far it sinks, and at most PRESS_INSET px a side on a wide button
+PRESS_INSET = 3
 PREVIEW_SETTLE = 150    # after the last resize step, before the page is drawn again at its new size
 PREVIEW_TIMEOUT = 20000 # a page not drawn by then: the preview process is replaced and the page says so
 TOAST = 5000            # how long a message stays

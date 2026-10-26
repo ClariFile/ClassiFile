@@ -490,6 +490,20 @@
   files, so an upgrade leaves no stale file.
 - **Not tested:** install, first run, OCR, filing, upgrade and uninstall of the setup file on any Windows (as rc.4).
 
+**Motion for buttons and the sidebar (2026-10-26, the owner's request)**
+- **Buttons answer the mouse:** the hover colour fades in (100 ms) and out (180 ms) instead of switching, and a
+  click sinks the button to 97% (at most 3 px a side) and lets it come back (`ButtonMotion` in
+  `classifile/app/widgets.py`). A key press never animates; the sidebar's rows don't sink. Pressed buttons also
+  turn a step darker at once, with or without motion. A fade step costs about 0.6 ms.
+- **The sidebar hides and comes back:** a ☰ at its top hides it (a picture of it slides out left) and the ☰
+  before the page title brings it back (it slides in from the left edge, 180 ms). The page takes or gives back
+  its room at once, so nothing is laid out again on the way. Kept for the next start while the window is wide;
+  below 1024 px it starts hidden, as before.
+- **Advanced in Settings** grows open and folds shut instead of jumping.
+- All of it follows Settings, Motion (and Windows' "Animation effects"): with reduced motion every change is
+  instant. Tests: `test_buttons_fade_and_sink_under_the_mouse_only_and_never_with_reduced_motion`,
+  `test_the_sidebar_hides_slides_back_and_stays_as_left`.
+
 **1.0.0-rc.8 (2026-10-26): a release candidate, not verified on a clean machine**
 - rc.7 plus the rest of the outside review below. `dist\ClassiFile-1.0.0-rc.8-setup.exe` (about 52 MB) and
   `dist\ClassiFile-1.0.0-rc.8-portable.zip` (about 72 MB), from the unchanged installer scripts.
