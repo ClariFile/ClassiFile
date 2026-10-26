@@ -679,13 +679,10 @@ class Notices(QWidget):
                     TIGHT if quiet else GROUP)  # quiet: the link follows its sentence
             icon = QLabel()
             icon.setPixmap(status_icon("failed" if kind == "error" else "needs_decision").pixmap(FILE_ICON, FILE_ICON))
-            label = QLabel(text)
-            label.setWordWrap(True)
+            label = wrapped(QLabel(text))           # fills the row: only its action button stops it short
             label.setObjectName("error" if kind == "error" else "secondary" if quiet else "")
             frame.setParent(self)
             label.setParent(frame)
-            label.ensurePolished()                  # measure with the notice font, not the default
-            label.setMaximumWidth(label.fontMetrics().horizontalAdvance(text) + RELATED)  # wraps only when short
             h.addWidget(icon)
             h.addSpacing(RELATED - h.spacing())     # icon to label
             h.addWidget(label, 1)
@@ -694,7 +691,6 @@ class Notices(QWidget):
                 button.setObjectName("link" if quiet else "")
                 button.clicked.connect(callback)
                 h.addWidget(button)
-            h.addStretch(1)
             self.box.addWidget(frame)
             self.items.append((kind, text, action))
         self.setVisible(bool(notices))

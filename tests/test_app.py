@@ -175,6 +175,15 @@ def test_empty_state_and_settings(app, make_org):
         cut = [lab.text()[:40] for lab in page.findChildren(QLabel)       # and no wrapped text has its lines cut off
                if lab.isVisible() and lab.wordWrap() and lab.height() < lab.heightForWidth(lab.width())]
         assert not cut, (key, cut)
+    long = "A long notice that has to wrap across the whole width of the window. " * 6
+    w.notices.show_notices([("warning", long, "Review", lambda: None), ("quiet", "Short.", None, None)])
+    QApplication.processEvents()        # notice text runs to its action button, or to the notice's edge
+    for frame in [w.notices.box.itemAt(i).widget() for i in range(w.notices.box.count())]:
+        lab = next(lab for lab in frame.findChildren(QLabel) if lab.text())     # not the icon
+        buttons = frame.findChildren(QPushButton)
+        edge = buttons[0].geometry().left() if buttons else frame.contentsRect().right()
+        assert edge - lab.geometry().right() <= 2 * GROUP, lab.text()[:40]
+        assert lab.height() >= lab.heightForWidth(lab.width())                    # no lines cut off
     _close(w, rec)
 
 
