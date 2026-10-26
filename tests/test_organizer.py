@@ -4,16 +4,16 @@ import sys
 import pymupdf
 import pytest
 
-from conftest import SAMPLE, EXPECT, alternate_streams, source_state
+from conftest import alternate_streams, source_state
 from classifile.organizer import read_and_analyze
 
 PLACEMENT = {
-    SAMPLE["S4"]: "Course A",
-    SAMPLE["S1"]: "Course B",
-    SAMPLE["S5"]: "Course A",
-    SAMPLE["S6"]: "Course B",
-    SAMPLE["S2"]: "C++",
-    SAMPLE["S3"]: "PHP",
+    "S4.pdf": "Course A",
+    "S1.pdf": "Course B",
+    "S5.pdf": "Course A",
+    "S6.pdf": "Course B",
+    "S2.pdf": "C++",
+    "S3.pdf": "PHP",
 }
 
 
@@ -35,15 +35,15 @@ def _file_all(org, ids):
         org.file(ids[name], cats[cat_name])
 
 
-def test_sources_preserved_through_full_import(samples, make_org):
-    before = source_state(samples)
-    atimes = {p.name: p.stat().st_atime_ns for p in samples.iterdir()}
+def test_sources_preserved_through_full_import(pdfs, make_org):
+    before = source_state(pdfs)
+    atimes = {p.name: p.stat().st_atime_ns for p in pdfs.iterdir()}
     org = make_org()
-    _file_all(org, _import_all(org, samples))
+    _file_all(org, _import_all(org, pdfs))
     org = make_org()
     org.startup()
-    assert source_state(samples) == before  # hash, size, mtime, attributes, streams, and the file listing
-    changed_atime = [n for n, t in atimes.items() if (samples / n).stat().st_atime_ns != t]
+    assert source_state(pdfs) == before  # hash, size, mtime, attributes, streams, and the file listing
+    changed_atime = [n for n, t in atimes.items() if (pdfs / n).stat().st_atime_ns != t]
     print(f"\nlast-access time changed (reported only, not asserted): {changed_atime or 'none'}")
 
 
@@ -64,39 +64,39 @@ def _snapshot(org):
     return cats, docs, inbox
 
 
-def test_persistence_across_reopen(samples, make_org):
+def test_persistence_across_reopen(pdfs, make_org):
     org = make_org()
-    ids = _import_all(org, samples)
-    org.file(ids[SAMPLE["S2"]], org.create_category("C++"))
+    ids = _import_all(org, pdfs)
+    org.file(ids["S2.pdf"], org.create_category("C++"))
     org.create_category("PHP")
     before = _snapshot(org)
-    analysis = org.catalog.analysis(ids[SAMPLE["S1"]])
+    analysis = org.catalog.analysis(ids["S1.pdf"])
     org = make_org()
     org.startup()
     assert _snapshot(org) == before
-    assert org.catalog.analysis(ids[SAMPLE["S1"]]) == analysis
+    assert org.catalog.analysis(ids["S1.pdf"]) == analysis
     assert org.catalog.schema_version == 12
     assert {d[2] for d in before[2]} == {"needs_decision"} and len(before[2]) == 5
 
 
-def test_duplicate_import_and_hash_is_not_identity(samples, make_org):
+def test_duplicate_import_and_hash_is_not_identity(pdfs, make_org):
     org = make_org()
-    ids = _import_all(org, samples)
-    path = samples / SAMPLE["S2"]
-    assert org.record(path, *read_and_analyze(path)) == (ids[SAMPLE["S2"]], "already imported")
+    ids = _import_all(org, pdfs)
+    path = pdfs / "S2.pdf"
+    assert org.record(path, *read_and_analyze(path)) == (ids["S2.pdf"], "already imported")
     assert len(set(ids.values())) == 6 and all(len(i) == 36 for i in ids.values())  # UUIDs, not hashes
 
 
-def test_import_checks(samples, make_org, tmp_path):
+def test_import_checks(pdfs, make_org, tmp_path):
     org = make_org()
     inside = org.output_root / "C++" / "copy.pdf"
     inside.parent.mkdir()
-    inside.write_bytes((samples / SAMPLE["S2"]).read_bytes())
+    inside.write_bytes((pdfs / "S2.pdf").read_bytes())
     assert org.check_import(inside) == "already in the output folder"
-    assert org.check_import(samples / "inventory.csv") is not None
+    assert org.check_import(pdfs / "inventory.csv") is not None
     # Output root inside the source's folder is refused.
     parent_source = tmp_path / "loose.pdf"
-    parent_source.write_bytes((samples / SAMPLE["S2"]).read_bytes())
+    parent_source.write_bytes((pdfs / "S2.pdf").read_bytes())
     assert org.check_import(parent_source) == "the output folder is inside this file's folder"
 
 
@@ -182,35 +182,35 @@ def test_catalog_migrates_v1_pdf_rows(tmp_path, monkeypatch):
     cat.close()
 
 
-def test_remove_refuses_filed_documents(samples, make_org):
+def test_remove_refuses_filed_documents(pdfs, make_org):
     org = make_org()
-    ids = _import_all(org, samples)
-    org.file(ids[SAMPLE["S2"]], org.create_category("C++"))
+    ids = _import_all(org, pdfs)
+    org.file(ids["S2.pdf"], org.create_category("C++"))
     with pytest.raises(ValueError):
-        org.remove([ids[SAMPLE["S2"]]])
-    assert org.catalog.document(ids[SAMPLE["S2"]])["status"] == "filed"
+        org.remove([ids["S2.pdf"]])
+    assert org.catalog.document(ids["S2.pdf"])["status"] == "filed"
 
 
-def test_preview_without_other_programs(samples, office):
+def test_preview_without_other_programs(pdfs, office):
     from classifile.pages import first_page_png
 
-    assert first_page_png(samples / SAMPLE["S2"]).startswith(b"\x89PNG")
+    assert first_page_png(pdfs / "S2.pdf").startswith(b"\x89PNG")
     assert first_page_png(office / "security.pptx") is None  # no stored thumbnail: the window shows a text card
 
 
-def test_locate_checks_the_content_hash(samples, make_org, tmp_path):
+def test_locate_checks_the_content_hash(pdfs, make_org, tmp_path):
     org = make_org()
     src = tmp_path / "a"
     src.mkdir()
     path = src / "notes.pdf"
-    path.write_bytes((samples / SAMPLE["S2"]).read_bytes())
+    path.write_bytes((pdfs / "S2.pdf").read_bytes())
     doc, _ = org.record(path, *read_and_analyze(path))
     moved = tmp_path / "b" / "renamed.pdf"
     moved.parent.mkdir()
     path.rename(moved)
     assert org.original_missing(doc)
     different = tmp_path / "b" / "other.pdf"
-    different.write_bytes((samples / SAMPLE["S1"]).read_bytes())
+    different.write_bytes((pdfs / "S1.pdf").read_bytes())
     with pytest.raises(ValueError, match="another version"):
         org.locate(doc, different)
     assert org.locate(doc, moved) == moved.resolve() and not org.original_missing(doc)
@@ -221,12 +221,12 @@ def test_locate_checks_the_content_hash(samples, make_org, tmp_path):
 
 
 # -- regrouping: move, rename, delete (decision record B5) -----------------------------------------------------------
-def _filed(samples, make_org, names=("S2", "S3")):
+def _filed(pdfs, make_org, names=("S2", "S3")):
     org = make_org()
-    ids = _import_all(org, samples)
+    ids = _import_all(org, pdfs)
     cat = org.create_category("First")
     for s in names:
-        org.file(ids[SAMPLE[s]], cat)
+        org.file(ids[f"{s}.pdf"], cat)
     return org, ids, cat
 
 
@@ -234,32 +234,32 @@ def _files(folder):
     return sorted(p.name for p in folder.iterdir()) if folder.is_dir() else None
 
 
-def test_move_replaces_the_primary_category(samples, make_org):
-    before = source_state(samples)
-    org, ids, first = _filed(samples, make_org)
-    doc, other = ids[SAMPLE["S2"]], ids[SAMPLE["S3"]]
+def test_move_replaces_the_primary_category(pdfs, make_org):
+    before = source_state(pdfs)
+    org, ids, first = _filed(pdfs, make_org)
+    doc, other = ids["S2.pdf"], ids["S3.pdf"]
     second = org.create_category("Second")
     assert org.move(doc, second) == "moved"
-    assert _files(org.output_root / "Second") == [SAMPLE["S2"]] and _files(org.output_root / "First") == [SAMPLE["S3"]]
+    assert _files(org.output_root / "Second") == ["S2.pdf"] and _files(org.output_root / "First") == ["S3.pdf"]
     assert [d["id"] for d in org.catalog.documents(second)] == [doc]
     assert [d["id"] for d in org.catalog.documents(first)] == [other]
     rows = org.catalog.all("SELECT category_id, provenance, status FROM memberships WHERE document_id = ? ORDER BY id", doc)
     assert [tuple(r) for r in rows] == [(first, "user-confirmed", "superseded"), (second, "user-corrected", "active")]
     assert org.move(doc, second) == "same" and org.catalog.pending_moves() == []
     assert org.move(doc, first) == "moved"                      # back again: the latest explicit choice wins
-    assert _files(org.output_root / "First") == sorted([SAMPLE["S2"], SAMPLE["S3"]])
+    assert _files(org.output_root / "First") == sorted(["S2.pdf", "S3.pdf"])
     with pytest.raises(ValueError):
-        org.move(ids[SAMPLE["S1"]], second)                     # a waiting document is filed, not moved
-    assert source_state(samples) == before                      # originals: untouched by any of it
+        org.move(ids["S1.pdf"], second)                     # a waiting document is filed, not moved
+    assert source_state(pdfs) == before                      # originals: untouched by any of it
 
 
-def test_move_leaves_an_edited_copy_in_place_and_never_overwrites(samples, make_org):
-    org, ids, first = _filed(samples, make_org, names=("S2",))
-    doc = ids[SAMPLE["S2"]]
-    old = org.output_root / "First" / SAMPLE["S2"]
+def test_move_leaves_an_edited_copy_in_place_and_never_overwrites(pdfs, make_org):
+    org, ids, first = _filed(pdfs, make_org, names=("S2",))
+    doc = ids["S2.pdf"]
+    old = org.output_root / "First" / "S2.pdf"
     old.write_bytes(old.read_bytes() + b"\n% my notes\n")       # the user edited the filed copy
     second = org.create_category("Second")
-    stranger = org.output_root / "Second" / SAMPLE["S2"]
+    stranger = org.output_root / "Second" / "S2.pdf"
     stranger.parent.mkdir()
     stranger.write_bytes(b"someone else's file")
     assert org.move(doc, second) == "edited"                    # made from the original, whose hash still matches
@@ -271,25 +271,25 @@ def test_move_leaves_an_edited_copy_in_place_and_never_overwrites(samples, make_
 
 
 @pytest.mark.parametrize("crash_at", ["after-copy", "after-switch"])
-def test_an_interrupted_move_finishes_at_startup(samples, make_org, crash_at):
+def test_an_interrupted_move_finishes_at_startup(pdfs, make_org, crash_at):
     from classifile.copies import engine
 
-    org, ids, first = _filed(samples, make_org, names=("S2",))
-    doc, second = ids[SAMPLE["S2"]], org.create_category("Second")
+    org, ids, first = _filed(pdfs, make_org, names=("S2",))
+    doc, second = ids["S2.pdf"], org.create_category("Second")
     with pytest.raises(engine._Crash):
         org.move(doc, second, _crash_at=crash_at)
-    assert _files(org.output_root / "First") == [SAMPLE["S2"]]  # the old copy is never gone before the end
+    assert _files(org.output_root / "First") == ["S2.pdf"]  # the old copy is never gone before the end
     org = make_org()                                            # the app starts again
     org.startup()
     assert org.catalog.pending_moves() == []
-    assert _files(org.output_root / "Second") == [SAMPLE["S2"]] and _files(org.output_root / "First") == []
+    assert _files(org.output_root / "Second") == ["S2.pdf"] and _files(org.output_root / "First") == []
     assert [d["id"] for d in org.catalog.documents(second)] == [doc] and org.catalog.documents(first) == []
     assert org.catalog.document(doc)["status"] == "filed"
 
 
-def test_rename_moves_only_the_apps_copies(samples, make_org):
-    before = source_state(samples)
-    org, ids, first = _filed(samples, make_org)
+def test_rename_moves_only_the_apps_copies(pdfs, make_org):
+    before = source_state(pdfs)
+    org, ids, first = _filed(pdfs, make_org)
     other = org.output_root / "First" / "my own notes.txt"
     other.write_text("not ClassiFile's")
     taken = org.create_category("Taken")
@@ -297,7 +297,7 @@ def test_rename_moves_only_the_apps_copies(samples, make_org):
         org.rename_category(first, " taken ")
     leftover = org.rename_category(first, "Renamed")
     assert leftover == [org.output_root / "First"] and _files(org.output_root / "First") == ["my own notes.txt"]
-    assert _files(org.output_root / "Renamed") == sorted([SAMPLE["S2"], SAMPLE["S3"]])
+    assert _files(org.output_root / "Renamed") == sorted(["S2.pdf", "S3.pdf"])
     cat = org.catalog.category(first)
     assert (cat["name"], cat["folder_name"]) == ("Renamed", "Renamed")
     assert all(d["copy_path"].startswith(str(org.output_root / "Renamed")) for d in org.catalog.documents(first))
@@ -306,30 +306,30 @@ def test_rename_moves_only_the_apps_copies(samples, make_org):
     other.unlink()
     assert org.rename_category(first, "Again") == [] and not (org.output_root / "Renamed").exists()
     assert not (org.output_root / "First").exists() or _files(org.output_root / "First") == []
-    assert source_state(samples) == before and taken
+    assert source_state(pdfs) == before and taken
 
 
-def test_an_interrupted_rename_finishes_at_startup(samples, make_org):
+def test_an_interrupted_rename_finishes_at_startup(pdfs, make_org):
     from classifile.copies import engine
 
-    org, ids, first = _filed(samples, make_org)
+    org, ids, first = _filed(pdfs, make_org)
     with pytest.raises(engine._Crash):
         org.rename_category(first, "Renamed", _crash_at="between-copy-and-retire")
     both = len(_files(org.output_root / "First")) + len(_files(org.output_root / "Renamed"))
     assert both == 3                                            # one document is in both folders; none is lost
     org = make_org()
     org.startup()
-    assert _files(org.output_root / "Renamed") == sorted([SAMPLE["S2"], SAMPLE["S3"]])
+    assert _files(org.output_root / "Renamed") == sorted(["S2.pdf", "S3.pdf"])
     assert not (org.output_root / "First").exists() and org.catalog.get_setting("renaming") == "[]"
     assert len(org.catalog.documents(first)) == 2
 
 
-def test_delete_only_an_empty_category_and_only_an_empty_folder(samples, make_org):
-    org, ids, first = _filed(samples, make_org, names=("S2",))
+def test_delete_only_an_empty_category_and_only_an_empty_folder(pdfs, make_org):
+    org, ids, first = _filed(pdfs, make_org, names=("S2",))
     with pytest.raises(ValueError):
         org.delete_category(first)                              # it holds a document
     second = org.create_category("Second")
-    org.move(ids[SAMPLE["S2"]], second)
+    org.move(ids["S2.pdf"], second)
     (org.output_root / "First" / "kept.txt").write_text("mine")
     assert org.delete_category(first) == org.output_root / "First"   # not empty: the folder stays
     assert [c["name"] for c in org.catalog.categories()] == ["Second"]
@@ -341,15 +341,15 @@ def test_delete_only_an_empty_category_and_only_an_empty_folder(samples, make_or
     assert org.delete_category(third) is None and not (org.output_root / "Third").exists()
 
 
-def test_also_belongs_to_makes_a_second_verified_copy(samples, make_org):
-    before = source_state(samples)
+def test_also_belongs_to_makes_a_second_verified_copy(pdfs, make_org):
+    before = source_state(pdfs)
     org = make_org()
-    ids = _import_all(org, samples)
+    ids = _import_all(org, pdfs)
     _file_all(org, ids)
-    name, other = SAMPLE["S2"], SAMPLE["S3"]
+    name, other = "S2.pdf", "S3.pdf"
     cats = {c["name"]: c["id"] for c in org.catalog.categories()}
     path = org.also(ids[name], cats["PHP"])
-    assert path == org.output_root / "PHP" / name and path.read_bytes() == (samples / name).read_bytes()
+    assert path == org.output_root / "PHP" / name and path.read_bytes() == (pdfs / name).read_bytes()
     assert (org.output_root / "C++" / name).exists()                   # the primary copy stays
     row = org.catalog.document_row(ids[name])
     assert (row["category"], row["provenance"]) == ("C++", "user-confirmed")   # the primary category is unchanged
@@ -374,4 +374,4 @@ def test_also_belongs_to_makes_a_second_verified_copy(samples, make_org):
     again = make_org()
     again.startup()
     assert again.catalog.secondary_categories(ids[name]) == []         # undone: no membership without a copy
-    assert source_state(samples) == before                             # the originals are never touched
+    assert source_state(pdfs) == before                             # the originals are never touched

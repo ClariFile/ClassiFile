@@ -490,6 +490,22 @@
   files, so an upgrade leaves no stale file.
 - **Not tested:** install, first run, OCR, filing, upgrade and uninstall of the setup file on any Windows (as rc.4).
 
+**The rest of the outside review (2026-10-26; after rc.7, not in a build yet)**
+- **Full width:** notice text (the "need your decision" line and the others) has no width cap any more; it runs to
+  its action button or to the notice's edge. `test_empty_state_and_settings` checks it.
+- **What matching learns from:** Settings, Advanced, says how many documents (and independent families) matching
+  can learn from, and how many are left out and why: family members filed apart (B4), or no readable words
+  (`Organizer.learning_audit`).
+- **Tests without the private samples:** the copy, recovery, move, rename, worker, inventory and window tests that
+  only need some documents use six generated PDFs (`pdfs` in `tests/conftest.py`). In a checkout without the
+  samples, 22 tests skip instead of 73; all of them check the samples' content (reader, OCR, analysis, labelling
+  windows). `tests/test_safety.py` adds the whole learning sequence on generated files.
+- **The evaluation the review asked for** (`tools.evaluate --outcomes --real-use`, on a catalog copy; output kept
+  local): every filed document is already learned, none is left out, and at Strict nothing is filed wrongly. The
+  failure that remains is missed automation (the user's category first, but not by the Strict lead), which only
+  a change of the frozen level (record 2.10) would change: the owner's decision, not a fix. Weighting families
+  equally (the review's hypothesis) has nothing to act on: the filed documents are almost all one per family.
+
 **1.0.0-rc.7 (2026-10-20): a release candidate, not verified on a clean machine**
 - rc.6 plus the review fixes below. `dist\ClassiFile-1.0.0-rc.7-setup.exe` (about 52 MB) and
   `dist\ClassiFile-1.0.0-rc.7-portable.zip` (about 72 MB), from the unchanged installer scripts.
@@ -530,7 +546,7 @@
 - Record 2.12: installer packaging is no longer deferred.
 - Tests: `tests/test_safety.py` runs the copy, recovery and learning cases on generated documents, so they run
   in every checkout. The older tests that need the private samples still skip without them (review finding 12,
-  partly done).
+  partly done; finished 2026-10-26, above).
 
 **1.0.0-rc.6 (2026-10-20): a release candidate, not verified on a clean machine**
 - rc.5 plus the polish below. `dist\ClassiFile-1.0.0-rc.6-setup.exe` (about 52 MB) and

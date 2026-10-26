@@ -3,34 +3,34 @@ import csv
 import pytest
 
 from tools import inventory, split
-from conftest import EXPECT, SAMPLE  # noqa: E402
+from conftest import SAMPLE  # noqa: E402
 
 
-def test_inventory_is_read_only_and_never_overwrites(samples, tmp_path):
-    (samples / "sub").mkdir()
-    (samples / "sub" / "dup.pdf").write_bytes((samples / SAMPLE["S2"]).read_bytes())
-    (samples / "notes.txt").write_text("x")
-    before = {p: (p.stat().st_mtime_ns, p.stat().st_size) for p in samples.rglob("*")}
+def test_inventory_is_read_only_and_never_overwrites(pdfs, tmp_path):
+    (pdfs / "sub").mkdir()
+    (pdfs / "sub" / "dup.pdf").write_bytes((pdfs / "S2.pdf").read_bytes())
+    (pdfs / "notes.txt").write_text("x")
+    before = {p: (p.stat().st_mtime_ns, p.stat().st_size) for p in pdfs.rglob("*")}
 
     out = tmp_path / "out" / "inv.csv"
-    inventory.main([str(samples), "--out", str(out)])
-    assert {p: (p.stat().st_mtime_ns, p.stat().st_size) for p in samples.rglob("*")} == before
+    inventory.main([str(pdfs), "--out", str(out)])
+    assert {p: (p.stat().st_mtime_ns, p.stat().st_size) for p in pdfs.rglob("*")} == before
 
     with open(out, newline="", encoding="utf-8-sig") as f:
         rows = {r["relative_path"]: r for r in csv.DictReader(f)}
     assert list(next(iter(rows.values()))) == inventory.COLUMNS
-    assert rows[SAMPLE["S2"]]["pages"] == "17"
-    assert rows[SAMPLE["S4"]]["pages"] == "25"
+    assert rows["S2.pdf"]["pages"] == "3"
+    assert rows["S4.pdf"]["pages"] == "3"
     assert rows["notes.txt"]["pages"] == ""
-    assert rows[SAMPLE["S2"]]["exact_dup_group"] == rows["sub/dup.pdf"]["exact_dup_group"] != ""
-    assert rows[SAMPLE["S1"]]["exact_dup_group"] == ""
-    assert rows[SAMPLE["S2"]]["near_dup_hint"] == ""  # identical bytes are not "near" duplicates
+    assert rows["S2.pdf"]["exact_dup_group"] == rows["sub/dup.pdf"]["exact_dup_group"] != ""
+    assert rows["S1.pdf"]["exact_dup_group"] == ""
+    assert rows["S2.pdf"]["near_dup_hint"] == ""  # identical bytes are not "near" duplicates
 
     with pytest.raises(SystemExit):  # existing output is never overwritten
-        inventory.main([str(samples), "--out", str(out)])
+        inventory.main([str(pdfs), "--out", str(out)])
     with pytest.raises(SystemExit):  # never writes into the scanned folder
-        inventory.main([str(samples), "--out", str(samples / "inv.csv")])
-    assert not (samples / "inv.csv").exists()
+        inventory.main([str(pdfs), "--out", str(pdfs / "inv.csv")])
+    assert not (pdfs / "inv.csv").exists()
 
 
 def _rows(n_families, labels=("A", "B")):

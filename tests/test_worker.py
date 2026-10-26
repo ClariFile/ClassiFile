@@ -3,11 +3,10 @@ import shutil
 
 from worker_helpers import misbehave
 from classifile.worker import Worker
-from conftest import EXPECT, SAMPLE  # noqa: E402
 
 
-def test_timeouts_crashes_and_errors_are_operational_failures(samples, tmp_path):
-    src = samples / SAMPLE["S2"]
+def test_timeouts_crashes_and_errors_are_operational_failures(pdfs, tmp_path):
+    src = pdfs / "S2.pdf"
     paths = {}
     for kind in ("hang", "crash", "raise", "fine"):
         paths[kind] = tmp_path / f"{kind}.pdf"

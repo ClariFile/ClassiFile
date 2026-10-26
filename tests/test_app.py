@@ -256,23 +256,23 @@ def test_decision_page_two_step_filing_toast_and_details(app, samples, make_org)
     _close(w, rec)
 
 
-def test_group_item_files_only_the_listed_documents(app, samples, make_org, tmp_path):
-    data = (samples / SAMPLE["S2"]).read_bytes()
+def test_group_item_files_only_the_listed_documents(app, pdfs, make_org, tmp_path):
+    data = (pdfs / "S2.pdf").read_bytes()
     src = tmp_path / "src"
     src.mkdir()
-    stem = SAMPLE["S2"].rsplit(".", 1)[0]
-    first, second, later = src / SAMPLE["S2"], src / f"{stem} (handout).pdf", src / f"{stem} (again).pdf"
+    stem = "S2.pdf".rsplit(".", 1)[0]
+    first, second, later = src / "S2.pdf", src / f"{stem} (handout).pdf", src / f"{stem} (again).pdf"
     first.write_bytes(data)
     second.write_bytes(data + b"\n% another copy\n")
     later.write_bytes(data + b"\n% a third copy\n")
-    w, rec = _window(make_org, [first, second, samples / SAMPLE["S1"]])
+    w, rec = _window(make_org, [first, second, pdfs / "S1.pdf"])
     _pump(app, lambda: not w.inflight)
     w.review()
     group = _item(w, "2 documents with the same suggestion")
-    assert group.group and group.names.isVisible() and SAMPLE["S2"] in group.names.text()
+    assert group.group and group.names.isVisible() and "S2.pdf" in group.names.text()
     assert second.name in group.names.text() and len(w.decision.items) == 2
     pages = group.details.menu().actions()                          # Details: each document of the group
-    assert not group.details.isHidden() and sorted(a.text() for a in pages) == sorted([SAMPLE["S2"], second.name])
+    assert not group.details.isHidden() and sorted(a.text() for a in pages) == sorted(["S2.pdf", second.name])
     pages[1].trigger()
     assert w.details.isVisible() and w.details.doc_id == w.inspected == group.ids[1]
     w.close_details()
@@ -282,9 +282,9 @@ def test_group_item_files_only_the_listed_documents(app, samples, make_org, tmp_
     group.primary.click()
     _pump(app, lambda: not w.filing)
     cat = w.org.catalog.category_by_key(best.casefold())
-    assert sorted(d["file_name"] for d in w.org.catalog.documents(cat["id"])) == sorted([second.name, SAMPLE["S2"]])
+    assert sorted(d["file_name"] for d in w.org.catalog.documents(cat["id"])) == sorted([second.name, "S2.pdf"])
     assert w.toast.label.text() == f"Filed 2 documents in {best}"
-    assert [d["file_name"] for d in w.waiting()] == [SAMPLE["S1"]]
+    assert [d["file_name"] for d in w.waiting()] == ["S1.pdf"]
     w.import_paths([str(later)])                                    # no rule was made: the next one still asks
     _pump(app, lambda: not w.inflight)
     assert w.org.catalog.document(_doc(w, later.name))["status"] == "needs_decision"
@@ -292,12 +292,12 @@ def test_group_item_files_only_the_listed_documents(app, samples, make_org, tmp_
     _close(w, rec)
 
 
-def test_missing_original_on_decision_page_and_locate(app, samples, make_org, tmp_path):
+def test_missing_original_on_decision_page_and_locate(app, pdfs, make_org, tmp_path):
     src, moved = tmp_path / "Downloads", tmp_path / "Documents"
     src.mkdir()
     moved.mkdir()
     original = src / "handout 3,2024.pdf"
-    original.write_bytes((samples / SAMPLE["S2"]).read_bytes())
+    original.write_bytes((pdfs / "S2.pdf").read_bytes())
     w, rec = _window(make_org, [original])
     _pump(app, lambda: not w.inflight)
     original.rename(moved / original.name)                         # the user moved it
@@ -313,7 +313,7 @@ def test_missing_original_on_decision_page_and_locate(app, samples, make_org, tm
     assert w.org.catalog.categories() == [] and not w.filing
 
     other = moved / "other.pdf"                                    # a different file: refused, with advice
-    other.write_bytes((samples / SAMPLE["S1"]).read_bytes())
+    other.write_bytes((pdfs / "S1.pdf").read_bytes())
     w.pick_file = lambda name, start: str(other)
     item.primary.click()
     assert any("Import it as a new document instead" in n for n in _notices(w))
@@ -333,10 +333,10 @@ def test_missing_original_on_decision_page_and_locate(app, samples, make_org, tm
     _close(w, rec)
 
 
-def test_failed_filing_leaves_nothing_half_done_and_the_error_stays(app, samples, make_org, tmp_path):
+def test_failed_filing_leaves_nothing_half_done_and_the_error_stays(app, pdfs, make_org, tmp_path):
     (tmp_path / "src").mkdir()
     original = tmp_path / "src" / "handout 3,2024.pdf"
-    original.write_bytes((samples / SAMPLE["S2"]).read_bytes())
+    original.write_bytes((pdfs / "S2.pdf").read_bytes())
     w, rec = _window(make_org, [original])
     _pump(app, lambda: not w.inflight)
     w.review()
@@ -372,17 +372,17 @@ def test_failed_filing_leaves_nothing_half_done_and_the_error_stays(app, samples
     _close(w, rec)
 
 
-def test_bulk_bar_context_menu_keyboard_and_search(app, samples, make_org):
-    names = [SAMPLE["S2"], SAMPLE["S1"], SAMPLE["S4"]]
-    w, rec = _window(make_org, [samples / n for n in names])
+def test_bulk_bar_context_menu_keyboard_and_search(app, pdfs, make_org):
+    names = ["S2.pdf", "S1.pdf", "S4.pdf"]
+    w, rec = _window(make_org, [pdfs / n for n in names])
     _pump(app, lambda: not w.inflight)
     assert sorted(_rows(w)) == sorted(names) and w.page_title.full == "All documents · 3"
     assert {_cell(w, i, 2) for i in range(3)} == {"Waiting"}       # icon plus a word
-    w.search.setText("l-2")                                        # search filters by name
-    assert _rows(w) == [SAMPLE["S4"]]
+    w.search.setText("s4")                                        # search filters by name
+    assert _rows(w) == ["S4.pdf"]
     w.search.clear()
 
-    w.select_docs([_doc(w, SAMPLE["S2"]), _doc(w, SAMPLE["S1"])])
+    w.select_docs([_doc(w, "S2.pdf"), _doc(w, "S1.pdf")])
     assert w.bulk.isVisible() and w.bulk_count.text() == "2 selected"
     actions = [a.text() for a in w.context_menu(w.selected_ids()).actions()]
     assert actions == ["Remove from ClassiFile"]
@@ -403,12 +403,12 @@ def test_bulk_bar_context_menu_keyboard_and_search(app, samples, make_org):
     assert len(w.org.catalog.documents(cat["id"])) == 2 and _cats(w) == {"Networking": "2"}
     assert {_cell(w, i, 2) for i in range(3)} == {"Approved", "Waiting"}   # filed by the user's choice
 
-    filed = _doc(w, SAMPLE["S2"])
+    filed = _doc(w, "S2.pdf")
     w.select_docs([filed])
     assert not w.bulk.isVisible()
     actions = [a.text() for a in w.context_menu([filed]).actions()]
     assert actions == ["Open", "Show in folder", "Details", "Also belongs to…", "Move to…"]  # never removed here
-    waiting = _doc(w, SAMPLE["S4"])
+    waiting = _doc(w, "S4.pdf")
     actions = [a.text() for a in w.context_menu([waiting]).actions()]
     assert actions == ["Details", "Remove from ClassiFile"]
     w.select_docs([waiting])
@@ -417,17 +417,17 @@ def test_bulk_bar_context_menu_keyboard_and_search(app, samples, make_org):
     _close(w, rec)
 
 
-def test_remove_waiting_documents(app, samples, make_org):
-    before = source_state(samples)
-    w, rec = _window(make_org, [samples / SAMPLE["S2"], samples / SAMPLE["S1"]])
+def test_remove_waiting_documents(app, pdfs, make_org):
+    before = source_state(pdfs)
+    w, rec = _window(make_org, [pdfs / "S2.pdf", pdfs / "S1.pdf"])
     _pump(app, lambda: not w.inflight)
-    gone = _doc(w, SAMPLE["S2"])
+    gone = _doc(w, "S2.pdf")
     w.select_docs([gone])
     QTest.keyClick(w.table, Qt.Key_Delete)                         # Delete removes, after the confirmation
     assert rec.removes == 1 and "weren't touched" in w.toast.label.text()
     assert w.org.catalog.document(gone) is None and w.org.catalog.one("SELECT COUNT(*) FROM extractions")[0] == 1
-    assert source_state(samples) == before                         # originals untouched
-    w.import_paths([str(samples / SAMPLE["S2"])])                     # importing again brings it back
+    assert source_state(pdfs) == before                         # originals untouched
+    w.import_paths([str(pdfs / "S2.pdf")])                     # importing again brings it back
     _pump(app, lambda: not w.inflight)
     w.select_docs([d["id"] for d in w.waiting()])
     w.bulk_remove.click()                                          # multi-select remove
@@ -436,10 +436,10 @@ def test_remove_waiting_documents(app, samples, make_org):
     _close(w, rec)
 
 
-def test_close_notice_and_its_setting(app, samples, make_org):
-    w, rec = _window(make_org, [samples / SAMPLE["S2"], samples / SAMPLE["S1"]])
+def test_close_notice_and_its_setting(app, pdfs, make_org):
+    w, rec = _window(make_org, [pdfs / "S2.pdf", pdfs / "S1.pdf"])
     _pump(app, lambda: not w.inflight)
-    w.file_docs([_doc(w, SAMPLE["S2"])], "Programming")
+    w.file_docs([_doc(w, "S2.pdf")], "Programming")
     _pump(app, lambda: not w.filing)
     rec.close_answer = ("back", False)
     w.close()
@@ -466,44 +466,44 @@ def _drag(w, paths, kind):
         w.dropEvent(QDropEvent(QPoint(10, 10), Qt.CopyAction, mime, Qt.LeftButton, Qt.NoModifier))
 
 
-def test_drop_overlay(app, samples, make_org, tmp_path):
+def test_drop_overlay(app, pdfs, make_org, tmp_path):
     w, rec = _window(make_org)
     notes = tmp_path / "notes.txt"
     notes.write_text("x")
-    _drag(w, [samples / SAMPLE["S2"], notes], "enter")
+    _drag(w, [pdfs / "S2.pdf", notes], "enter")
     assert w.overlay.isVisible() and w.overlay.title.text() == "Drop files here to import"
     assert "PDF, PPTX, DOCX, ODT" in w.overlay.formats.text() and "notes.txt" in w.overlay.skipped.text()
     w.dragLeaveEvent(QDragLeaveEvent())
     assert not w.overlay.isVisible()
-    _drag(w, [samples / SAMPLE["S2"]], "enter")
+    _drag(w, [pdfs / "S2.pdf"], "enter")
     assert not w.overlay.skipped.isVisible()
-    _drag(w, [samples / SAMPLE["S2"]], "drop")
+    _drag(w, [pdfs / "S2.pdf"], "drop")
     assert not w.overlay.isVisible() and w.inflight
-    assert _rows(w) == [SAMPLE["S2"]] and _cell(w, 0, 2) in ("Reading", "Waiting")
+    assert _rows(w) == ["S2.pdf"] and _cell(w, 0, 2) in ("Reading", "Waiting")
     _pump(app, lambda: not w.inflight)
-    assert _rows(w) == [SAMPLE["S2"]]
+    assert _rows(w) == ["S2.pdf"]
     _close(w, rec)
 
 
-def test_details_preview_and_expand(app, samples, office, make_org):
-    w, rec = _window(make_org, [samples / SAMPLE["S4"], office / "security.pptx"])
+def test_details_preview_and_expand(app, pdfs, office, make_org):
+    w, rec = _window(make_org, [pdfs / "S4.pdf", office / "security.pptx"])
     _pump(app, lambda: not w.inflight)
-    w.select_docs([_doc(w, SAMPLE["S4"])])
+    w.select_docs([_doc(w, "S4.pdf")])
     w.details_toggle.click()
     p = w.details.preview
     _drawn(app, p)
     assert w.details.isVisible() and not p.image.pixmap().isNull()
-    assert p.page_label.text() == "Page 1 of 25" and not p.prev.isEnabled()
+    assert p.page_label.text() == "Page 1 of 3" and not p.prev.isEnabled()
     p.next.click()
-    assert p.page_label.text() == "Page 2 of 25" and p.prev.isEnabled()      # at once, before the picture
+    assert p.page_label.text() == "Page 2 of 3" and p.prev.isEnabled()      # at once, before the picture
     _drawn(app, p)
     assert not w.details.open_button.isVisible()                   # nothing to open before filing
     p.expand.click()
     big = w.preview_overlay
     _drawn(app, big.preview)
-    assert big.isVisible() and big.preview.page_label.text() == "Page 2 of 25"
+    assert big.isVisible() and big.preview.page_label.text() == "Page 2 of 3"
     QTest.keyClick(big, Qt.Key_PageDown)
-    assert big.preview.page_label.text() == "Page 3 of 25"
+    assert big.preview.page_label.text() == "Page 3 of 3"
     QTest.keyClick(big, Qt.Key_Escape)
     assert not big.isVisible() and w.details.isVisible()
     w.select_docs([_doc(w, "security.pptx")])                      # no stored thumbnail: a plain sentence
@@ -514,8 +514,8 @@ def test_details_preview_and_expand(app, samples, office, make_org):
     _close(w, rec)
 
 
-def test_change_output_folder_moves_copies(app, samples, make_org, tmp_path):
-    w, rec = _window(make_org, [samples / SAMPLE["S2"], samples / SAMPLE["S1"]])
+def test_change_output_folder_moves_copies(app, pdfs, make_org, tmp_path):
+    w, rec = _window(make_org, [pdfs / "S2.pdf", pdfs / "S1.pdf"])
     _pump(app, lambda: not w.inflight)
     w.file_docs([d["id"] for d in w.waiting()], "Courses")
     _pump(app, lambda: not w.filing)
@@ -530,7 +530,7 @@ def test_change_output_folder_moves_copies(app, samples, make_org, tmp_path):
     w.change_root.click()
     assert w.org.output_root == new_root.resolve()
     assert edited.exists() and not old[1].exists()                 # edited copy stays; the other moved
-    assert (new_root / "Courses" / old[1].name).read_bytes() == (samples / old[1].name).read_bytes()
+    assert (new_root / "Courses" / old[1].name).read_bytes() == (pdfs / old[1].name).read_bytes()
     assert "Moved 1 copy" in w.toast.label.text() and "1 edited copy stayed" in w.toast.label.text()
     assert str(new_root.resolve()) in w.root_label.text().replace("​", "")
     assert sorted(c["status"] for c in w.org.catalog.copies()) == ["edited", "moved", "published"]
@@ -554,15 +554,15 @@ def test_new_category_button_and_empty_hint(app, make_org):
     _close(w, rec)
 
 
-def test_responsive_breakpoints_and_elided_names(app, samples, make_org):
-    w, rec = _window(make_org, [samples / SAMPLE["S5"]])
+def test_responsive_breakpoints_and_elided_names(app, pdfs, make_org):
+    w, rec = _window(make_org, [pdfs / "S5.pdf"])
     _pump(app, lambda: not w.inflight)
     w.resize(400, 300)
     _pump(app, lambda: (w.width(), w.height()) == (900, 560))      # never smaller than the minimum
     assert w.sidebar.isHidden() and w.menu_button.isVisible()      # narrower than 1024: a menu button
     w.menu_button.click()
     assert w.sidebar.isVisible()
-    w.select_docs([_doc(w, SAMPLE["S5"])])
+    w.select_docs([_doc(w, "S5.pdf")])
     w.set_details_open(True)
     assert w.details.isVisible() and w.details.parent() is w.workspace   # over the list
     assert w.table.isColumnHidden(3)                               # no date column when narrow
@@ -583,16 +583,16 @@ def test_responsive_breakpoints_and_elided_names(app, samples, make_org):
     assert all(os.path.isfile(c) for c in (CHEVRON_DOWN, CHEVRON_RIGHT)) and "chevron-down" in w.styleSheet()
     w.page_title.resize(60, 20)
     assert w.page_title.text().endswith("…") and w.page_title.toolTip() == "All documents · 1"
-    assert _cell(w, 0, 0, Qt.ToolTipRole) == SAMPLE["S5"]
+    assert _cell(w, 0, 0, Qt.ToolTipRole) == "S5.pdf"
     _close(w, rec)
 
 
-def test_details_open_beside_the_decision_page(app, samples, make_org):
-    w, rec = _window(make_org, [samples / SAMPLE["S4"]])
+def test_details_open_beside_the_decision_page(app, pdfs, make_org):
+    w, rec = _window(make_org, [pdfs / "S4.pdf"])
     _pump(app, lambda: not w.inflight)
     w.resize(1024, 700)
     w.review()
-    item = _item(w, SAMPLE["S4"])
+    item = _item(w, "S4.pdf")
     item.details.click()                                           # too narrow for both: over the list, a way back
     assert w.details.parent() is w.workspace and w.details.back.isVisible() and item.inspected
     assert (w.details.category.caption.text(), w.details.category.value.text()) == ("Suggested new category", item.best)
@@ -600,7 +600,7 @@ def test_details_open_beside_the_decision_page(app, samples, make_org):
     assert not w.details.isVisible() and not item.inspected and item.hasFocus()   # back on the row it looked at
     w.resize(1920, 1000)                                           # test fonts are wide: room for both
     w.review()
-    item = _item(w, SAMPLE["S4"])
+    item = _item(w, "S4.pdf")
     right = lambda: item.more_menu.mapTo(item, item.more_menu.rect().topRight()).x()
     _pump(app, lambda: item.width() > 1040 and right() >= item.width() - 2 * RELATED)
     assert item.width() >= w.decision.width() - 2 * GROUP - 2 * RELATED   # the whole width, on wide screens too
@@ -614,8 +614,8 @@ def test_details_open_beside_the_decision_page(app, samples, make_org):
     assert not w.details.isVisible() and not item.details.isChecked() and w.inspected is None
     QTest.mouseClick(item.title, Qt.LeftButton)                    # a click on the row inspects it, files nothing
     assert w.view[0] == DECIDE and w.stack.currentWidget() is w.decision   # no jump to the document list
-    assert w.details.isVisible() and w.details.title.full == SAMPLE["S4"] and not w.filing
-    assert w.details.preview.page_label.text() == "Page 1 of 25"
+    assert w.details.isVisible() and w.details.title.full == "S4.pdf" and not w.filing
+    assert w.details.preview.page_label.text() == "Page 1 of 3"
     assert w.details.parent() is w.content                         # beside the rows
     assert w.slide.state() == w.slide.State.Running or reduced_motion()   # it slides in from the right edge
     _pump(app, lambda: w.slide.state() != w.slide.State.Running)
@@ -630,10 +630,10 @@ def test_details_open_beside_the_decision_page(app, samples, make_org):
     _close(w, rec)
 
 
-def test_details_width_does_not_depend_on_scrolling(app, samples, make_org):
-    w, rec = _window(make_org, [samples / SAMPLE["S4"]])
+def test_details_width_does_not_depend_on_scrolling(app, pdfs, make_org):
+    w, rec = _window(make_org, [pdfs / "S4.pdf"])
     _pump(app, lambda: not w.inflight)
-    w.select_docs([_doc(w, SAMPLE["S4"])])
+    w.select_docs([_doc(w, "S4.pdf")])
     w.set_details_open(True)
     viewport, widths = w.details.scroll.viewport(), set()
     for height in (1000, 560):                                     # everything fits; an opened section must scroll
@@ -649,12 +649,12 @@ def test_details_width_does_not_depend_on_scrolling(app, samples, make_org):
     _close(w, rec)
 
 
-def test_no_stray_windows_appear(app, samples, make_org, tmp_path):
+def test_no_stray_windows_appear(app, pdfs, make_org, tmp_path):
     from PySide6.QtCore import QEvent, QObject
 
     (tmp_path / "src").mkdir()
-    twin = tmp_path / "src" / (SAMPLE["S2"].rsplit(".", 1)[0] + " (handout).pdf")  # groups with S2
-    twin.write_bytes((samples / SAMPLE["S2"]).read_bytes() + b"\n% another copy\n")
+    twin = tmp_path / "src" / ("S2.pdf".rsplit(".", 1)[0] + " (handout).pdf")  # groups with S2
+    twin.write_bytes((pdfs / "S2.pdf").read_bytes() + b"\n% another copy\n")
 
     class Watch(QObject):
         """Records every widget shown as a window of its own (a widget shown before it has a parent is one)."""
@@ -670,16 +670,16 @@ def test_no_stray_windows_appear(app, samples, make_org, tmp_path):
     watch = Watch()
     app.installEventFilter(watch)
     try:
-        w, rec = _window(make_org, [samples / SAMPLE["S2"], samples / SAMPLE["S5"], twin])
+        w, rec = _window(make_org, [pdfs / "S2.pdf", pdfs / "S5.pdf", twin])
         _pump(app, lambda: not w.inflight)
         w.review()
         assert any(i.group for i in w.decision.items)
         for item in list(w.decision.items):
             item.choose.click()
-        _item(w, SAMPLE["S5"]).details.click()
-        w.leave_pending([_doc(w, SAMPLE["S5"])])                   # any action redraws the items
+        _item(w, "S5.pdf").details.click()
+        w.leave_pending([_doc(w, "S5.pdf")])                   # any action redraws the items
         w.show_view(ALL)
-        w.select_docs([_doc(w, SAMPLE["S5"])])
+        w.select_docs([_doc(w, "S5.pdf")])
         w.set_details_open(True)
         w.select_docs([d["id"] for d in w.waiting()])              # the bar for several documents
         w.bulk_file.click()                                        # the picker's own window: the only other one
@@ -692,10 +692,10 @@ def test_no_stray_windows_appear(app, samples, make_org, tmp_path):
     _close(w, rec)
 
 
-def test_the_decision_page_stays_where_it_is_after_filing(app, samples, make_org):
+def test_the_decision_page_stays_where_it_is_after_filing(app, pdfs, make_org):
     from PySide6.QtWidgets import QScrollArea
 
-    w, rec = _window(make_org, [samples / SAMPLE[s] for s in ("S1", "S2", "S3", "S4", "S5", "S6")])
+    w, rec = _window(make_org, [pdfs / f"{s}.pdf" for s in ("S1", "S2", "S3", "S4", "S5", "S6")])
     _pump(app, lambda: not w.inflight)
     w.resize(1280, 600)                                            # short: the items need scrolling
     w.review()
@@ -758,38 +758,38 @@ def test_category_picker_rows_and_keys(app):
     assert p.current() == ("existing", "a", "Networks")           # typing chose the first; down, down, up
 
 
-def test_no_one_click_creation_once_categories_exist(app, samples, make_org):
-    w, rec = _window(make_org, [samples / SAMPLE[s] for s in ("S1", "S3", "S4")])
+def test_no_one_click_creation_once_categories_exist(app, pdfs, make_org):
+    w, rec = _window(make_org, [pdfs / f"{s}.pdf" for s in ("S1", "S3", "S4")])
     _pump(app, lambda: not w.inflight)
     w.review()
     assert {i.primary.text() for i in w.decision.items} == {"Create && file"}    # no categories yet
-    first = _item(w, SAMPLE["S4"])
+    first = _item(w, "S4.pdf")
     best = first.best
     first.primary.click()
     _pump(app, lambda: not w.filing)
     assert [c["name"] for c in w.org.catalog.categories()] == [best]
     for item in w.decision.items:                                  # from now on a new category takes a choice
         assert item.primary.text() == "Choose category…" and not item.choose.isVisible() and item.best
-    item = _item(w, SAMPLE["S3"])
+    item = _item(w, "S3.pdf")
     QTest.keyClick(item, Qt.Key_Return)                            # Enter on the item only opens the choices
     assert item.expanded.isVisible() and len(w.org.catalog.categories()) == 1 and not w.filing
     assert _rows_of(item.picker)[0] == f"{best} · 1" and _rows_of(item.picker)[1].startswith(f"New: {item.best}")
     w.org.create_category(item.best)                               # the top suggestion names an existing category
     w.refresh()
-    item = _item(w, SAMPLE["S3"])
+    item = _item(w, "S3.pdf")
     assert item.primary.text() == f"File in {item.best}" and item.choose.isVisible()
     assert _said(item) == f"Suggested category: {item.best}"
     item.primary.click()
     _pump(app, lambda: not w.filing)
-    assert w.org.catalog.document(_doc(w, SAMPLE["S3"]))["status"] == "filed"
+    assert w.org.catalog.document(_doc(w, "S3.pdf"))["status"] == "filed"
     _close(w, rec)
 
 
-def test_none_of_these_fit_records_the_rejection(app, samples, make_org):
-    w, rec = _window(make_org, [samples / SAMPLE["S1"], samples / SAMPLE["S4"]])
+def test_none_of_these_fit_records_the_rejection(app, pdfs, make_org):
+    w, rec = _window(make_org, [pdfs / "S1.pdf", pdfs / "S4.pdf"])
     _pump(app, lambda: not w.inflight)
     w.review()
-    item = _item(w, SAMPLE["S1"])
+    item = _item(w, "S1.pdf")
     item.choose.click()
     assert item.none_fit.isVisible() and item.none_fit.text() == "None of these fit — type my own"
     assert not item.reasons.isVisible()
@@ -810,8 +810,8 @@ def test_none_of_these_fit_records_the_rejection(app, samples, make_org):
     cat = w.org.catalog.category_by_key("networks")
     rows = [tuple(r) for r in w.org.catalog.all(
         "SELECT document_id, analyzer_version, reason, category_id FROM suggestion_feedback")]
-    assert rows == [(_doc(w, SAMPLE["S1"]), "rules-8", "too narrow", cat["id"])]
-    other = _item(w, SAMPLE["S4"])                                               # no reason given; no rejection
+    assert rows == [(_doc(w, "S1.pdf"), "rules-8", "too narrow", cat["id"])]
+    other = _item(w, "S4.pdf")                                               # no reason given; no rejection
     other.primary.click()
     _pick(other.picker, "net")
     other.confirm.click()
@@ -840,10 +840,10 @@ def test_only_one_suggestion_is_said(app, make_org, tmp_path):
     _close(w, rec)
 
 
-def test_move_rename_and_delete_from_the_window(app, samples, make_org):
-    before = source_state(samples)
-    names = [SAMPLE["S1"], SAMPLE["S2"], SAMPLE["S3"]]
-    w, rec = _window(make_org, [samples / n for n in names])
+def test_move_rename_and_delete_from_the_window(app, pdfs, make_org):
+    before = source_state(pdfs)
+    names = ["S1.pdf", "S2.pdf", "S3.pdf"]
+    w, rec = _window(make_org, [pdfs / n for n in names])
     _pump(app, lambda: not w.inflight)
     ids = [_doc(w, n) for n in names]
     for i, cat in zip(ids, ("One", "Two", "Three")):               # one category per document, as it happened
@@ -893,12 +893,12 @@ def test_move_rename_and_delete_from_the_window(app, samples, make_org):
     w.category_menu(unused).actions()[1].trigger()
     assert "Unused" not in [c["name"] for c in w.org.catalog.categories()]
     assert w.toast.label.text() == "Deleted the category."
-    assert source_state(samples) == before                         # the originals: untouched throughout
+    assert source_state(pdfs) == before                         # the originals: untouched throughout
     _close(w, rec)
 
 
-def test_sidebar_keeps_its_place_and_details_stay_on(app, samples, make_org):
-    w, rec = _window(make_org, [samples / SAMPLE["S4"], samples / SAMPLE["S5"]])
+def test_sidebar_keeps_its_place_and_details_stay_on(app, pdfs, make_org):
+    w, rec = _window(make_org, [pdfs / "S4.pdf", pdfs / "S5.pdf"])
     _pump(app, lambda: not w.inflight)
     for n in range(40):
         w.org.create_category(f"Category {n:02d}")
@@ -920,13 +920,13 @@ def test_sidebar_keeps_its_place_and_details_stay_on(app, samples, make_org):
     w.details_toggle.click()                                       # nothing selected: it opens and says what to do
     assert w.details.isVisible() and w.details.title.full == "Details"
     assert "Select a document" in w.details.hint.text() and not w.details.locations_section.isVisible()
-    w.select_docs([_doc(w, SAMPLE["S4"])])
+    w.select_docs([_doc(w, "S4.pdf")])
     _drawn(app, w.details.preview)
-    assert w.details.title.full == SAMPLE["S4"] and w.details.preview.page_label.text() == "Page 1 of 25"
+    assert w.details.title.full == "S4.pdf" and w.details.preview.page_label.text() == "Page 1 of 3"
     assert w.details.locations_section.isVisible()
     w.show_view(RECENT)                                            # still on, on another page
-    w.select_docs([_doc(w, SAMPLE["S5"])])
-    assert w.details.isVisible() and w.details.title.full == SAMPLE["S5"]
+    w.select_docs([_doc(w, "S5.pdf")])
+    assert w.details.isVisible() and w.details.title.full == "S5.pdf"
     w.select_docs([])
     assert w.details.isVisible() and w.details.title.full == "Details"
     w.details_toggle.click()
@@ -934,14 +934,14 @@ def test_sidebar_keeps_its_place_and_details_stay_on(app, samples, make_org):
     _close(w, rec)
 
 
-def test_a_card_in_use_survives_background_reads(app, samples, make_org):
+def test_a_card_in_use_survives_background_reads(app, pdfs, make_org):
     from classifile.app import decision
 
-    w, rec = _window(make_org, [samples / SAMPLE["S1"], samples / SAMPLE["S2"]])
+    w, rec = _window(make_org, [pdfs / "S1.pdf", pdfs / "S2.pdf"])
     _pump(app, lambda: not w.inflight)
     w.org.create_category("Elsewhere")
     w.review()
-    item = _item(w, SAMPLE["S1"])
+    item = _item(w, "S1.pdf")
     item.primary.click()                                           # the choices open; something is typed
     item.picker.field.setText("my draft")
     item.picker.field.setCursorPosition(3)
@@ -952,14 +952,14 @@ def test_a_card_in_use_survives_background_reads(app, samples, make_org):
     statements = []
     w.org.catalog.db.set_trace_callback(statements.append)
     try:
-        w.import_paths([str(samples / SAMPLE["S3"]), str(samples / SAMPLE["S4"])])
+        w.import_paths([str(pdfs / "S3.pdf"), str(pdfs / "S4.pdf")])
         _pump(app, lambda: not w.inflight)
     finally:
         decision.DecisionItem.__init__ = make
         w.org.catalog.db.set_trace_callback(None)
     assert len(w.decision.items) == 4 and len(built) == 2          # only the two new cards were made
     assert refreshes == [{}, {"recheck": False}, {"recheck": False}]   # once per document read, not twice
-    assert _item(w, SAMPLE["S1"]) is item and item.expanded.isVisible()
+    assert _item(w, "S1.pdf") is item and item.expanded.isVisible()
     assert item.picker.field.text() == "my draft" and item.picker.field.cursorPosition() == 3
     assert item.picker.field.hasFocus()
 
@@ -968,36 +968,36 @@ def test_a_card_in_use_survives_background_reads(app, samples, make_org):
     w.refresh()
     w.org.catalog.db.set_trace_callback(None)
     assert len([s for s in statements if s.lstrip().upper().startswith("SELECT")]) == 6   # with "Check these"
-    assert _item(w, SAMPLE["S1"]) is item and item.picker.field.text() == "my draft"
+    assert _item(w, "S1.pdf") is item and item.picker.field.text() == "my draft"
 
     w.org.create_category("Brand New")                             # the open list follows the catalog
     w.refresh()
-    assert _item(w, SAMPLE["S1"]) is item and item.picker.field.text() == "my draft"
+    assert _item(w, "S1.pdf") is item and item.picker.field.text() == "my draft"
     item.picker.field.setText("brand")
     assert _rows_of(item.picker) == ["Brand New · 0", "Create category 'brand'"]
     w.show_view(ALL)                                               # leaving the page and coming back: still there
     w.review()
-    assert _item(w, SAMPLE["S1"]) is item and item.expanded.isVisible() and item.picker.field.text() == "brand"
+    assert _item(w, "S1.pdf") is item and item.expanded.isVisible() and item.picker.field.text() == "brand"
     w.leave_pending(item.ids)                                      # moved to the end, not rebuilt
     assert w.decision.items[-1] is item and item.expanded.isVisible()
     _close(w, rec)
 
 
-def test_search_name_and_category_count_and_keys(app, samples, make_org):
-    names = [SAMPLE["S1"], SAMPLE["S2"], SAMPLE["S4"]]
-    w, rec = _window(make_org, [samples / n for n in names])
+def test_search_name_and_category_count_and_keys(app, pdfs, make_org):
+    names = ["S1.pdf", "S2.pdf", "S4.pdf"]
+    w, rec = _window(make_org, [pdfs / n for n in names])
     _pump(app, lambda: not w.inflight)
-    w.file_docs([_doc(w, SAMPLE["S1"])], "Quantum Optics")
+    w.file_docs([_doc(w, "S1.pdf")], "Quantum Optics")
     _pump(app, lambda: not w.filing)
     w.show_view(ALL)
     assert w.search.placeholderText() == "Search all documents…" and not w.result_count.isVisible()
     statements = []
     w.org.catalog.db.set_trace_callback(statements.append)
     w.search.setText("QUANT")                                      # the category matches too
-    assert _rows(w) == [SAMPLE["S1"]] and w.result_count.text() == "1 of 3" and w.result_count.isVisible()
+    assert _rows(w) == ["S1.pdf"] and w.result_count.text() == "1 of 3" and w.result_count.isVisible()
     assert w.page_title.full == "All documents · 3"                # the heading keeps the whole count
-    w.search.setText("l-2")
-    assert _rows(w) == [SAMPLE["S4"]]
+    w.search.setText("s4")
+    assert _rows(w) == ["S4.pdf"]
     w.search.setText("no such thing")
     assert statements == []                                        # a key reads nothing from the catalog
     w.org.catalog.db.set_trace_callback(None)
@@ -1006,20 +1006,20 @@ def test_search_name_and_category_count_and_keys(app, samples, make_org):
     w.clear_search.click()
     assert w.search.text() == "" and w.stack.currentWidget() is w.table and len(_rows(w)) == 3
 
-    w.select_docs([_doc(w, SAMPLE["S4"])])
+    w.select_docs([_doc(w, "S4.pdf")])
     w.set_details_open(True)
     QTest.keySequence(w.table, QKeySequence(QKeySequence.Find))    # Ctrl+F puts the cursor in the field
     assert w.search.hasFocus()
-    QTest.keyClicks(w.search, "l-2")
+    QTest.keyClicks(w.search, "s4")
     QTest.keyClick(w.search, Qt.Key_Escape)                        # Esc clears the text first
     assert w.search.text() == "" and w.details.isVisible()
     QTest.keyClick(w.search, Qt.Key_Escape)                        # and then closes details
     assert not w.details.isVisible()
 
-    w.search.setText("l-2")
+    w.search.setText("s4")
     _click_category(w, "Quantum Optics")                           # another view: no hidden text filters it
     assert w.search.text() == "" and w.search.placeholderText() == "Search Quantum Optics…"
-    assert _rows(w) == [SAMPLE["S1"]] and w.page_title.full == "Quantum Optics · 1"
+    assert _rows(w) == ["S1.pdf"] and w.page_title.full == "Quantum Optics · 1"
     w.show_view(RECENT)
     assert w.search.placeholderText() == "Search recently added…" and len(_rows(w)) == 3
 
@@ -1032,9 +1032,9 @@ def test_search_name_and_category_count_and_keys(app, samples, make_org):
     first.details.click()
     assert w.inspected is None and not w.details_open and not first.details.isChecked()
     cards = list(w.decision.items)
-    w.search.setText(SAMPLE["S4"][:6].upper())
+    w.search.setText("S4.pdf"[:6].upper())
     shown = [c for c in cards if c.isVisible()]
-    assert w.decision.items == cards and shown == [_item(w, SAMPLE["S4"])]   # hidden, not rebuilt
+    assert w.decision.items == cards and shown == [_item(w, "S4.pdf")]   # hidden, not rebuilt
     assert w.result_count.text() == "1 of 2" and w.page_title.full == "Needs your decision · 2"
     w.search.setText("no such thing")
     assert w.stack.currentWidget() is w.no_match
@@ -1045,37 +1045,37 @@ def test_search_name_and_category_count_and_keys(app, samples, make_org):
     _close(w, rec)
 
 
-def test_the_list_is_updated_in_place(app, samples, make_org):
-    names = [SAMPLE["S1"], SAMPLE["S2"], SAMPLE["S4"]]
-    w, rec = _window(make_org, [samples / n for n in names])
+def test_the_list_is_updated_in_place(app, pdfs, make_org):
+    names = ["S1.pdf", "S2.pdf", "S4.pdf"]
+    w, rec = _window(make_org, [pdfs / n for n in names])
     _pump(app, lambda: not w.inflight)
 
     w.sort.setCurrentText("Name A–Z")
     assert _rows(w) == sorted(names, key=str.casefold)
-    doc = _doc(w, SAMPLE["S2"])
+    doc = _doc(w, "S2.pdf")
     w.select_docs([doc])
     resets = []
     w.docs.modelReset.connect(lambda: resets.append(1))
-    w.file_docs([_doc(w, SAMPLE["S1"])], "Quantum Optics")         # another row changes; this one stays selected
+    w.file_docs([_doc(w, "S1.pdf")], "Quantum Optics")         # another row changes; this one stays selected
     _pump(app, lambda: not w.filing)
     w.refresh()
     assert w.selected_ids() == [doc] and resets == []
-    assert _cell(w, _rows(w).index(SAMPLE["S1"]), 1) == "Quantum Optics"
-    assert w.document_row(doc)["file_name"] == SAMPLE["S2"] and w.document_row("no such id") is None
+    assert _cell(w, _rows(w).index("S1.pdf"), 1) == "Quantum Optics"
+    assert w.document_row(doc)["file_name"] == "S2.pdf" and w.document_row("no such id") is None
     w.sort.setCurrentText("Newest first")                          # what is still being read comes first
-    w.import_paths([str(samples / SAMPLE["S5"])])
-    assert _rows(w)[0] == SAMPLE["S5"] and _cell(w, 0, 2) == "Reading" and w.selected_ids() == [doc]
+    w.import_paths([str(pdfs / "S5.pdf")])
+    assert _rows(w)[0] == "S5.pdf" and _cell(w, 0, 2) == "Reading" and w.selected_ids() == [doc]
     _pump(app, lambda: not w.inflight)
-    assert _cell(w, _rows(w).index(SAMPLE["S5"]), 2) == "Waiting" and len(_rows(w)) == 4
+    assert _cell(w, _rows(w).index("S5.pdf"), 2) == "Waiting" and len(_rows(w)) == 4
     _close(w, rec)
 
 
-def test_the_list_fits_beside_the_details_panel(app, samples, make_org):
-    w, rec = _window(make_org, [samples / SAMPLE["S4"], samples / SAMPLE["S5"]])
+def test_the_list_fits_beside_the_details_panel(app, pdfs, make_org):
+    w, rec = _window(make_org, [pdfs / "S4.pdf", pdfs / "S5.pdf"])
     _pump(app, lambda: not w.inflight)
     w.resize(1280, 720)
     _pump(app, lambda: w.width() == 1280 and not w.table.isColumnHidden(3))
-    w.select_docs([_doc(w, SAMPLE["S5"])])
+    w.select_docs([_doc(w, "S5.pdf")])
     w.set_details_open(True)                                       # beside the list: the list gets narrow
     _pump(app, lambda: w.table.isColumnHidden(3))                  # so the date column goes
     assert w.details.parent() is w.content and w.table.horizontalScrollBar().maximum() == 0
@@ -1084,7 +1084,7 @@ def test_the_list_fits_beside_the_details_panel(app, samples, make_org):
 
     w.org.create_category("Elsewhere")                             # with a category, Enter opens the choices
     w.review()                                                     # Esc in a card's field: the keyboard stays on the card
-    item = _item(w, SAMPLE["S4"])
+    item = _item(w, "S4.pdf")
     QTest.keyClick(item, Qt.Key_Return)
     assert item.expanded.isVisible() and item.picker.field.hasFocus()
     QTest.keyClick(item.picker.field, Qt.Key_Escape)
@@ -1515,15 +1515,15 @@ def test_every_button_has_a_name_light_and_dark_and_leave_pending_is_in_the_menu
     _close(again, rec)
 
 
-def test_reduced_motion_makes_every_change_instant(app, samples, make_org, monkeypatch):
+def test_reduced_motion_makes_every_change_instant(app, pdfs, make_org, monkeypatch):
     from classifile.app import widgets
 
     monkeypatch.setattr(widgets, "reduced_motion", lambda: True)   # Windows' "Animation effects" switched off
-    w, rec = _window(make_org, [samples / SAMPLE["S4"]])
+    w, rec = _window(make_org, [pdfs / "S4.pdf"])
     _pump(app, lambda: not w.inflight)
     w.resize(1920, 1000)
     w.review()
-    item = _item(w, SAMPLE["S4"])
+    item = _item(w, "S4.pdf")
     item.details.click()
     assert w.details.isVisible() and w.slide.state() != w.slide.State.Running
     w.close_details()
@@ -1660,13 +1660,13 @@ def test_retry_find_category_motion_and_the_matching_log(app, make_org, tmp_path
     _close(w, rec)
 
 
-def test_a_filed_row_folds_away_and_goes_at_once_with_reduced_motion(app, samples, make_org):
+def test_a_filed_row_folds_away_and_goes_at_once_with_reduced_motion(app, pdfs, make_org):
     from shiboken6 import isValid
 
     from classifile.app import widgets
     from classifile.app.main import SETTINGS
 
-    w, rec = _window(make_org, [samples / SAMPLE[s] for s in ("S1", "S2", "S3")])
+    w, rec = _window(make_org, [pdfs / f"{s}.pdf" for s in ("S1", "S2", "S3")])
     _pump(app, lambda: not w.inflight)
     for preference, folding in (("full", True), ("reduce", False)):
         w.set_motion(preference)

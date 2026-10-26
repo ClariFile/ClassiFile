@@ -79,6 +79,38 @@ def samples(tmp_path):
     return dest
 
 
+GENERATED = {       # pdfs: six documents on different subjects, a title on the cover and running text after it
+    "S1": ("Garden planning", "tomato soil compost seedling pruning mulch harvest watering greenhouse"),
+    "S2": ("Kitchen notes", "garlic onion simmer oven butter flour dough roast pepper"),
+    "S3": ("Trip checklist", "hotel booking passport flight luggage visa train ticket timetable"),
+    "S4": ("Car upkeep", "brake tyre engine oil filter battery mileage service insurance"),
+    "S5": ("Camera basics", "lens aperture shutter exposure tripod focus portrait landscape sensor"),
+    "S6": ("Home budget", "rent bills groceries savings electricity water internet receipt budget"),
+}
+
+
+@pytest.fixture
+def pdfs(tmp_path):
+    """Six generated PDFs, S1.pdf to S6.pdf, of three pages each: for the tests that need some documents, not the
+    content of the private samples, so they run in every checkout."""
+    import pymupdf
+
+    dest = tmp_path / "pdfs"
+    dest.mkdir()
+    for key, (title, words) in GENERATED.items():
+        w = words.split()
+        doc = pymupdf.open()
+        for page in range(3):
+            p = doc.new_page()
+            if page == 0:
+                p.insert_text((72, 110), title, fontsize=22)
+            lines = [" ".join(w[(page + i + k) % len(w)] for k in range(5)).capitalize() + "." for i in range(12)]
+            p.insert_text((72, 160), "\n".join(lines), fontsize=11)
+        doc.save(dest / f"{key}.pdf")
+        doc.close()
+    return dest
+
+
 def alternate_streams(path):
     """Names of NTFS alternate data streams via FindFirstStreamW; None when not on Windows."""
     if sys.platform != "win32":
