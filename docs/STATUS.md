@@ -490,6 +490,19 @@
   files, so an upgrade leaves no stale file.
 - **Not tested:** install, first run, OCR, filing, upgrade and uninstall of the setup file on any Windows (as rc.4).
 
+**1.0.0-rc.9 (2026-10-26): a release candidate, not verified on a clean machine**
+- rc.8 plus the motion pass and the second outside review below, built from commit `73c2c68` (the first build
+  that names its commit: `build.json` beside ClassiFile.exe, "(build 73c2c68fad)" in About, Advanced, the problem
+  report and the self-test). `dist\ClassiFile-1.0.0-rc.9-setup.exe` (about 52 MB),
+  `dist\ClassiFile-1.0.0-rc.9-portable.zip` (about 72 MB) and `dist\ClassiFile-1.0.0-rc.9-hashes.txt` (SHA-256 of
+  both and of build.json; the setup file's hash checked against it).
+- Checked without installing, on the build laptop: 324 tests; `tools.check_ui` no failures; the built app's
+  self-test with only its bundled OCR data, on copies of the six samples: PASS, the same counts as rc.8, also from
+  the unpacked portable zip; the app asks for `asInvoker`; rc.9 ships rc.8's 234 files plus build.json.
+- **Not tested:** install, first run, OCR, filing, upgrade and uninstall of the setup file on any Windows; the
+  preview process inside the built app; closing during work, backup and restore, and portable beside installed
+  in the built app (`docs/INSTALLER_TEST.md` now has these steps).
+
 **The second outside review, designImp2 (2026-10-26; built as rc.9)**
 - **Learning can't be undone by timing (item 1):** a learning revision, counted up by SQLite triggers (schema 13)
   on every change to what may teach matching (a user's placement, an example, a document becoming or leaving an
