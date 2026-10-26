@@ -4,7 +4,7 @@
 
 ## Now (read this first)
 
-- **Where it stands:** v1 release candidate 1.0.0-rc.8, built and checked without installing. CP5 is done: the
+- **Where it stands:** v1 release candidate 1.0.0-rc.9, built and checked without installing. CP5 is done: the
   matcher was frozen (record 2.10) and the final evaluation ran once, on 2026-10-16. `data\final-eval` is not read
   again, and `tools.final_eval` refuses a second run whatever its options.
 - **Next:** the clean-machine installer test (`docs/INSTALLER_TEST.md`; never on the owner's own laptop), then
@@ -490,7 +490,7 @@
   files, so an upgrade leaves no stale file.
 - **Not tested:** install, first run, OCR, filing, upgrade and uninstall of the setup file on any Windows (as rc.4).
 
-**The second outside review, designImp2 (2026-10-26; not in a build yet)**
+**The second outside review, designImp2 (2026-10-26; built as rc.9)**
 - **Learning can't be undone by timing (item 1):** a learning revision, counted up by SQLite triggers (schema 13)
   on every change to what may teach matching (a user's placement, an example, a document becoming or leaving an
   example, a family id, a deleted category; never the app's own placements). An update reads everything at one

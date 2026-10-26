@@ -3,7 +3,7 @@ import json
 import sys
 from pathlib import Path
 
-__version__ = "1.0.0-rc.8"   # pilot release candidate; 1.0.0 after the pilot (docs/LAUNCH.md)
+__version__ = "1.0.0-rc.9"   # pilot release candidate; 1.0.0 after the pilot (docs/LAUNCH.md)
 
 
 def build():

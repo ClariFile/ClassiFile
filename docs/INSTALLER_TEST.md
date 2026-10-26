@@ -14,7 +14,12 @@ computer someone depends on. Disposable test documents only.
 - [ ] First run: tour, an empty output folder; Help and About readable; About shows the version.
 - [ ] Offline (airplane mode): add the documents, the scanned one too; none "couldn't be read"; file them; copies
       appear in the category folders; an original's Modified time unchanged; nothing new beside originals.
-- [ ] Reopen: same state.
+- [ ] Reopen: same state. Close while documents are still being read or filed: "Closing…", then it closes; a
+      second ClassiFile started meanwhile says it is already open.
+- [ ] Build: About and Advanced show "(build …)"; it matches the commit in `ClassiFile-<version>-hashes.txt`, and
+      the setup file's SHA-256 matches that file.
+- [ ] Backup and restore (step 13b): the restored catalog has the same categories.
+- [ ] Portable and installed side by side (step 20): each keeps its own catalog.
 - [ ] Self-test (step 14): PASS.
 - [ ] Upgrade (step 19): the newer setup over the older keeps categories and documents.
 - [ ] Uninstall: program and shortcuts gone; output folder, `%LOCALAPPDATA%\ClassiFile` and originals stay.
@@ -42,7 +47,7 @@ The detailed steps follow.
 
 5. Expected: the ClassiFile window opens with a short tour (4 steps). Go through it.
 6. When asked for the output folder, make a new folder, for example `Documents\ClassiFile`, and choose it.
-7. Open Help and About. Expected: text that fills its card across the window, the version (for example 1.0.0-rc.8) on
+7. Open Help and About. Expected: text that fills its card across the window, the version (for example 1.0.0-rc.9 (build …)) on
    About.
 
 ## 3. Offline use
@@ -60,6 +65,11 @@ The detailed steps follow.
     beside the originals.
 13. Close ClassiFile, open it again from the Start menu. Expected: the same categories and documents. Airplane mode
     can go off now.
+    - 13a. Add five documents and press Close at once. Expected: "Closing… finishing the work under way", then the
+      window closes. Start ClassiFile twice quickly: the second says it is already open.
+    - 13b. **Settings → Advanced → Back up the catalog…** to the desktop; make a new category; **Restore a
+      backup…** with that file; close and open ClassiFile. Expected: "Switched to the backup", the new category
+      gone, a "catalog before restore …" file beside the catalog.
 
 ## 4. Built-in check (optional, two minutes)
 
@@ -89,6 +99,11 @@ The detailed steps follow.
 19. Install the older version, file two documents, then run the newer setup without uninstalling.
     - Expected: no folder question; About shows the new version; the same categories and documents.
 
+## 7. Portable beside installed (optional)
+
+20. Unzip `ClassiFile-<version>-portable.zip`, run `ClassiFile-test.cmd`, add one document. Expected: the installed
+    ClassiFile's categories are not there, and both can be open at once (each has its own catalog).
+
 ## Results
 
 | Step | Expected | Seen (OK / what happened) |
@@ -100,9 +115,13 @@ The detailed steps follow.
 | 11 | Details shows pages; copies in category folders | |
 | 12 | Original unchanged, nothing new beside it | |
 | 13 | Same state after reopening, offline | |
+| 13a | Closing during work waits, then closes; a second copy is refused | |
+| 13b | Backup and restore bring the catalog back | |
 | 15 | Self-test PASS | |
 | 16–17 | Uninstall removes the program, keeps copies, catalog and originals | |
 | 19 | Upgrade keeps categories and documents | |
+| 20 | Portable and installed keep separate catalogs | |
+| — | About's build matches the hashes file; the setup file's SHA-256 matches | |
 
 Send the table, the laptop's Windows version (Settings → System → About) and `classifile-check.txt`. Never send the
 documents themselves.

@@ -9,7 +9,7 @@ your original files are never changed, and nothing is sent over the internet.
 ClassiFile is part of the ClariFile suite. Its companion, SummarEase, will summarize documents; each app works on its
 own.
 
-> **Status:** v1 release candidate (1.0.0-rc.8, for a small pilot), for Windows. The screenshots show a made-up library.
+> **Status:** v1 release candidate (1.0.0-rc.9, for a small pilot), for Windows. The screenshots show a made-up library.
 
 ![All documents, with waiting and filed documents](docs/images/all.png)
 
