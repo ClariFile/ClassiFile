@@ -7,8 +7,14 @@ install in Program Files); Inno Setup 6 (ISCC.exe; without it only the app folde
 dist\\ClassiFile-<version>\\ (the app folder), dist\\ClassiFile-<version>-portable.zip (the app folder with
 installer\\portable\\, for testing without installing) and dist\\ClassiFile-<version>-setup.exe; it refuses when any
 exists, so an earlier build is never overwritten. Network access is not needed.
+A build is made only from a commit with no uncommitted change to tracked files, and says which: build.json beside
+ClassiFile.exe (version, commit, extraction record and reader versions, Python and library versions; About,
+Advanced and the problem report show the commit), and dist\\ClassiFile-<version>-hashes.txt (SHA-256 of the setup
+file, the portable zip and build.json), so a tested copy can be matched to its source.
 """
 import argparse
+import hashlib
+import json
 import importlib.metadata
 import os
 import shutil
@@ -49,6 +55,30 @@ def write_portable(app, out):
                 z.write(f, f"{top}/ClassiFile/{f.relative_to(app).as_posix()}")
 
 
+def commit():
+    """The commit being built; exits when tracked files have changes that are not committed."""
+    git = lambda *a: subprocess.run(["git", *a], cwd=ROOT, check=True, capture_output=True, text=True).stdout.strip()
+    if git("status", "--porcelain", "--untracked-files=no"):
+        sys.exit("Commit or stash the changes first: a build is made only from a recorded commit.")
+    return git("rev-parse", "HEAD")
+
+
+def build_info(head):
+    from classifile.reader import RECORD_VERSION, odt, ooxml, pdf
+    versions = {name: importlib.metadata.version(name) for name in ("pymupdf", "pyside6", "pyinstaller")}
+    return {"version": __version__, "commit": head, "record_version": RECORD_VERSION,
+            "readers": [pdf.READER_VERSION, ooxml.DOCX_READER_VERSION, ooxml.PPTX_READER_VERSION, odt.READER_VERSION],
+            "python": sys.version.split()[0], "libraries": versions}
+
+
+def sha256(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--tessdata", type=Path, default=TESSDATA)
@@ -56,7 +86,9 @@ def main(argv=None):
     a = ap.parse_args(argv)
     app, setup = DIST / f"ClassiFile-{__version__}", DIST / f"ClassiFile-{__version__}-setup.exe"
     portable = DIST / f"ClassiFile-{__version__}-portable.zip"
-    for p in (app, setup, portable):
+    hashes = DIST / f"ClassiFile-{__version__}-hashes.txt"
+    head = commit()
+    for p in (app, setup, portable, hashes):
         if p.exists():
             sys.exit(f"Refusing to overwrite {p}: remove it first.")
     eng = a.tessdata / "eng.traineddata"
@@ -69,7 +101,9 @@ def main(argv=None):
                        check=True, cwd=ROOT, env=os.environ | {"CLASSIFILE_ENG_TRAINEDDATA": str(eng)})
         DIST.mkdir(exist_ok=True)
         shutil.move(tmp / "dist" / "ClassiFile", app)
-        print(f"App folder: {app}")
+        with open(app / "build.json", "x", encoding="utf-8") as f:
+            json.dump(build_info(head), f, indent=1)
+        print(f"App folder: {app} (commit {head[:10]})")
         write_portable(app, portable)
         print(f"Portable zip: {portable}")
         iscc = a.iscc or next((p for p in ISCC if p.is_file()), None)
@@ -81,6 +115,10 @@ def main(argv=None):
                         f"/DOutputDir={DIST}", f"/DIcon={ROOT / 'assets' / 'icons' / 'classifile' / 'classifile.ico'}",
                         str(HERE / "classifile.iss")], check=True)
     print(f"Setup file: {setup}")
+    with open(hashes, "x", encoding="utf-8") as f:
+        f.write(f"ClassiFile {__version__}, commit {head}\n")
+        f.writelines(f"{sha256(p)}  {p.name}\n" for p in (setup, portable, app / "build.json"))
+    print(f"Hashes: {hashes}")
     return 0
 
 

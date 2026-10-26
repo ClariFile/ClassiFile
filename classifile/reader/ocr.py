@@ -2,8 +2,11 @@
 
 Only units flagged suspected_unread are OCR'd, and only their non-repeated pictures that meet the rule
 (common.SUSPECT_MIN_PICTURE_AREA of the page or slide). OCR text is kept apart from native text, after
-the junk filter below; the number of discarded characters is recorded. Per-unit status:
-  done               OCR found usable text
+the junk filter below; the number of discarded characters is recorded. Each picture's own outcome is kept in
+ocr_pictures (common.PICTURE_OUTCOMES), so text read from one picture never hides another that failed. Per-unit
+status:
+  done               OCR found usable text, and read every picture
+  partial            OCR read some pictures and left others unread (see ocr_pictures)
   no_text            OCR ran and found none, or only junk (photos, decorations); see ocr_discarded_chars
   no_readable_image  no image in the unit could be decoded (e.g. EMF/WMF)
   failed             the OCR engine raised on every readable image
@@ -23,7 +26,7 @@ from pathlib import Path
 
 import pymupdf
 
-from .common import ocr_worthy, page_layout
+from .common import UNREAD_OUTCOMES, ocr_worthy, page_layout
 
 OCR_LANGUAGE = "eng"
 OCR_DPI = 300
@@ -167,11 +170,15 @@ def run(units, sources):
         if time.monotonic() > deadline:
             u.ocr_status = "deferred"
             continue
-        texts, raws, readable, failed, discarded, layouts = [], [], 0, 0, 0, []
+        texts, raws, readable, failed, discarded, layouts, outcomes = [], [], 0, 0, 0, [], []
         for n, make in enumerate(sources.get(u.index, ())):
+            if time.monotonic() > deadline:     # out of time inside the unit: the rest stays unread, and says so
+                outcomes.append({"picture": n, "outcome": "not_attempted"})
+                continue
             try:
                 made = make()
             except Exception:
+                outcomes.append({"picture": n, "outcome": "render_failed"})
                 continue
             pix, region = made if isinstance(made, tuple) else (made, None)
             readable += 1
@@ -182,11 +189,13 @@ def run(units, sources):
                 raw, blocks = read[key][0].strip(), [dict(b, lines=[dict(l) for l in b["lines"]]) for b in read[key][1]]
             except Exception:
                 failed += 1
+                outcomes.append({"picture": n, "outcome": "engine_failed"})
                 continue
             raws.append(raw)
             clean = usable_ocr_text(raw, photo_like=flat_share(pix) < PHOTO_MAX_FLAT_SHARE)
             discarded += len("".join(raw.split())) - len("".join(clean.split()))
             texts.append(clean)
+            outcomes.append({"picture": n, "outcome": "read" if clean else "no_text"})
             kept = set(clean.splitlines())
             for b in blocks:
                 for line in b["lines"]:
@@ -197,7 +206,11 @@ def run(units, sources):
         u.ocr_discarded_chars = discarded
         u.ocr_raw_text = "\n".join(r for r in raws if r) or None
         u.ocr_layout = layouts
-        u.ocr_status = ("done" if text else "no_readable_image" if not readable
-                        else "failed" if failed == readable else "no_text")
+        u.ocr_pictures = outcomes
+        unread = any(o["outcome"] in UNREAD_OUTCOMES for o in outcomes)
+        u.ocr_status = ("partial" if text and unread else "done" if text
+                        else "deferred" if any(o["outcome"] == "not_attempted" for o in outcomes)
+                        else "no_readable_image" if not readable
+                        else "failed" if failed == readable else "partial" if unread else "no_text")
     return {"engine": f"mupdf-tesseract (PyMuPDF {pymupdf.VersionBind})", "language": OCR_LANGUAGE,
             "dpi": OCR_DPI, "available": folder is not None and not disabled, "budget_seconds": OCR_BUDGET_SECONDS}

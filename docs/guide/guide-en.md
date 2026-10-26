@@ -31,6 +31,9 @@ After reading, each document either:
 - **is filed by itself**, when one category clearly fits and already holds 3 documents you confirmed; or
 - **waits for you** in **Needs your decision**.
 
+While documents are being read, **Stop** (beside "Reading 3 of 12…") lets the ones being read finish and leaves the
+rest unread. They are counted as "not read (stopped)", not as problems; add them again later.
+
 ## 4. Needs your decision
 
 Each waiting document shows the categories that fit best, and why.
@@ -39,6 +42,14 @@ Each waiting document shows the categories that fit best, and why.
 - Press another category name to choose it instead.
 - Press **Choose another…** to pick any category, or type a new name.
 - Press **Details** to see the document's pages.
+
+"Best match: compared with 5 examples in Garden; shares compost, soil" means ClassiFile compared the document with
+the 5 documents you put in Garden, taken together, and found those words in common. The other choices say
+"Weaker match", and "no words in common" when they share none.
+
+If some pictures in a document couldn't be read, its card says on which pages. ClassiFile never files such a
+document by itself, because the unread part might be what it is about. Look at the pages in **Details** and choose,
+or try **⋯ → Read again**.
 
 When several documents look like one new subject, they are shown together. Type one name for all of them.
 
@@ -69,9 +80,12 @@ Sometimes a filed document reads much more like another category. It appears und
 
 - **Automatic filing:** how sure ClassiFile must be before it files by itself. **Strict** is the default. "Off"
   means it always asks.
-- **Learning:** learn from your folders, or update now.
+- **Learning:** learn from your folders, or update now. Each folder you learned from says how many of its files
+  couldn't be read or were already in ClassiFile; **Details…** names them and can try the unreadable ones again.
 - **Output folder**, **Appearance** (light or dark) and **When closing**.
-- **Advanced:** version numbers and the learning log, useful when you report a problem.
+- **Advanced:** version numbers and the learning log, useful when you report a problem; **Back up the catalog…**
+  and **Restore a backup…** (section 12).
+- The **☰** at the top of the sidebar hides it; the **☰** before the page title brings it back.
 
 ## 10. What never happens
 
@@ -93,6 +107,18 @@ Sometimes a filed document reads much more like another category. It appears und
   itself.
 - **Uninstall:** Windows **Settings → Apps → Installed apps** → ClassiFile → **⋯ → Uninstall**. Your original files,
   the organized copies in your output folder and ClassiFile's catalog (`%LOCALAPPDATA%\ClassiFile`) stay.
+
+### Backing up what ClassiFile has learned
+
+Your categories, your choices and what matching learned are kept in ClassiFile's catalog, not in your documents.
+Copies in your output folder alone don't bring them back.
+
+- **Back up:** **Settings → Advanced → Back up the catalog…** saves it to a new file you choose, for example on a USB
+  stick or in your usual backups. It can be done while ClassiFile is open.
+- **Restore:** **Settings → Advanced → Restore a backup…** checks the file first, then switches to it the next time
+  ClassiFile opens. The catalog in use until then is kept beside it ("catalog before restore …"), never deleted.
+  Your documents and the copies in your output folder are not touched; a copy you changed since the backup is
+  flagged, never overwritten.
 
 ## 13. Reporting a problem
 

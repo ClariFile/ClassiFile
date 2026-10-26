@@ -9,11 +9,11 @@ import sys
 
 
 def self_test(report, files):
-    from classifile import __version__
+    from classifile import version_text
     from classifile.organizer import read_and_analyze
     from classifile.reader.ocr import tessdata
     from classifile.worker import Worker
-    lines = [f"ClassiFile {__version__}", f"OCR language data: {'found' if tessdata() else 'MISSING'}"]
+    lines = [f"ClassiFile {version_text()}", f"OCR language data: {'found' if tessdata() else 'MISSING'}"]
     worker = Worker(read_and_analyze)
     try:
         for n, path in enumerate(files, 1):

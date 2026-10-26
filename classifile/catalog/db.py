@@ -9,6 +9,8 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 
+from classifile.reader import unread_gap
+
 APP_NAME = "ClassiFile"
 
 MIGRATIONS = [
@@ -216,6 +218,41 @@ MIGRATIONS = [
         at TEXT NOT NULL
     );
     """,
+    # v13: the learning revision. Every change to what may teach matching (a user's placement, an example, a
+    # document leaving or becoming an example, a family id, a deleted category) counts it up, in the same
+    # transaction, so an update trained before such a change is never published (Catalog.add_matcher).
+    # Placements the app made by itself teach nothing and leave it alone.
+    """
+    INSERT OR IGNORE INTO settings VALUES ('learning_revision', '0');
+    CREATE TRIGGER learn_membership_added AFTER INSERT ON memberships
+        WHEN NEW.role = 'primary' AND NEW.provenance != 'machine-assigned'
+        BEGIN UPDATE settings SET value = value + 1 WHERE key = 'learning_revision'; END;
+    CREATE TRIGGER learn_membership_changed AFTER UPDATE ON memberships
+        WHEN NEW.role = 'primary' AND (NEW.provenance != 'machine-assigned' OR OLD.provenance != 'machine-assigned')
+        BEGIN UPDATE settings SET value = value + 1 WHERE key = 'learning_revision'; END;
+    CREATE TRIGGER learn_membership_removed AFTER DELETE ON memberships
+        WHEN OLD.role = 'primary' AND OLD.provenance != 'machine-assigned'
+        BEGIN UPDATE settings SET value = value + 1 WHERE key = 'learning_revision'; END;
+    CREATE TRIGGER learn_example_added AFTER INSERT ON examples
+        BEGIN UPDATE settings SET value = value + 1 WHERE key = 'learning_revision'; END;
+    CREATE TRIGGER learn_example_removed AFTER DELETE ON examples
+        BEGIN UPDATE settings SET value = value + 1 WHERE key = 'learning_revision'; END;
+    CREATE TRIGGER learn_document_status AFTER UPDATE OF status ON documents
+        WHEN OLD.status != NEW.status AND EXISTS (SELECT 1 FROM examples WHERE document_id = NEW.id)
+        BEGIN UPDATE settings SET value = value + 1 WHERE key = 'learning_revision'; END;
+    CREATE TRIGGER learn_family_added AFTER INSERT ON family_labels
+        BEGIN UPDATE settings SET value = value + 1 WHERE key = 'learning_revision'; END;
+    CREATE TRIGGER learn_family_changed AFTER UPDATE ON family_labels
+        BEGIN UPDATE settings SET value = value + 1 WHERE key = 'learning_revision'; END;
+    CREATE TRIGGER learn_family_removed AFTER DELETE ON family_labels
+        BEGIN UPDATE settings SET value = value + 1 WHERE key = 'learning_revision'; END;
+    CREATE TRIGGER learn_category_deleted AFTER UPDATE OF deleted_at ON categories
+        BEGIN UPDATE settings SET value = value + 1 WHERE key = 'learning_revision'; END;
+    """,
+    # v14: what became of each picture OCR was to read (extraction record 7); NULL for older reads
+    """
+    ALTER TABLE extraction_units ADD COLUMN ocr_pictures TEXT;  -- JSON [{"picture", "outcome"}]
+    """,
 ]
 
 
@@ -231,6 +268,73 @@ def default_data_dir():
 
 def now():
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+# -- backup and restore (designImp2 item 12) ----------------------------------------------------------------------
+# A backup is a consistent copy of the catalog (SQLite's backup API, also while the app runs). Restoring never
+# overwrites: the backup is checked, put beside the catalog as RESTORE_NAME, and switched in by apply_restore() at
+# the next start, before the catalog is opened; the catalog it replaces is kept under another name. The documents,
+# the originals and the filed copies are never touched; a copy changed or gone since the backup is flagged as
+# usual when it is next looked at.
+RESTORE_NAME = "restore.sqlite3"
+
+
+def check_backup(path):
+    """None when path is a ClassiFile catalog this version can open, else a plain reason. Opened read-only."""
+    try:
+        db = sqlite3.connect(f"file:{Path(path).as_posix()}?mode=ro", uri=True)
+        try:
+            if db.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                return "This file is damaged."
+            version = db.execute("SELECT version FROM schema_version").fetchone()[0]
+            db.execute("SELECT 1 FROM documents LIMIT 1")
+        finally:
+            db.close()
+    except sqlite3.Error:
+        return "This isn't a ClassiFile catalog."
+    if version > len(MIGRATIONS):
+        return "This catalog is from a newer ClassiFile. Update ClassiFile first."
+    return None
+
+
+def stage_restore(backup, data_dir):
+    """Check a backup and put a copy of it beside the catalog, to be switched in at the next start. Raises
+    ValueError with a plain reason; never overwrites (an earlier staged restore is replaced only by asking again)."""
+    reason = check_backup(backup)
+    if reason:
+        raise ValueError(reason)
+    staged = Path(data_dir) / RESTORE_NAME
+    staged.unlink(missing_ok=True)          # only ClassiFile's own staged copy, never the catalog
+    src = sqlite3.connect(f"file:{Path(backup).as_posix()}?mode=ro", uri=True)
+    try:
+        dst = sqlite3.connect(staged)
+        try:
+            src.backup(dst)
+        finally:
+            dst.close()
+    finally:
+        src.close()
+    return staged
+
+
+def apply_restore(catalog_path):
+    """At start, before the catalog is opened: a staged restore that still checks becomes the catalog, and the
+    catalog it replaces is kept beside it as "catalog before restore <time>.sqlite3". Returns that name (or the
+    reason the staged file was set aside), else None. Renames only; nothing is overwritten or deleted."""
+    catalog_path = Path(catalog_path)
+    staged = catalog_path.parent / RESTORE_NAME
+    if not staged.is_file():
+        return None
+    stamp = datetime.now().strftime("%Y-%m-%d %H%M%S")
+    if check_backup(staged):
+        staged.rename(staged.with_name(f"restore not used {stamp}.sqlite3"))
+        return "not used"
+    kept = None
+    if catalog_path.exists():
+        kept = catalog_path.with_name(f"catalog before restore {stamp}.sqlite3")
+        catalog_path.rename(kept)
+    staged.rename(catalog_path)
+    return kept.name if kept else ""
 
 
 class Catalog:
@@ -252,6 +356,31 @@ class Catalog:
     def close(self):
         with self.lock:
             self.db.close()
+
+    def backup(self, dest):
+        """A consistent copy of the catalog in a new file dest (never over an existing one), with the app and
+        schema version it came from. Written under a temporary name first, then renamed into place."""
+        dest = Path(dest)
+        if dest.exists():
+            raise ValueError("A file with that name exists already. Choose another name.")
+        part = dest.with_name(dest.name + ".part")
+        part.unlink(missing_ok=True)        # only a leftover of ClassiFile's own unfinished backup
+        out = sqlite3.connect(part)
+        try:
+            with self.lock:
+                self.db.backup(out)
+            from classifile import __version__
+            with out:
+                out.execute("INSERT INTO settings VALUES ('backup_info', ?) ON CONFLICT(key) DO UPDATE SET"
+                            " value = excluded.value", (json.dumps({"app": __version__, "schema": self.schema_version,
+                                                                    "made_at": now()}),))
+        finally:
+            out.close()
+        if check_backup(part):
+            part.unlink()
+            raise ValueError("The backup couldn't be checked, so it was not kept. Try again.")
+        part.rename(dest)                   # fails rather than replace a file that appeared meanwhile
+        return dest
 
     def _migrate(self):
         with self.lock, self.db:
@@ -482,6 +611,19 @@ class Catalog:
             out.setdefault(r[0], []).extend(t for t in r[1:] if t)
         return {d: "\n".join(parts) for d, parts in out.items()}
 
+    def unread_units(self, doc_id=None):
+        """{document id: [unit numbers]} of the units that still hold content nothing has read (reader.unread_gap:
+        OCR did not run, or left a picture unread), for one document or for all. A document with any is not filed
+        by itself (B3: a decision while a gap remains would be provisional)."""
+        out = {}
+        for r in self.all("SELECT s.document_id, u.unit_index, u.ocr_status, u.ocr_pictures FROM extraction_units u"
+                          " JOIN extractions e ON e.id = u.extraction_id JOIN snapshots s ON s.id = e.snapshot_id"
+                          " WHERE u.suspected_unread = 1" + (" AND s.document_id = ?" if doc_id else "")
+                          + " ORDER BY s.document_id, u.unit_index", *([doc_id] if doc_id else [])):
+            if unread_gap(True, r["ocr_status"], json.loads(r["ocr_pictures"] or "[]")):
+                out.setdefault(r["document_id"], []).append(r["unit_index"])
+        return out
+
     def explicit_labels(self):
         """{document id: category id} for filed documents whose category the user chose or corrected (A7): the
         latest explicit choice. Placements the app made by itself are no confirmation and are left out. The user's
@@ -505,20 +647,31 @@ class Catalog:
                 cats.setdefault(family[d], set()).add(c)
         return {d for d in labels if d in family and len(cats[family[d]]) > 1}
 
+    def learning_revision(self):
+        """Counted up by every change to what may teach matching (the v13 triggers)."""
+        return int(self.get_setting("learning_revision", "0"))
+
     def _chosen_labels(self):
+        # An example teaches while it is one, and once it is filed; imported again and waiting for a decision it is
+        # an open question, and those teach nothing until they are answered (B4).
         examples = dict(self.all("SELECT x.document_id, x.category_id FROM examples x JOIN categories c ON"
-                                 " c.id = x.category_id WHERE c.deleted_at IS NULL"))
+                                 " c.id = x.category_id JOIN documents d ON d.id = x.document_id"
+                                 " WHERE c.deleted_at IS NULL AND d.status IN ('example', 'filed')"))
         return examples | dict(self.all(
             "SELECT m.document_id, m.category_id FROM memberships m JOIN documents d ON d.id = m.document_id"
             " JOIN categories c ON c.id = m.category_id WHERE m.role = 'primary' AND m.status = 'active'"
             " AND m.provenance IN ('user-confirmed', 'user-corrected') AND d.status = 'filed'"
             " AND c.deleted_at IS NULL"))
 
-    def add_matcher(self, bundle, found, keep, trigger="user"):
+    def add_matcher(self, bundle, found, keep, trigger="user", revision=None):
         """Store a trained model as the next version. keep: it becomes the active one (the one before stays as
         "previous"); otherwise it is recorded as rejected and the active one stays. trigger: "user" (Update
-        matching) or "automatic" (A7, record 2.6). Returns the version."""
+        matching) or "automatic" (A7, record 2.6). revision: the learning_revision() it was trained at; when what
+        may teach matching has changed since (a Forget, a removal, a correction), nothing is stored and None is
+        returned, in the same transaction as the check. Returns the version."""
         with self.lock, self.db:
+            if revision is not None and self.learning_revision() != revision:
+                return None
             if keep:
                 self.db.execute("UPDATE matchers SET status = 'previous' WHERE status = 'active'")
             return self.db.execute(

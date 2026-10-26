@@ -189,14 +189,16 @@ def _retire_old_copy(catalog, c, twin_cat=None):
     return "moved"
 
 
-def move_copies(catalog, new_root):
+def move_copies(catalog, new_root, progress=None):
     """Move every published copy outside new_root into it by the verified-copy rules: a new verified copy is
     published (never overwriting; name clashes get a suffix), then the old file is removed only if unchanged.
-    Edited copies are left in place and flagged; missing ones are flagged. Returns [(copy_id, outcome)]."""
+    Edited copies are left in place and flagged; missing ones are flagged. progress(done, total), before each copy.
+    Returns [(copy_id, outcome)]."""
     report = []
-    for c in catalog.copies("published"):
-        if _inside(c["path"], new_root):
-            continue
+    todo = [c for c in catalog.copies("published") if not _inside(c["path"], new_root)]
+    for n, c in enumerate(todo):
+        if progress:
+            progress(n, len(todo))
         old = Path(c["path"])
         if not old.exists():
             catalog.update_copy(c["id"], status="missing")

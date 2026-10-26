@@ -643,5 +643,39 @@ def test_learning_from_existing_folders_reads_only_and_counts_as_the_users_examp
     assert note is None and org.catalog.document(doc)["status"] == "needs_decision"
     assert org.forget_folder(found[0][0]) == 2                             # the two still kept as examples
     assert org.catalog.document(doc)["status"] == "needs_decision"         # the waiting one stays
-    assert sorted(Counter(org.catalog.explicit_labels().values()).values()) == [1, 3]
+    assert sorted(Counter(org.catalog.explicit_labels().values()).values()) == [3]   # waiting: teaches nothing (B4)
     assert {p: (p.read_bytes(), p.stat().st_mtime_ns) for p in mine.rglob("*") if p.is_file()} == before
+
+
+def test_a_known_gap_stops_automatic_filing_and_new_folders_until_read_again(make_org, tmp_path):
+    """designImp2 item 4: a clear match with a picture left unread waits, with where the gap is; the user can still
+    file it; reading it again without the gap lets it be filed by itself (B3)."""
+    org, src = make_org(), tmp_path / "src"
+    for n in range(3):
+        _add(org, src, "Algebra", n)
+        _add(org, src, "Networks", n)
+    org.update_matching()
+    clear, other = _add(org, src, "Networks", 7, False), _add(org, src, "Networks", 8, False)
+    cats = {c["name"]: c["id"] for c in org.catalog.categories()}
+    assert org.auto_choice(clear)[0] == cats["Networks"]               # clear: it would be filed by itself
+    org.catalog.run("UPDATE extraction_units SET suspected_unread = 1, ocr_status = 'partial', ocr_pictures = ?"
+                    " WHERE unit_index = 2 AND extraction_id = (SELECT e.id FROM extractions e JOIN snapshots s"
+                    " ON s.id = e.snapshot_id WHERE s.document_id = ?)",
+                    json.dumps([{"picture": 0, "outcome": "read"}, {"picture": 1, "outcome": "render_failed"}]),
+                    clear)
+    assert org.catalog.unread_units() == {clear: [2]}                   # where: page 2
+    assert org.auto_choice(clear) is None and org.file_automatically(clear) is None
+    assert org.matches(clear, set(cats.values()))[0][0] == cats["Networks"]   # still suggested to the user
+    assert org.auto_choice(other)[0] == cats["Networks"]               # the gap is this document's alone
+    path = src / "networks-7.pdf"
+    assert org.record(path, *read_and_analyze(path)) == (clear, "read again")   # Read again: no gap this time
+    assert org.catalog.unread_units() == {} and org.file_automatically(clear) == cats["Networks"]
+    assert org.record(path, *read_and_analyze(path)) == (clear, "already imported")   # filed: never read over
+
+
+def test_unread_text_names_the_pages():
+    from classifile.app.reasons import unread_text
+
+    assert unread_text([2], "page").startswith("⚠ Some pictures on page 2 couldn't be read")
+    assert "on slides 3, 4 and 9" in unread_text([3, 4, 9], "slide")
+    assert "in this document" in unread_text([12], "block")

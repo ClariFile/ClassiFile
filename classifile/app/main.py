@@ -9,7 +9,7 @@ import re
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
 
@@ -37,14 +37,14 @@ from classifile.app.models import DOC, SORTS, CategoryModel, DocumentFilter, Doc
 from classifile.app.widgets import (
     CHECKLIST_MAX, DATE_COLUMN_MIN, PANEL, SETTING_CHOICE, TIGHT, DETAILS_MAX, DETAILS_MIN, DETAILS_WIDTH, FILE_ICON, GROUP, LIST_MIN, MIN_WINDOW,
     MOTION_STANDARD, NARROW, PAD, RELATED, SEARCH_MAX, SECTION, SIDEBAR_WIDTH, SUPPORTED, TOAST, TOAST_LONG,
-    CONTROL, FONT, ICON, STATUS, foot_icon, TEXT_BODY, WIDE, WINDOW, box, button_motion, keyboard_focus, motion, qt_palette, set_motion, slide_away, smooth_scrolling, style_sheet,
+    CLOSE_POLL, CONTROL, FONT, ICON, STATUS, foot_icon, TEXT_BODY, WIDE, WINDOW, box, button_motion, keyboard_focus, motion, qt_palette, set_motion, slide_away, smooth_scrolling, style_sheet,
     use_theme,
     Collapsible, DropOverlay, ElidedLabel, Notices, PickerDialog, PreviewOverlay, Toast, wrappable, wrapped,
 )
 from classifile.copies.engine import CopyError
-from classifile.catalog.db import Catalog, default_data_dir
-from classifile import __version__, matching
-from classifile.matching import AUTO_DEFAULT, LEVELS
+from classifile.catalog.db import Catalog, apply_restore, default_data_dir, stage_restore
+from classifile import matching, version_text
+from classifile.matching import AUTO_DEFAULT, AUTO_MIN_CONFIRMED, LEVELS
 from classifile.reader import RECORD_VERSION
 from classifile.organizer import Organizer, in_program_folder, is_cloud_synced, read_and_analyze
 from classifile.worker import WorkerPool
@@ -93,6 +93,18 @@ def check_text(found):
     return text + (f" (the version before: {old['first']} and {old['wrong']})" if old else "")
 
 
+def readiness_text(rows):
+    """Advanced in Settings: each category's confirmed documents, and whether it is filed into by itself yet."""
+    lines = []
+    for name, n, families, unreadable in rows:
+        line = f"{name}: {n} confirmed" + (
+            f" in {families} famil{'y' if families == 1 else 'ies'}" if families != n else "") + (
+            f", {unreadable} with no readable words" if unreadable else "")
+        lines.append(line + ("" if n >= AUTO_MIN_CONFIRMED else
+                             f" (filed into by itself from {AUTO_MIN_CONFIRMED})"))
+    return "\n".join(lines)
+
+
 def learning_text(audit):
     """Advanced in Settings: what matching may learn from now, and what is left out and why."""
     plural = lambda n, word: f"{n} {word}{'' if n == 1 else 's'}"
@@ -104,6 +116,9 @@ def learning_text(audit):
                  "categories; file them in one category to include them.")
     if audit["unreadable"]:
         text += f" Left out: {plural(audit['unreadable'], 'document')} with no readable words."
+    if audit.get("related"):
+        text += (f" {plural(audit['related'], 'document')} look like versions of one another by name or text but "
+                 "are filed in different categories. They still teach matching; check they are where you want.")
     return text
 
 
@@ -136,7 +151,7 @@ def problem_report(catalog):
     status = dict(catalog.all("SELECT status, COUNT(*) FROM documents GROUP BY status"))
     categories = one("SELECT COUNT(*) FROM categories WHERE deleted_at IS NULL")
     edited = one("SELECT COUNT(*) FROM copies WHERE status = 'edited'")
-    lines = [f"ClassiFile {__version__}", f"Windows: {platform.platform()}",
+    lines = [f"ClassiFile {version_text()}", f"Windows: {platform.platform()}",
              f"Python {platform.python_version()} · catalog schema {catalog.schema_version} · extraction record "
              f"{RECORD_VERSION}", "",
              "Documents: " + ", ".join(f"{k} {status.get(k, 0)}" for k in
@@ -225,6 +240,10 @@ class MainWindow(QWidget):
         self.entered = None         # the view the last refresh showed
         self.since = recent_since() # "Recently added" starts here; set again whenever a view is opened
         self.pool = ThreadPoolExecutor(max_workers=READ_WORKERS)
+        self.jobs = set()           # what runs or waits on self.pool; closing waits for it to end (closeEvent)
+        self.closing = False        # Close was accepted: no new work, and finished reads are not recorded
+        self.stopped = set()        # queued reads the user stopped (Stop): never read, counted as stopped
+        self.root_moving = None     # (done, total) while copies move to a new output folder, off this thread
         self.workers = workers or WorkerPool(read_and_analyze, size=READ_WORKERS)
         self.bridge = Bridge()
         self.bridge.read_done.connect(self._read_done)
@@ -384,6 +403,12 @@ class MainWindow(QWidget):
         mode.addWidget(self.mode_link)
         head.addLayout(mode)
         head.addWidget(self.processing)
+        self.stop_button = QPushButton("Stop")
+        self.stop_button.setObjectName("link")
+        self.stop_button.setToolTip("Documents being read now finish; the rest are not read")
+        self.stop_button.clicked.connect(self.stop_reading)
+        self.stop_button.hide()
+        head.addWidget(self.stop_button)
         head.addWidget(self.add_button)
 
         self.notices = Notices()
@@ -795,6 +820,18 @@ class MainWindow(QWidget):
         a.addWidget(self.matching_log)
         a.addSpacing(RELATED)
         a.addWidget(self.tech)
+        backup = QPushButton("Back up the catalog…")
+        backup.setToolTip("Saves your categories, choices and what matching learned to a file you choose. "
+                          "Your documents and copies stay where they are.")
+        backup.clicked.connect(self.backup_catalog)
+        restore = QPushButton("Restore a backup…")
+        restore.setToolTip("Switches to a backup at the next start. The catalog in use now is kept beside it.")
+        restore.clicked.connect(self.restore_catalog)
+        keep = box(QHBoxLayout(), spacing=RELATED)
+        keep.addWidget(backup)
+        keep.addWidget(restore)
+        keep.addStretch(1)
+        a.addLayout(keep)
         self.advanced = Collapsible("Advanced", advanced_body)   # starts closed: details for reporting a problem
         for combo in (self.auto_level, self.auto_scope, self.appearance, self.motion):
             combo.setFixedWidth(SETTING_CHOICE)   # one width: their edges line up down the page
@@ -859,6 +896,7 @@ class MainWindow(QWidget):
         Once matching is in use, a document's stored text is read and scored the first time it is seen."""
         names = {c["id"]: c["name"] for c in (self.org.catalog.categories() if cats is None else cats)}
         matching = bool(self.org.matcher())
+        unread = self.org.catalog.unread_units()
         docs = []
         for d in self.org.catalog.waiting_documents():
             if d["status"] not in WAITING:
@@ -876,6 +914,7 @@ class MainWindow(QWidget):
             matches = [(names[c], n, w) for c, n, w in self.org.matches(d["id"], names)] if ready and matching else []
             docs.append(d | {"missing": missing, "suggestions": analysis.get("suggestions", []),
                              "unit": analysis.get("unit", "page"), "matches": matches,
+                             "unread": unread.get(d["id"], []),
                              "abstained": ready and matching and not matches})
         self.missing = {d["id"]: d["missing"] for d in docs}
         by_id = {d["id"]: d for d in docs}
@@ -1088,7 +1127,14 @@ class MainWindow(QWidget):
         self.docs.sync(rows)
 
     def _show_processing(self):
-        if self.inflight:
+        if self.closing:                # "Closing…" stays in view
+            return
+        if self.root_moving:
+            done, total = self.root_moving
+            self.processing.setText(f"Moving copies to the new output folder: {min(done + 1, total)} of {total}…")
+        elif self.learning and "scanning" in self.learning:
+            self.processing.setText(f"Looking through {self.learning['scanning']}…")
+        elif self.inflight:
             done = max(0, self.read_total - len(self.inflight))
             self.processing.setText(f"Reading {min(done + 1, self.read_total)} of {self.read_total} documents…")
         elif self.learning:
@@ -1097,7 +1143,19 @@ class MainWindow(QWidget):
         else:
             self.processing.setText("")
             self.read_total = 0
-        self.processing.setVisible(bool(self.inflight or self.learning))
+        self.processing.setVisible(bool(self.inflight or self.learning or self.root_moving))
+        self.stop_button.setVisible(any(st == "queued" and p not in self.stopped for p, st in self.inflight.items())
+                                    or bool(self.learning and "total" in self.learning
+                                            and not self.learning.get("stop")))
+
+    def stop_reading(self):
+        """Stop: the documents being read now finish; the ones still waiting their turn are not read (they are
+        counted as stopped, never as unreadable), and learning from a folder stops the same way."""
+        self.stopped |= {p for p, st in self.inflight.items() if st == "queued"}
+        if self.learning and "total" in self.learning:
+            self.learning["stop"] = True
+        self.toast.show_message("Stopping: the documents being read now finish first.")
+        self._show_processing()
 
     def _show_notices(self, waiting):
         notices = []
@@ -1330,8 +1388,32 @@ class MainWindow(QWidget):
         answer = self.ask_move(len(to_move)) if to_move else "leave"
         if answer == "cancel":
             return
-        # ponytail: the move runs on the UI thread; a background job when large folders make the window wait.
-        report = self.org.set_output_root(path, move=answer == "move")
+        # Copies move off this thread, one at a time (Organizer.copying keeps other copy work waiting meanwhile).
+        self.root_moving = (0, len(to_move)) if answer == "move" else None
+        self.change_root.setEnabled(False)
+        self._show_processing()
+
+        def step(done, total):
+            self.root_moving = (done, total)
+            self._show_processing()
+
+        def done(report):
+            self.moving -= 1
+            self.root_moving = None
+            self.change_root.setEnabled(True)
+            self._show_processing()
+            if isinstance(report, Exception):
+                why = report if isinstance(report, ValueError) else type(report).__name__
+                self.toast.show_message(f"The output folder wasn't changed: {why}.")
+            else:
+                self._root_changed(answer, report)
+            self._show_root()
+            self.refresh()
+
+        progress = lambda n, total: self.bridge.job_done.emit(lambda r: step(*r), (n, total))
+        self._background(lambda: self.org.set_output_root(path, move=answer == "move", progress=progress), done)
+
+    def _root_changed(self, answer, report):
         counts = {k: sum(1 for _, o in report if o == k) for k in ("moved", "edited", "missing", "failed")}
         msg = "Output folder changed."
         if answer == "move":
@@ -1342,7 +1424,6 @@ class MainWindow(QWidget):
             if counts["missing"] or counts["failed"]:
                 msg += f" {counts['missing'] + counts['failed']} could not be moved and stayed where they were."
         self.toast.show_message(msg)
-        self.refresh()
 
     def _show_root(self):
         root = self.org.output_root
@@ -1363,15 +1444,27 @@ class MainWindow(QWidget):
         path = self.pick_folder("Choose a folder you have already organized")
         if not path:
             return
-        try:
-            found = self.org.scan_folder(path)
-        except ValueError as e:
-            self.toast.show_message(str(e), ms=TOAST_LONG)
-            return
-        if not found:
-            self.toast.show_message(f"No folder inside {Path(path).name} holds {SUPPORTED} documents.", ms=TOAST_LONG)
-            return
-        chosen = self.ask_learn(Path(path), found)
+        self.learning = {"scanning": Path(path).name}   # a large folder takes a while: off this thread
+        self._show_processing()
+
+        def done(found):
+            self.moving -= 1
+            self.learning = None
+            self._show_processing()
+            if self.closing:
+                return
+            if isinstance(found, Exception):
+                text = str(found) if isinstance(found, ValueError) else "ClassiFile couldn't read this folder."
+                return self.toast.show_message(text, ms=TOAST_LONG)
+            if not found:
+                return self.toast.show_message(f"No folder inside {Path(path).name} holds {SUPPORTED} documents.",
+                                               ms=TOAST_LONG)
+            self._learn_chosen(Path(path), found)
+
+        self._background(lambda: self.org.scan_folder(path), done)
+
+    def _learn_chosen(self, path, found):
+        chosen = self.ask_learn(path, found)
         jobs = []
         for name, folder, files in chosen or ():
             try:
@@ -1380,14 +1473,20 @@ class MainWindow(QWidget):
                 self.toast.show_message(f"{name}: {e}")
                 continue
             jobs += [(p, cat_id, folder) for p in files]
+        self._learn_files(jobs, [str(folder) for _, folder, _ in chosen or ()])
+
+    def _learn_files(self, jobs, folders):
         if not jobs:
             return
-        self.learning = {"total": len(jobs), "done": 0, "learned": 0, "known": 0, "unread": 0}
+        self.learning = {"total": len(jobs), "done": 0, "learned": 0, "known": 0, "unread": 0, "folders": folders}
         for job in jobs:
-            self.pool.submit(self._learn_job, *job)
+            self._submit(self._learn_job, *job)
         self.refresh()
 
     def _learn_job(self, path, cat_id, folder):
+        if (self.learning or {}).get("stop"):
+            return self.bridge.job_done.emit(lambda result: self._learn_done(path, cat_id, folder, result),
+                                             "stopped")
         try:
             out = self.workers.run(str(path))   # read in a worker process, like any document; only read
         except Exception as e:
@@ -1396,21 +1495,97 @@ class MainWindow(QWidget):
 
     def _learn_done(self, path, cat_id, folder, out):
         run = self.learning
-        what = "unread" if isinstance(out, Exception) else self.org.learn(path, *out, cat_id, folder)
-        run[what] += 1
+        if self.closing or run is None:
+            return
+        what = "stopped" if out == "stopped" else "unread" if isinstance(out, Exception) \
+            else self.org.learn(path, *out, cat_id, folder)
+        run[what] = run.get(what, 0) + 1
+        if what != "learned":                   # which files taught nothing, by folder: shown in Settings
+            run.setdefault("files", {}).setdefault(str(folder), {}).setdefault(what, []).append(str(path))
         run["done"] += 1
         if run["done"] < run["total"]:
             return self._show_processing()
         self.learning = None
+        self._keep_learn_results(run)
         parts = [f"Learned from {run['learned']} document{'s' if run['learned'] != 1 else ''}"] + (
             [f"{run['known']} already in ClassiFile"] if run["known"] else []) + (
-            [f"{run['unread']} couldn't be read"] if run["unread"] else [])
+            [f"{run['unread']} couldn't be read"] if run["unread"] else []) + (
+            [f"{run['stopped']} not read (stopped)"] if run.get("stopped") else [])
         self.toast.show_message(" · ".join(parts), ms=TOAST_LONG)
         if run["learned"]:
             self.update_matching()              # learn from them now, with the usual check; then look again
         self.refresh()
 
+    def _keep_learn_results(self, run):
+        """The files of each learned folder that taught nothing (unread, already in ClassiFile, stopped), kept in
+        the catalog for Settings. They stay on this computer: the problem report never includes them."""
+        kept = self._setting("learn_results", {})
+        for folder in run.get("folders", ()):
+            kept[folder] = run.get("files", {}).get(folder, {})
+        self._save("learn_results", {f: r for f, r in kept.items() if r})
+
+    def show_learn_results(self, folder):
+        """Settings, a learned folder's "Details…": which of its files taught nothing, and why; Try again reads
+        the ones that couldn't be read (or were stopped) once more."""
+        result = self._setting("learn_results", {}).get(folder, {})
+        words = {"unread": "Couldn't be read", "known": "Already in ClassiFile (they teach as they are)",
+                 "stopped": "Not read (stopped)"}
+        text = "\n\n".join(f"{words[k]}:\n" + "\n".join(Path(p).name for p in v) for k, v in result.items() if v)
+        again = [p for k in ("unread", "stopped") for p in result.get(k, ())]
+        if self.ask_list(f"Learned from {Path(folder).name}", text, "Try again" if again else None):
+            cat = next((c for f, c, _, _ in self.org.catalog.learned_folders() if f == folder), None)
+            if cat and not self.learning:
+                self._learn_files([(Path(p), cat, folder) for p in again if Path(p).is_file()], [folder])
+
+    def ask_save_path(self, title, name):
+        """Where to save a new file; "" when cancelled. Replaced in tests."""
+        return QFileDialog.getSaveFileName(self, title, str(Path.home() / "Documents" / name),
+                                           "ClassiFile catalog (*.sqlite3)")[0]
+
+    def ask_open_path(self, title):
+        return QFileDialog.getOpenFileName(self, title, str(Path.home() / "Documents"),
+                                           "ClassiFile catalog (*.sqlite3)")[0]
+
+    def backup_catalog(self):
+        """Advanced, "Back up the catalog…": a consistent copy in a new file (designImp2 item 12)."""
+        path = self.ask_save_path("Back up the catalog", f"ClassiFile catalog {date.today().isoformat()}.sqlite3")
+        if not path:
+            return
+        try:
+            self.org.catalog.backup(path)
+        except (ValueError, OSError) as e:
+            why = e if isinstance(e, ValueError) else "the file couldn't be written."
+            return self.toast.show_message(f"No backup was made: {why}", ms=TOAST_LONG)
+        self.toast.show_message(f"Backed up to {Path(path).name}. Keep it with your other backups.", ms=TOAST_LONG)
+
+    def restore_catalog(self):
+        """Advanced, "Restore a backup…": checked now, switched in at the next start (catalog.db.apply_restore);
+        the catalog in use now is kept beside it, never overwritten."""
+        path = self.ask_open_path("Restore a backup")
+        if not path:
+            return
+        try:
+            stage_restore(path, self.org.catalog.path.parent)
+        except (ValueError, OSError) as e:
+            why = e if isinstance(e, ValueError) else "it could not be copied."
+            return self.toast.show_message(f"Not restored: {why}", ms=TOAST_LONG)
+        self.toast.show_message("Close and open ClassiFile again to switch to the backup. The catalog in use now is "
+                                "kept beside it.", ms=TOAST_LONG)
+
+    def ask_list(self, title, text, action=None):
+        """A list to read, with an optional action; True when the action was chosen. Replaced in tests."""
+        box_ = QMessageBox(self)
+        box_.setWindowTitle(title)
+        box_.setText(text)
+        go = box_.addButton(action, QMessageBox.AcceptRole) if action else None
+        box_.addButton("Close", QMessageBox.RejectRole)
+        box_.exec()
+        return go is not None and box_.clickedButton() is go
+
     def forget_folder(self, folder):
+        kept = self._setting("learn_results", {})
+        if kept.pop(str(folder), None) is not None:
+            self._save("learn_results", kept)
         n = self.org.forget_folder(folder)
         self.toast.show_message(f"Forgot {n} example{'s' if n != 1 else ''} from {Path(folder).name}. "
                                 "Your files weren't touched.")
@@ -1448,7 +1623,7 @@ class MainWindow(QWidget):
                     self.run = {"docs": [], "auto": set(), "unread": 0}
                 self.inflight[p] = "queued"
                 self.read_total += 1
-                self.pool.submit(self._read_job, p)
+                self._submit(self._read_job, p)
         if refused:
             self.toast.show_message("Not added: " + "; ".join(refused), ms=TOAST_LONG)
         if self.view[0] in TEXT_PAGES + ("category",):
@@ -1457,6 +1632,8 @@ class MainWindow(QWidget):
         self.refresh()
 
     def _read_job(self, path):
+        if path in self.stopped:
+            return self.bridge.read_done.emit(path, "stopped")
         self.bridge.read_done.emit(path, "reading")
         try:
             out = self.workers.run(path)  # crashes and timeouts come back as failed results
@@ -1465,6 +1642,16 @@ class MainWindow(QWidget):
         self.bridge.read_done.emit(path, out)
 
     def _read_done(self, path, out):
+        if self.closing:                # the window is going: nothing more is recorded
+            return
+        if out == "stopped":            # never read: it leaves the list, and the summary counts it
+            self.inflight.pop(path, None)
+            self.stopped.discard(path)
+            if self.run is not None:
+                self.run["stopped"] = self.run.get("stopped", 0) + 1
+            self._fill_list()
+            self._show_processing()
+            return self._run_step()
         if out == "reading":  # only its row and the "Reading 3 of 12…" line change: nothing is read or rebuilt
             if path in self.inflight:
                 self.inflight[path] = "reading"
@@ -1530,7 +1717,7 @@ class MainWindow(QWidget):
             self.filing[d["id"]] = cat_id
             self.actions[d["id"]] = action
         for d in docs:
-            self.pool.submit(self._file_job, d["id"], cat_id)
+            self._submit(self._file_job, d["id"], cat_id)
         self.refresh()
 
     def _file_job(self, doc_id, cat_id):
@@ -1586,7 +1773,7 @@ class MainWindow(QWidget):
             if choice:
                 self.filing[doc_id] = choice[0]
                 self.auto_running += 1
-                self.pool.submit(self._auto_job, doc_id)
+                self._submit(self._auto_job, doc_id)
 
     def _auto_job(self, doc_id):
         try:
@@ -1649,7 +1836,8 @@ class MainWindow(QWidget):
         parts = ([f"Filed {filed} automatically"] if filed else []) + (
             [f"{folders} new folder{'s' if folders != 1 else ''}"] if folders else []) + (
             [f"{need} need{'s' if need == 1 else ''} you"] if need else []) + (
-            [f"{unread} couldn't be read"] if unread else [])
+            [f"{unread} couldn't be read"] if unread else []) + (
+            [f"{run['stopped']} not read (stopped)"] if run.get("stopped") else [])
         if parts:
             target = DECIDE if need or unread else AUTO
             self.toast.show_message(" · ".join(parts), "Review", lambda: self.show_view(target), ms=TOAST_LONG)
@@ -1967,9 +2155,10 @@ class MainWindow(QWidget):
         self.matching_label.setText(text)
         self._show_learned()
         self.tech.setText(
-            f"ClassiFile {__version__} · matching version {m.get('version', 'none yet')} · catalog schema "
+            f"ClassiFile {version_text()} · matching version {m.get('version', 'none yet')} · catalog schema "
             f"{self.org.catalog.schema_version} · extraction record {RECORD_VERSION}\nData folder: "
-            f"{wrappable(self.org.catalog.path.parent)}\n" + learning_text(self.org.learning_audit()))
+            f"{wrappable(self.org.catalog.path.parent)}\n" + learning_text(self.org.learning_audit())
+            + (f"\n\nBy category:\n{ready}" if (ready := readiness_text(self.org.readiness())) else ""))
         lines = []
         for r in self.org.catalog.matcher_log():
             found = json.loads(r["check_json"]) if r["check_json"] else None
@@ -1991,14 +2180,26 @@ class MainWindow(QWidget):
         for folder, _, name, n in self.org.catalog.learned_folders():
             row = QWidget()
             h = box(QHBoxLayout(row), spacing=GROUP)
-            text = QLabel(f"{Path(folder).name} → {name} · {n} document{'s' if n != 1 else ''}")
+            result = self._setting("learn_results", {}).get(folder, {})
+            untaught = ", ".join(f"{len(v)} {w}" for k, w in (("unread", "couldn't be read"),
+                                                                ("known", "already in ClassiFile"),
+                                                                ("stopped", "not read")) if (v := result.get(k)))
+            text = QLabel(f"{Path(folder).name} → {name} · {n} document{'s' if n != 1 else ''}"
+                          + (f" · {untaught}" if untaught else ""))
             text.setObjectName("secondary")
             text.setToolTip(folder)
+            if untaught:
+                details = QPushButton("Details…")
+                details.setObjectName("link")
+                details.setToolTip("Which files taught nothing, and why")
+                details.clicked.connect(lambda _=False, f=folder: self.show_learn_results(f))
             forget = QPushButton("Forget")
             forget.setObjectName("link")
             forget.setToolTip("ClassiFile deletes what it stored for these examples. Your files aren't touched.")
             forget.clicked.connect(lambda _=False, f=folder: self.forget_folder(f))
             h.addWidget(text, 1)
+            if untaught:
+                h.addWidget(details)
             h.addWidget(forget)
             self.learned_rows.addWidget(row)
         self.learned.setVisible(self.learned_rows.count() > 0)
@@ -2017,6 +2218,9 @@ class MainWindow(QWidget):
                 text = f"Something went wrong while updating matching ({type(result).__name__}). Try again."
             elif result["outcome"] == "up to date":
                 text = "Matching is already up to date."
+            elif result["outcome"] == "newer choices":
+                text = ("Matching wasn't changed: you filed, moved or forgot documents while it was learning. "
+                        "Update again to include them.")
             else:
                 said = check_text(result["check"])
                 if result["outcome"] == "kept previous":
@@ -2041,8 +2245,8 @@ class MainWindow(QWidget):
         def done(result):
             self.moving -= 1
             self.updating = False
-            if isinstance(result, Exception) or result["outcome"] == "up to date":
-                return                          # too little to learn from yet: tried again at the next one
+            if isinstance(result, Exception) or result["outcome"] in ("up to date", "newer choices"):
+                return                          # too little yet, or newer choices came: tried again at the next one
             if result["outcome"] == "updated":
                 self.update_note = (f"Matching updated by itself: version {result['version']}, learned from "
                                     f"{result['documents']} documents in {result['categories']} categories.")
@@ -2059,10 +2263,20 @@ class MainWindow(QWidget):
         self.refresh()
 
     def retry_docs(self, ids):
-        """Read documents that couldn't be read again, from their originals."""
-        docs = [d for d in (self.org.catalog.document(i) for i in ids) if d and d["status"] in ("failed", "pending")]
+        """Read documents again from their originals: those that couldn't be read, and waiting ones with pictures
+        left unread (a better read clears the warning)."""
+        unread = self.org.catalog.unread_units()
+        docs = [d for d in (self.org.catalog.document(i) for i in ids) if d and (
+            d["status"] in ("failed", "pending") or (d["status"] == "needs_decision" and d["id"] in unread))]
         if docs:
             self.import_paths([d["source_path"] for d in docs])
+
+    def _submit(self, fn, *args):
+        """Every job off this thread goes through here, so closing knows what is still running."""
+        future = self.pool.submit(fn, *args)
+        self.jobs.add(future)
+        future.add_done_callback(self.jobs.discard)
+        return future
 
     def _background(self, job, done):
         """Run job() off this thread, then done(result or the exception) in the window."""
@@ -2073,7 +2287,7 @@ class MainWindow(QWidget):
                 result = e
             self.bridge.job_done.emit(done, result)
         self.moving += 1
-        self.pool.submit(run)
+        self._submit(run)
 
     def move_docs(self, ids):
         ids = [i for i in ids if (self.org.catalog.document(i) or {"status": ""})["status"] == "filed"]
@@ -2232,19 +2446,31 @@ class MainWindow(QWidget):
         super().keyPressEvent(e)
 
     def closeEvent(self, e):
-        n = len(self.waiting())
-        if n and self.org.catalog.get_setting("close_notice") != "off":
-            choice, dont_show = self.ask_close(n)
-            if dont_show:
-                self.org.catalog.set_setting("close_notice", "off")
-            if choice == "back":
-                e.ignore()
-                self.show_view(DECIDE)
-                return
-        self.details.preview.close_pdf()
-        self.read_results.clear()
-        self.pool.shutdown(wait=False, cancel_futures=True)
-        self.workers.close()
+        """Closing takes no new work: waiting reads are dropped and the reader processes stop. A copy, move or
+        matching update that has started finishes first, with "Closing…" in view, so the catalog (and its lock,
+        released when the window has gone) is never left to a second ClassiFile while work on it goes on."""
+        if not self.closing:
+            n = len(self.waiting())
+            if n and self.org.catalog.get_setting("close_notice") != "off":
+                choice, dont_show = self.ask_close(n)
+                if dont_show:
+                    self.org.catalog.set_setting("close_notice", "off")
+                if choice == "back":
+                    e.ignore()
+                    self.show_view(DECIDE)
+                    return
+            self.closing = True
+            self.details.preview.close_pdf()
+            self.read_results.clear()
+            self.pool.shutdown(wait=False, cancel_futures=True)
+            self.workers.close()
+        if self.jobs:
+            e.ignore()
+            self.setEnabled(False)          # nothing new starts meanwhile
+            self.processing.setText("Closing… finishing the work under way")
+            self.processing.show()
+            QTimer.singleShot(CLOSE_POLL, self.close)
+            return
         super().closeEvent(e)
 
 
@@ -2269,8 +2495,13 @@ def main():
         QMessageBox.information(None, "ClassiFile is already open",
                                 "ClassiFile is already open. Switch to its window on the taskbar.")
         sys.exit(0)
+    restored = apply_restore(path)              # a backup chosen last time becomes the catalog now
     w = MainWindow(Organizer(Catalog(path)))
     w.show()
+    if restored is not None:
+        w.toast.show_message("The backup could not be used, so nothing changed." if restored == "not used" else
+                             "Switched to the backup." + (f" The earlier catalog is kept as “{restored}”."
+                                                         if restored else ""), ms=TOAST_LONG)
     code = app.exec()
     lock.unlock()
     sys.exit(code)

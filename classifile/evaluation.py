@@ -34,8 +34,9 @@ def file_stem(file_name):
 def families(counts, files):
     """{document id: family id} for the documents of counts ({id: matching.terms()}). files: {id: (sha256, file
     name, the owner's family id or "")}. Documents are one family when the owner says so, or when they have the
-    same bytes, the same file_stem(), or nearly the same text (matching.NEAR_TEXT). The family id is its smallest
-    document id."""
+    same bytes, the same file_stem(), or nearly the same text (matching.NEAR_TEXT). A name or text resemblance is
+    an inference, and the owner's ids overrule it: two documents the owner gave different family ids are never
+    joined by it (a shared file name such as "notes" is no proof). The family id is its smallest document id."""
     docs = sorted(counts)
     parent = {d: d for d in docs}
 
@@ -49,17 +50,19 @@ def families(counts, files):
         a, b = find(a), find(b)
         parent[max(a, b)] = min(a, b)
 
+    owners = {d: files.get(d, ("", "", ""))[2] for d in docs}
+    inferable = lambda a, b: not (owners[a] and owners[b] and owners[a] != owners[b])
     seen = {}
     for d in docs:
         sha, name, owner = files.get(d, ("", "", ""))
         for key in (("owner", owner), ("bytes", sha), ("name", file_stem(name))):
-            if key[1]:
+            if key[1] and (key[0] != "name" or inferable(d, seen.get(key, d))):
                 join(d, seen.setdefault(key, d))
     idf = matching.fit_idf([counts[d] for d in docs])     # for finding versions only: no model sees these vectors
     vectors = {d: matching.vector(counts[d], idf) for d in docs}
     for i, a in enumerate(docs):
         for b in docs[:i]:
-            if vectors[a] and matching.dot(vectors[a], vectors[b]) >= matching.NEAR_TEXT:
+            if vectors[a] and inferable(a, b) and matching.dot(vectors[a], vectors[b]) >= matching.NEAR_TEXT:
                 join(a, b)
     return {d: find(d) for d in docs}
 

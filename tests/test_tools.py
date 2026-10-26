@@ -337,3 +337,28 @@ def test_screenshots_render_a_made_up_library(tmp_path):
     from tools import screenshots
     assert screenshots.main([str(tmp_path / "shots"), "--size", "1024x640", "--views", "decide,settings"]) == 0
     assert sorted(p.name for p in (tmp_path / "shots").iterdir()) == ["decide.png", "settings.png"]
+
+
+def test_error_ledger_uses_neutral_ids_and_never_overwrites(make_org, filed_pdf, tmp_path, capsys):
+    """designImp2: the private error ledger. Neutral ids in the ledger; file names only in the separate map."""
+    import csv
+
+    from tools import error_ledger
+
+    org = make_org()
+    for cat, texts in {"Garden": ("compost soil seedling", "mulch pruning hedge", "tomato greenhouse soil"),
+                       "Travel": ("hotel booking passport", "flight luggage visa", "train ticket hotel")}.items():
+        for n, words in enumerate(texts):
+            filed_pdf(org, f"{cat.lower()}-{n}.pdf", words, cat)
+    path = org.catalog.path
+    org.catalog.close()
+    out, names = tmp_path / "ledger.csv", tmp_path / "names.csv"
+    assert error_ledger.main(["--catalog", str(path), "--out", str(out), "--names", str(names)]) == 0
+    rows = list(csv.DictReader(open(out, encoding="utf-8")))
+    assert len(rows) == 6 and [r["id"] for r in rows] == [f"D{n}" for n in range(1, 7)]
+    assert not any(".pdf" in v for r in rows for v in r.values())          # no file names in the ledger
+    assert {r["file_name"] for r in csv.DictReader(open(names, encoding="utf-8"))} == {
+        f"{c}-{n}.pdf" for c in ("garden", "travel") for n in range(3)}
+    assert all(r["outcome"] in ("right", "wrong", "missed", "wait") for r in rows)
+    with pytest.raises(SystemExit):
+        error_ledger.main(["--catalog", str(path), "--out", str(out)])    # never over an existing file

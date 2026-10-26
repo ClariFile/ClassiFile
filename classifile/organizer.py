@@ -1,6 +1,8 @@
 """GUI-independent workflow: import checks -> read + analyze -> record -> user decision -> verified copy."""
+import functools
 import os
 import sys
+import threading
 from pathlib import Path
 
 from classifile import evaluation, matching
@@ -41,9 +43,21 @@ def in_program_folder(path):
     return Path(path).resolve().is_relative_to(Path(sys.executable).resolve().parent)
 
 
+def copying(method):
+    """One copy-making action at a time (filing, moving, renaming, a new output folder...), from whichever thread:
+    each reads where the copies are and changes it, so two at once could work on the same files. Reentrant: filing
+    a new folder's documents is one action."""
+    @functools.wraps(method)
+    def run(self, *args, **kwargs):
+        with self.copy_lock:
+            return method(self, *args, **kwargs)
+    return run
+
+
 class Organizer:
     def __init__(self, catalog):
         self.catalog = catalog
+        self.copy_lock = threading.RLock()  # see copying()
         self._matcher = False       # False: not loaded yet; None: no usable model; else (version row, Matcher)
         self._ranked = {}           # doc_id -> its categories ranked by the model in use
         self._counts = {}           # doc_id -> matching.terms() of its stored text
@@ -56,15 +70,17 @@ class Organizer:
         root = self.catalog.get_setting("output_root")
         return Path(root) if root else None
 
-    def set_output_root(self, path, move=False):
+    @copying
+    def set_output_root(self, path, move=False, progress=None):
         """Choose the output folder. With move=True, ClassiFile's existing copies are moved into it by the
-        verified-copy rules (edited copies stay and are flagged). Returns [(copy_id, outcome)] for the move."""
+        verified-copy rules (edited copies stay and are flagged); progress(done, total) as it goes. Returns
+        [(copy_id, outcome)] for the move."""
         path = Path(path).resolve()
         if not path.is_dir():
             raise ValueError("output folder does not exist")
         if in_program_folder(path):
             raise ValueError("output folder is inside ClassiFile's program folder")
-        report = move_copies(self.catalog, path) if move else []
+        report = move_copies(self.catalog, path, progress) if move else []
         self.catalog.set_setting("output_root", str(path))
         return report
 
@@ -74,10 +90,31 @@ class Organizer:
         return [c for c in self.catalog.copies("published") if not Path(c["path"]).resolve().is_relative_to(new_root)]
 
     def remove(self, doc_ids):
-        """Remove waiting documents from ClassiFile: their stored text and analysis go; originals are untouched."""
+        """Remove waiting documents from ClassiFile: their stored text and analysis go; originals are untouched.
+        What matching learned from them goes too (_unlearn): a waiting document may have been learned as an
+        example before it was imported for filing."""
         for doc_id in doc_ids:
             self.catalog.remove_document(doc_id)
+        self._unlearn(doc_ids)
 
+    def _unlearn(self, doc_ids):
+        """The one path for documents that left the catalog (Remove, Forget): every matching version trained on
+        them is emptied, and when one was, a new version is trained at once from what remains (trigger "forget",
+        without the update check: the owner's choice, 2026-10-20). With too little left, matching pauses until the
+        next update. What was worked out from them is dropped as well."""
+        if self.catalog.forget_in_matchers(doc_ids):
+            for _ in range(3):              # retried while another change to the examples lands meanwhile
+                revision = self.catalog.learning_revision()
+                texts, labels = self.catalog.texts(), self.catalog.explicit_labels()
+                if len({c for d, c in labels.items() if texts.get(d)}) < 2 or self.catalog.add_matcher(
+                        matching.train(texts, labels), None, True, "forget", revision) is not None:
+                    break
+        self._matcher, self._ranked, self._words, self._groups = False, {}, {}, (None, [])
+        self._audit = (None, None)
+        for d in doc_ids:
+            self._counts.pop(d, None)
+
+    @copying
     def startup(self):
         """Recover interrupted copies and reconcile document statuses with copy records."""
         report = recover(self.catalog, self.output_root)
@@ -143,9 +180,15 @@ class Organizer:
                 self.catalog.update_source_path(doc_id, Path(path).resolve())
                 self.catalog.set_document_status(doc_id, "needs_decision")
                 return doc_id, None
-            # A failed read (e.g. a timeout) is retried by importing the same bytes again; a failed copy is not.
-            if self.catalog.document(doc_id)["status"] in ("failed", "pending") and not self.catalog.active_primary(doc_id):
+            # A failed read (e.g. a timeout) is retried by importing the same bytes again; a failed copy is not. So
+            # is a waiting document with parts left unread (Read again): a better read can clear them.
+            status = self.catalog.document(doc_id)["status"]
+            if not self.catalog.active_primary(doc_id) and (status in ("failed", "pending") or (
+                    status == "needs_decision" and result.status == "ok" and self.catalog.unread_units(doc_id))):
                 self.catalog.replace_extraction(doc_id, result, analysis, summary)
+                for cache in (self._counts, self._ranked):
+                    cache.pop(doc_id, None)
+                self._words = {k: v for k, v in self._words.items() if k[1] != doc_id}
                 return doc_id, "read again"
             return doc_id, "already imported"
         return self.catalog.add_document(result, Path(path).resolve(), analysis, summary), None
@@ -191,13 +234,6 @@ class Organizer:
         and the categories stay. Returns how many were forgotten."""
         ids = self.catalog.example_documents(str(folder))
         self.remove(ids)
-        if self.catalog.forget_in_matchers(ids):
-            texts, labels = self.catalog.texts(), self.catalog.explicit_labels()
-            if len({c for d, c in labels.items() if texts.get(d)}) >= 2:
-                self.catalog.add_matcher(matching.train(texts, labels), None, True, "forget")
-        self._matcher, self._ranked, self._words, self._groups = False, {}, {}, (None, [])
-        for d in ids:
-            self._counts.pop(d, None)
         return len(ids)
 
     def create_category(self, name, by="user"):
@@ -214,6 +250,7 @@ class Organizer:
             n += 1
         return self.catalog.add_category(name, name_key(name), folder, created_by=by)
 
+    @copying
     def file(self, doc_id, cat_id, provenance="user-confirmed", auto=None):
         """Primary placement plus verified copy: the user's choice, unless file_automatically() says otherwise.
         Returns (outcome, path).
@@ -270,6 +307,7 @@ class Organizer:
             return None
         return path
 
+    @copying
     def move(self, doc_id, cat_id, _crash_at=None):
         """Replace a filed document's primary category. The new copy is made from a verified copy (or from the
         original if its hash still matches) and verified; only then does the placement change (user-corrected) and
@@ -322,6 +360,7 @@ class Organizer:
         if doc and primary:
             self._verified_copy(doc, primary["category_id"])
 
+    @copying
     def restore_copy(self, doc_id):
         """A filed document whose copy has gone: a new verified copy in its category, made from another verified
         copy (of "also belongs to") or from the original if its hash still matches. Nothing is overwritten and
@@ -342,6 +381,7 @@ class Organizer:
                             "again.")
         return make_copy(self.catalog, doc_id, doc["sha256"], source, primary["category_id"], root)[1]
 
+    @copying
     def also(self, doc_id, cat_id):
         """ "Also belongs to" (A6, B5): a secondary membership with its own verified copy, made from the verified
         primary copy or from the original. The primary category does not change. Returns the copy's path."""
@@ -371,6 +411,7 @@ class Organizer:
     def _renaming(self):
         return json.loads(self.catalog.get_setting("renaming", "[]"))
 
+    @copying
     def rename_category(self, cat_id, name, _crash_at=None):
         """Rename a category; only ClassiFile's copies move into the renamed folder.
         Returns the old folders that still hold other files (left in place)."""
@@ -394,6 +435,7 @@ class Organizer:
         self.catalog.set_setting("renaming", json.dumps([c for c in self._renaming() if c != cat_id]))
         return leftover
 
+    @copying
     def delete_category(self, cat_id):
         """Delete a category that holds no documents. Its folder is removed only if it is empty.
         Returns the folder if it stayed (it holds other files), else None."""
@@ -519,9 +561,11 @@ class Organizer:
     def auto_choice(self, doc_id):
         """Where a waiting document would be filed without a question: (category id, what that rests on), or None
         when it waits for the user. It is filed only when its best category leads the second by the level in use,
-        and that category holds enough documents the user confirmed (placements the app made do not count)."""
+        and that category holds enough documents the user confirmed (placements the app made do not count). A
+        document with parts nothing has read (Catalog.unread_units) always waits: the unread part may be what it is
+        about (B3), so it is the user's decision, with where the gap is."""
         level, doc = matching.LEVELS.get(self.auto_level()), self.catalog.document(doc_id)
-        if level is None or not self.matcher() or doc is None or doc["status"] != "needs_decision":
+        if level is None or not self.matcher() or doc is None or doc["status"] != "needs_decision"                 or self.catalog.unread_units(doc_id):
             return None
         row, model = self.matcher()
         ranked = self._rank(doc_id, {c["id"] for c in self.catalog.categories()})
@@ -566,8 +610,9 @@ class Organizer:
             return []
         cats = self.catalog.categories()
         live = {c["id"] for c in cats}
+        unread = self.catalog.unread_units()     # parts left unread: never put in a folder by the app (B3)
         unmatched = [d for d in doc_ids if (self.catalog.document(d) or {"status": ""})["status"] == "needs_decision"
-                     and not self.original_missing(d) and not self.matches(d, live)]
+                     and d not in unread and not self.original_missing(d) and not self.matches(d, live)]
         if len(unmatched) < matching.FOLDER_MIN:
             return []
         model = self.matcher()[1]
@@ -581,6 +626,7 @@ class Organizer:
                 out.append((ids, matching.shared_words([vectors[d] for d in ids]), name))
         return out
 
+    @copying
     def create_folders(self, doc_ids):
         """Create the folder_groups() folders and file their documents there: the normal verified copies,
         machine-assigned (they never train the matcher until the user confirms them). Returns [(category id,
@@ -627,11 +673,12 @@ class Organizer:
         trained = json.loads(last["bundle_json"])["training"]
         return sum(trained.get(d) != c for d, c in labels.items()) >= matching.AUTO_UPDATE_EVERY
 
-    def evaluation_inputs(self):
+    def evaluation_inputs(self, texts=None):
         """(counts, labels, groups) for classifile.evaluation, from the catalog as it is now: the terms() of every
         document with readable text, the user's explicit choices, and the families they are held out by (the
-        owner's family labels where recorded, tools.evaluate --set-families)."""
-        counts = {d: matching.terms(t) for d, t in self.catalog.texts().items()}
+        owner's family labels where recorded, tools.evaluate --set-families). texts: Catalog.texts(), when the
+        caller has read it already."""
+        counts = {d: matching.terms(t) for d, t in (self.catalog.texts() if texts is None else texts).items()}
         labels = self.catalog.explicit_labels()
         return counts, labels, {d: d for d in labels} | evaluation.families(counts, self._files())
 
@@ -643,16 +690,38 @@ class Organizer:
     def learning_audit(self):
         """What matching may learn from now, for Advanced in Settings: {"documents": explicit labels with
         readable text, "families": how many independent families they are (versions and twins count once),
-        "unreadable": labels whose document has no readable words (they teach nothing), "conflicts": family
-        members filed apart (left out, B4)}. Counted again only when the labels change."""
+        "unreadable": labels whose document has no readable words (they teach nothing), "conflicts": documents
+        the owner gave one family id but filed apart (left out, B4), "related": documents the evaluation takes for
+        one family by name or text only (no owner's id says so) that are filed apart: they still teach, since a
+        shared name is no proof, and are listed for the user to look at}. The families are the ones the
+        evaluation holds out together (evaluation.families). Counted again only when the labels change."""
         labels = self.catalog.explicit_labels()
         key = tuple(sorted(labels.items()))
         if self._audit[0] != key:
             readable = {d: c for d in labels if (c := self._terms(d))}
             groups = evaluation.families(readable, self._files())
+            cats = {}
+            for d, g in groups.items():
+                cats.setdefault(g, set()).add(labels[d])
             self._audit = (key, {"documents": len(readable), "families": len(set(groups.values())),
-                                 "unreadable": len(labels) - len(readable)})
+                                 "unreadable": len(labels) - len(readable),
+                                 "related": sum(len(cats[g]) > 1 for g in groups.values())})
         return self._audit[1] | {"conflicts": len(self.catalog.family_conflicts())}
+
+    def readiness(self):
+        """Per category, for Advanced in Settings: [(name, confirmed documents, independent families, unreadable
+        ones)], by name. Three near-copies are not broad evidence, so the families are counted too; the rule for
+        filing by itself stays matching.AUTO_MIN_CONFIRMED confirmed documents (record 2.10)."""
+        labels = self.catalog.explicit_labels()
+        readable = {d: c for d in labels if (c := self._terms(d))}
+        groups = evaluation.families(readable, self._files())
+        out = []
+        for cat in self.catalog.categories():
+            mine = [d for d, c in labels.items() if c == cat["id"]]
+            if mine:
+                out.append((cat["name"], len(mine), len({groups[d] for d in mine if d in groups}),
+                            sum(d not in readable for d in mine)))
+        return out
 
     def check_level(self):
         """The level the update check counts automatic filings at: the one in use, or Strict when it is off."""
@@ -665,9 +734,14 @@ class Organizer:
         only if it files no more documents wrongly at the level in use and puts the user's category first no less
         often (evaluation.no_worse). Either way it is recorded with both results, and the documents to check
         ("Check these").
-        Returns {"outcome": "updated" | "kept previous" | "up to date", "version", "documents", "categories",
-        "check"}. Raises ValueError with a plain reason when there is too little to learn from."""
-        counts, labels, groups = self.evaluation_inputs()
+        Everything is read at one learning revision, and nothing is published when what may teach matching
+        changed meanwhile (a Forget, a removal, a correction): outcome "newer choices", the version in use stays,
+        and the next update learns from the newer state.
+        Returns {"outcome": "updated" | "kept previous" | "up to date" | "newer choices", "version", "documents",
+        "categories", "check"}. Raises ValueError with a plain reason when there is too little to learn from."""
+        revision = self.catalog.learning_revision()     # first: a change after this is seen at publication
+        texts = self.catalog.texts()
+        counts, labels, groups = self.evaluation_inputs(texts)
         if len({c for d, c in labels.items() if counts.get(d)}) < 2:
             raise ValueError("Matching needs filed documents in at least two categories.")
         self._matcher = False               # read the catalog's state, not a remembered one
@@ -685,10 +759,12 @@ class Organizer:
             found["previous"] = evaluation.summary(
                 evaluation.evaluate(counts, labels, groups, current[1].bundle["training"], live), level)
         keep = current is None or evaluation.no_worse(found["new"], found["previous"])
-        texts = self.catalog.texts()
         bundle = matching.train(texts, labels)
-        version = self.catalog.add_matcher(bundle, found, keep, trigger)
+        version = self.catalog.add_matcher(bundle, found, keep, trigger, revision)
         self._matcher = False
+        if version is None:
+            return {"outcome": "newer choices", "version": current[0]["version"] if current else None,
+                    "documents": 0, "categories": 0, "check": None}
         return {"outcome": "updated" if keep else "kept previous",
                 "version": version if keep else current[0]["version"],
                 "documents": sum(bundle["documents"].values()), "categories": len(bundle["documents"]),

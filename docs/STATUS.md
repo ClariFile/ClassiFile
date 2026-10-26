@@ -490,6 +490,46 @@
   files, so an upgrade leaves no stale file.
 - **Not tested:** install, first run, OCR, filing, upgrade and uninstall of the setup file on any Windows (as rc.4).
 
+**The second outside review, designImp2 (2026-10-26; not in a build yet)**
+- **Learning can't be undone by timing (item 1):** a learning revision, counted up by SQLite triggers (schema 13)
+  on every change to what may teach matching (a user's placement, an example, a document becoming or leaving an
+  example, a family id, a deleted category; never the app's own placements). An update reads everything at one
+  revision and is published only if the revision is unchanged, checked in the same transaction
+  (`Catalog.add_matcher`); otherwise it reports "newer choices" and the version in use stays.
+- **Remove and Forget share one path (item 2):** `Organizer._unlearn` empties every version trained on the removed
+  documents and trains a new one from what remains. A learned example imported again for filing teaches nothing
+  while it waits (B4: open questions are excluded), and teaches again once filed.
+- **Families (item 6):** the owner's family ids overrule name and text inferences in `evaluation.families`;
+  inferred families still teach and are held out together, and Advanced lists those filed apart ("related").
+- **Closing (item 5):** Close takes no new work, drops waiting reads and ends the reader processes for good, and
+  keeps the window, and so the catalog's lock, until a copy, move or update under way has ended ("Closing…").
+  Workers also bound the whole exchange (`TRANSFER_GRACE`), not only the wait for an answer.
+- **Partial scans (item 3):** extraction record 7 keeps each OCR'd picture's outcome (`ocr_pictures`: read,
+  no_text, render_failed, engine_failed, not_attempted) and a unit status `partial`; `reader.unread_gap` is the one
+  answer to "is something here unread" (schema 14 stores the outcomes). Reader versions pdf-6, docx-7, pptx-7,
+  odt-6; the summary is summary-5. Records older than 7 are judged by their status alone.
+- **Gaps stop automatic filing (item 4):** a document with units nothing has read is never filed by itself nor
+  put in a new folder (B3); its card names the pages, and ⋯ → Read again reads it once more. On a copy of the
+  owner's catalog no document has such units (1,153 flagged units, all done or no_text): nothing changes there.
+- **Honest explanations (item 7):** "Best match: compared with N examples in X; shares …"; the other choices say
+  "Weaker match", and "no words in common" when they share none. Never "similar to N documents".
+- **Preview (item 9):** the label says "Loading page 2 of 3…" until that page's picture is in view; a preview's
+  newer request replaces its older waiting one, so pages passed are never drawn.
+- **Long jobs (item 10):** copy-making actions take one lock (`Organizer.copying`); moving copies to a new output
+  folder runs in the background with "N of M"; Learn looks through the folder in the background; Stop ends a
+  reading or learning batch after the documents being read (counted "not read (stopped)", never as unreadable).
+- **Decisions and learning (item 11):** a card's reason wraps instead of ending in "…"; Learn says how many
+  documents are in folders inside each folder; Settings lists, per learned folder, the files that taught nothing
+  (unread, already in ClassiFile, stopped), with Details… and Try again. The names stay in the catalog, never in
+  the problem report.
+- **Backup and restore (item 12):** Advanced, "Back up the catalog…" (SQLite's backup API, a new file only) and
+  "Restore a backup…" (checked, switched in at the next start; the catalog it replaces is kept beside it).
+- **Better categorization, groundwork only:** `tools.error_ledger` (neutral ids, a first reason code per mistake,
+  local output) and readiness per category in Advanced. No change to the matcher or the frozen level: choosing an
+  experiment from the ledger is the owner's checkpoint.
+- **Not done here:** item 8 (a uniquely versioned build tested on a clean machine) needs the owner's go-ahead for
+  the build and a spare Windows for the test.
+
 **Motion for buttons and the sidebar (2026-10-26, the owner's request)**
 - **Buttons answer the mouse:** the hover colour fades in (100 ms) and out (180 ms) instead of switching, and a
   click sinks the button to 97% (at most 3 px a side) and lets it come back (`ButtonMotion` in

@@ -23,7 +23,8 @@ class LearnDialog(QDialog):
         heading = QLabel("Learn from my existing folders")
         heading.setObjectName("heading")
         about = QLabel(f"Each folder in {root.name} becomes a category, and its documents become examples ClassiFile "
-                       "learns from. Your files are only read: nothing is moved, copied or changed. Untick folders "
+                       "learns from, also the ones in folders inside it. Your files are only read: nothing is "
+                       "moved, copied or changed. Untick folders "
                        "that aren't a subject, such as “New folder” or “Downloads”, and rename "
                        "any category.")
         about.setObjectName("secondary")
@@ -78,11 +79,14 @@ class LearnDialog(QDialog):
 
     def _update(self):
         n = 0
-        for tick, name, note, _, files in self.rows:
+        for tick, name, note, sub, files in self.rows:
             name.setEnabled(tick.isChecked())
             key = name_key(" ".join(name.text().split()))
+            nested = sum(f.parent != sub for f in files)
+            inside = (f"{nested} of the {len(files)} are in folders inside it." if nested else "")
             text = ("" if not tick.isChecked() else "Type a category name, or untick this folder." if not key
-                    else f"Adds to your category “{self.existing[key]}”." if key in self.existing else "")
+                    else " ".join(filter(None, [f"Adds to your category “{self.existing[key]}”."
+                                                if key in self.existing else "", inside])))
             note.setText(text)
             note.setVisible(bool(text))
             n += len(files) if tick.isChecked() and key else 0

@@ -232,7 +232,8 @@ class DetailsPanel(QFrame):
                     else f"You chose “{d['category']}”.")
         if not waiting:
             return ""
-        lines = [f"{similar_reason(n, name, words)}." for name, n, words in waiting.get("matches") or ()]
+        lines = [f"{similar_reason(n, name, words, best=not i)}."
+                 for i, (name, n, words) in enumerate(waiting.get("matches") or ())]
         lines += [f"{s['name']}: {reason_text(s['evidence'], waiting['unit']) or 'no page reference'}"
                   for s in top_names(waiting["suggestions"])]
         return "\n".join(lines)

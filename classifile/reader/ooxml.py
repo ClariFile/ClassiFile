@@ -13,8 +13,8 @@ from .common import (
     ocr_worthy, open_zip, opening_lines, part, read_snapshot, running, suspect, xml,
 )
 
-DOCX_READER_VERSION = "docx-6"
-PPTX_READER_VERSION = "pptx-6"
+DOCX_READER_VERSION = "docx-7"   # 7: per-picture OCR outcomes (record 7)
+PPTX_READER_VERSION = "pptx-7"
 
 W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 P = "{http://schemas.openxmlformats.org/presentationml/2006/main}"

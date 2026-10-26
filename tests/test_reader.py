@@ -89,3 +89,55 @@ def test_long_documents_are_read(tmp_path):
     doc.save(tmp_path / "long.pdf")
     r = read_pdf(tmp_path / "long.pdf")
     assert r.status == "ok" and r.record.unit_count == 600
+
+
+def test_one_picture_read_and_one_failed_is_partial_and_stays_so_in_the_catalog(monkeypatch, make_org, tmp_path):
+    """designImp2 item 3: text read from one picture never hides another that failed. The unit keeps the text it
+    read, says "partial", and every picture's outcome survives the catalog and a reopen; a fully read unit keeps
+    "done" with no gap."""
+    import json
+
+    import pymupdf
+
+    from classifile.reader import ocr, unread_gap
+    from classifile.reader.common import UnitRecord
+
+    monkeypatch.delenv("CLASSIFILE_OCR", raising=False)
+    monkeypatch.setattr(ocr, "tessdata", lambda: "here")
+    monkeypatch.setattr(ocr, "ocr_pixmap", lambda pix, folder, with_layout=False: (
+        "Router packet switch subnet protocol gateway", []))
+    pix = lambda: pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 8, 8), 0)
+
+    def broken():
+        raise ValueError("not a picture MuPDF can open")
+
+    unit = lambda i: UnitRecord(i, "page", "", 0, 0.0, 0.5, 0.5, True, "rule")
+    mixed, whole = unit(1), unit(2)
+    ocr.run([mixed, whole], {1: [pix, broken], 2: [pix]})
+    assert mixed.ocr_status == "partial" and "Router" in mixed.ocr_text      # the text read is kept
+    assert mixed.ocr_pictures == [{"picture": 0, "outcome": "read"}, {"picture": 1, "outcome": "render_failed"}]
+    assert unread_gap(True, mixed.ocr_status, mixed.ocr_pictures)
+    assert whole.ocr_status == "done" and not unread_gap(True, whole.ocr_status, whole.ocr_pictures)
+    assert unread_gap(True, "done", [{"picture": 0, "outcome": "engine_failed"}])   # outcomes decide, not "done"
+    assert not unread_gap(False, "partial") and not unread_gap(True, "done")      # an older record: its status
+
+    monkeypatch.setattr(ocr, "ocr_pixmap", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("engine")))
+    engine = unit(3)
+    ocr.run([engine], {3: [pix, pix]})
+    assert engine.ocr_status == "failed" and {p["outcome"] for p in engine.ocr_pictures} == {"engine_failed"}
+
+    org = make_org()                                                          # through the catalog and a reopen
+    doc = pymupdf.open()
+    doc.new_page().insert_text((72, 72), "router packet switch")
+    doc.save(tmp_path / "net.pdf")
+    from classifile.organizer import read_and_analyze
+    result, analysis, summary = read_and_analyze(tmp_path / "net.pdf")
+    result.record.units[0] = mixed
+    doc_id, _ = org.record(tmp_path / "net.pdf", result, analysis, summary)
+    def check(o):
+        row = o.catalog.one("SELECT ocr_status, ocr_pictures FROM extraction_units")
+        assert row["ocr_status"] == "partial" and json.loads(row["ocr_pictures"])[1]["outcome"] == "render_failed"
+        assert o.catalog.unread_units() == {doc_id: [1]}
+
+    check(org)
+    check(make_org())

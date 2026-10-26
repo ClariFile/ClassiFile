@@ -6,7 +6,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QWidget,
 )
 
-from classifile import __version__
+from classifile import version_text
 from classifile.app.widgets import GROUP, PAD, PANEL, RELATED, SECTION, SUPPORTED, TIGHT, box, wrapped
 SOURCE = "https://github.com/ClariFile/ClassiFile"
 RELEASES = SOURCE + "/releases"
@@ -51,7 +51,7 @@ _HELP = [
 ]
 
 _ABOUT = [
-    ("ClassiFile", f"Version {__version__}. ClassiFile organizes copies of your documents into categories, by "
+    ("ClassiFile", f"Version {version_text()}. ClassiFile organizes copies of your documents into categories, by "
                    "their content, so you can find them again without sorting them by hand."),
     ("How it works",
      "It reads the text of each document, compares it with the documents already in each category, and files it "

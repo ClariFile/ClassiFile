@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
 )
 
 from classifile.analysis.candidates import name_key, top_names
-from classifile.app.reasons import reason_text, similar_reason
+from classifile.app.reasons import reason_text, similar_reason, unread_text
 from classifile.app.widgets import (
     BAR, BUTTON_TEXT_MAX, CONTROL, FILE_ICON, GROUP, NAME_FIELD_MAX, RELATED, TEXT_MIN, TIGHT,
     CategoryPicker, ElidedLabel, ListRow, box, collapse, format_icon, restyle, scroll_area_of, unfold, wrappable,
@@ -43,7 +43,8 @@ def group_items(docs):
         top = top_names(d["suggestions"], 1)
         if d.get("subject"):                    # no category matches it, and it resembles others: one question
             groups.setdefault(("subject", d["subject"][0]), []).append(d)
-        elif d["status"] == "needs_decision" and not d["missing"] and top and not d.get("matches"):
+        elif d["status"] == "needs_decision" and not d["missing"] and top and not d.get("matches") \
+                and not d.get("unread"):
             groups.setdefault(name_key(top[0]["name"]), []).append(d)
         else:
             items.append([d])
@@ -63,7 +64,8 @@ def card_state(members, categories):
     existing = categories.get(name_key(top[0]["name"])) if top else None
     return ([(d["id"], d["file_name"]) for d in members], first["status"], first["status_reason"], first["missing"],
             first["source_path"], first["suggestions"], first["unit"],
-            existing["name"] if existing else bool(categories), first.get("matches"), first.get("abstained"))
+            existing["name"] if existing else bool(categories), first.get("matches"), first.get("abstained"),
+            first.get("unread"))
 
 
 def shorten(name, limit=BUTTON_TEXT_MAX):
@@ -122,7 +124,9 @@ class DecisionItem(ListRow):
         row.addWidget(self.category, 1)
         self.line = QLabel()                    # problems and other whole sentences; wraps
         wrapped(self.line)
-        self.reason = ElidedLabel(object_name="secondary")
+        self.reason = QLabel()                  # why: wraps, never cut short, also beside the details panel
+        self.reason.setObjectName("secondary")
+        wrapped(self.reason)
         self.names = QLabel()
         self.names.setObjectName("secondary")
         wrapped(self.names)
@@ -141,7 +145,7 @@ class DecisionItem(ListRow):
         wrapped(self.others)
         self.others.setTextFormat(Qt.RichText)
         self.others.setTextInteractionFlags(Qt.LinksAccessibleByMouse | Qt.LinksAccessibleByKeyboard)
-        self.others.setToolTip("\n".join(f"File in '{name}'. {similar_reason(n, name, words)}."
+        self.others.setToolTip("\n".join(f"File in '{name}'. {similar_reason(n, name, words, best=False)}."
                                          for name, n, words in self.matches[1:]))
         self.others.setAccessibleName("Or file in another matching category")
         self.others.linkActivated.connect(lambda n: self.c.file_docs(self.ids, self.matches[int(n)][0]))
@@ -168,6 +172,9 @@ class DecisionItem(ListRow):
         menu = QMenu(self)
         # A row keeps one main action, "Choose another…" and "Details"; the rest is under ⋯, at the row's end.
         self.pending = menu.addAction("Leave pending", lambda: self.c.leave_pending(self.ids))
+        self.read_again = menu.addAction("Read again", lambda: self.c.retry_docs(self.ids))
+        self.read_again.setToolTip("Read the original file again, pictures too")
+        self.read_again.setVisible(bool(first.get("unread")))
         menu.addAction("Remove from ClassiFile", lambda: self.c.remove_docs(self.ids))
         self.more_menu.setMenu(menu)
 
@@ -270,6 +277,10 @@ class DecisionItem(ListRow):
                     self._say(self.line, (f"{none}. " if none else "") + "No suggested name. Choose a category.")
                 self.primary.setText("Choose category…")
                 self.choose.hide()
+            if first.get("unread"):             # never filed by itself while parts are unread (B3)
+                self._say(self.line, (self.line.text() + "\n" if self.line.text() else "")
+                          + unread_text(first["unread"], first["unit"]))
+                self.line.setObjectName("warning")
             if first["status_reason"]:
                 self._say(self.line, (self.line.text() + "\n" if self.line.text() else "")
                           + f"Last attempt: {wrappable(first['status_reason'])}")

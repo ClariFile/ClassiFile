@@ -6,10 +6,13 @@ app down. A crash or timeout is an operational failure ("failed" with a fixed re
 import multiprocessing as mp
 import os
 import queue
+import threading
 
 from classifile.reader import ReadResult, sha256_file
 
 DEFAULT_TIMEOUT = 300  # seconds per file. ponytail: one fixed value; scale with expected OCR work after E8.
+TRANSFER_GRACE = 30    # seconds more for the whole exchange (sending the path, the result coming back): then the
+                       # child is ended, so a stalled transfer can never hold a thread
 
 
 def _serve(conn, target):
@@ -42,6 +45,7 @@ class Worker:
         """on_failure(request, reason): the answer after a crash, a timeout or an error in the child."""
         self.target, self.timeout, self.on_failure = target, timeout, on_failure
         self.proc = self.conn = None
+        self.closed = False             # the app is closing: no new child, and failures are not hashed
 
     def _start(self):
         ctx = mp.get_context("spawn")  # same behaviour on every platform; Windows only has spawn
@@ -51,28 +55,42 @@ class Worker:
         child.close()
 
     def run(self, path):
+        """The child's answer, or on_failure(path, reason). The whole exchange is bounded: the child is ended
+        after timeout + TRANSFER_GRACE seconds whatever it is doing, which ends a stalled send or receive too."""
+        if self.closed:
+            return ReadResult("failed", "the app was closing", None, None), None, None
         if self.proc is None or not self.proc.is_alive():
             self._start()
+        proc, conn = self.proc, self.conn
+        watchdog = threading.Timer(self.timeout + TRANSFER_GRACE, proc.kill)
+        watchdog.daemon = True
+        watchdog.start()
         try:
-            self.conn.send(path)
-            if self.conn.poll(self.timeout):
-                out = self.conn.recv()
+            conn.send(path)
+            if conn.poll(self.timeout):
+                out = conn.recv()
                 if not isinstance(out, Exception):
                     return out
                 reason = str(out)
             else:
                 reason = "reading timed out"
-        except (EOFError, OSError):
+        except (EOFError, OSError, AttributeError):    # AttributeError: closed under it (stop() from closing)
             reason = "reader process stopped unexpectedly"
+        finally:
+            watchdog.cancel()
         self.stop()
+        if self.closed:
+            return ReadResult("failed", "the app was closing", None, None), None, None
         return self.on_failure(path, reason)
 
-    def stop(self):
-        if self.proc is not None:
-            self.proc.kill()
-            self.proc.join(10)
-            self.conn.close()
-        self.proc = self.conn = None
+    def stop(self, close=False):
+        """End the child (a new one starts on the next run), or for good with close=True."""
+        self.closed = self.closed or close
+        proc, conn, self.proc, self.conn = self.proc, self.conn, None, None
+        if proc is not None:
+            proc.kill()
+            proc.join(10)
+            conn.close()
 
 
 class WorkerPool:
@@ -93,4 +111,4 @@ class WorkerPool:
 
     def close(self):
         for w in self.workers:
-            w.stop()
+            w.stop(close=True)

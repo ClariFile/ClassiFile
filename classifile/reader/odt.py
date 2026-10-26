@@ -12,7 +12,7 @@ from .common import (
     part, read_snapshot, running, suspect, xml,
 )
 
-READER_VERSION = "odt-5"
+READER_VERSION = "odt-6"   # 6: per-picture OCR outcomes (record 7)
 MIMETYPE = b"application/vnd.oasis.opendocument.text"
 
 OFFICE = "{urn:oasis:names:tc:opendocument:xmlns:office:1.0}"

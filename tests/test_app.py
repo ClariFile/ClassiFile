@@ -203,7 +203,7 @@ def test_decision_page_two_step_filing_toast_and_details(app, samples, make_org)
     assert w.stack.currentWidget() is w.decision and len(w.decision.items) == 3 and not _notices(w)
     cst = _item(w, SAMPLE["S1"])
     cover, course = EXPECT["S1.cover_title"], EXPECT["S1.course_line"]   # from the local fixture map
-    assert _said(cst) == f"Suggested new category: {cover}" and cst.reason.full.startswith("Found on the cover")
+    assert _said(cst) == f"Suggested new category: {cover}" and cst.reason.text().startswith("Found on the cover")
     assert cst.primary.text() == "Create && file" and cst.choose.isVisible() and cst.pending.isVisible()
     cst.choose.click()                                              # expands in place
     # two names now: lines that only repeat on some pages are under "More"
@@ -496,14 +496,17 @@ def test_details_preview_and_expand(app, pdfs, office, make_org):
     assert w.details.isVisible() and not p.image.pixmap().isNull()
     assert p.page_label.text() == "Page 1 of 3" and not p.prev.isEnabled()
     p.next.click()
-    assert p.page_label.text() == "Page 2 of 3" and p.prev.isEnabled()      # at once, before the picture
+    assert p.page_label.text() == "Loading page 2 of 3…" and p.prev.isEnabled()   # page 1's picture is still there
     _drawn(app, p)
+    assert p.page_label.text() == "Page 2 of 3"                    # the label names the picture in view
     assert not w.details.open_button.isVisible()                   # nothing to open before filing
     p.expand.click()
     big = w.preview_overlay
     _drawn(app, big.preview)
     assert big.isVisible() and big.preview.page_label.text() == "Page 2 of 3"
     QTest.keyClick(big, Qt.Key_PageDown)
+    assert big.preview.page_label.text() == "Loading page 3 of 3…"
+    _drawn(app, big.preview)
     assert big.preview.page_label.text() == "Page 3 of 3"
     QTest.keyClick(big, Qt.Key_Escape)
     assert not big.isVisible() and w.details.isVisible()
@@ -529,7 +532,9 @@ def test_change_output_folder_moves_copies(app, pdfs, make_org, tmp_path):
     rec.folder = str(new_root)
     w.show_view(SETTINGS)
     w.change_root.click()
-    assert w.org.output_root == new_root.resolve()
+    assert w.root_moving == (0, 2) and w.processing.isVisible() and not w.change_root.isEnabled()   # off this thread
+    _pump(app, lambda: w.root_moving is None)
+    assert w.org.output_root == new_root.resolve() and w.change_root.isEnabled()
     assert edited.exists() and not old[1].exists()                 # edited copy stays; the other moved
     assert (new_root / "Courses" / old[1].name).read_bytes() == (pdfs / old[1].name).read_bytes()
     assert "Moved 1 copy" in w.toast.label.text() and "1 edited copy stayed" in w.toast.label.text()
@@ -616,6 +621,7 @@ def test_details_open_beside_the_decision_page(app, pdfs, make_org):
     QTest.mouseClick(item.title, Qt.LeftButton)                    # a click on the row inspects it, files nothing
     assert w.view[0] == DECIDE and w.stack.currentWidget() is w.decision   # no jump to the document list
     assert w.details.isVisible() and w.details.title.full == "S4.pdf" and not w.filing
+    _drawn(app, w.details.preview)
     assert w.details.preview.page_label.text() == "Page 1 of 3"
     assert w.details.parent() is w.content                         # beside the rows
     assert w.slide.state() == w.slide.State.Running or reduced_motion()   # it slides in from the right edge
@@ -837,7 +843,7 @@ def test_only_one_suggestion_is_said(app, make_org, tmp_path):
     w.review()
     item = w.decision.items[0]
     assert _said(item) == "Suggested new category: Thermal Expansion"
-    assert item.reason.full == "Found on the cover  ·  Only one suggestion found"
+    assert item.reason.text() == "Found on the cover  ·  Only one suggestion found"
     _close(w, rec)
 
 
@@ -968,7 +974,7 @@ def test_a_card_in_use_survives_background_reads(app, pdfs, make_org):
     w.org.catalog.db.set_trace_callback(statements.append)
     w.refresh()
     w.org.catalog.db.set_trace_callback(None)
-    assert len([s for s in statements if s.lstrip().upper().startswith("SELECT")]) == 6   # with "Check these"
+    assert len([s for s in statements if s.lstrip().upper().startswith("SELECT")]) == 7   # "Check these", gaps
     assert _item(w, "S1.pdf") is item and item.picker.field.text() == "my draft"
 
     w.org.create_category("Brand New")                             # the open list follows the catalog
@@ -1126,10 +1132,11 @@ def test_cards_offer_the_best_matching_categories_once_matching_is_updated(app, 
     item, other = _item(w, known), _item(w, "unknown.pdf")
     assert item.matches[0][:2] == ("Networks", 3) and len(item.matches) == 3   # ranked, the best first
     assert _said(item) == "Suggested category: Networks" and item.primary.text() == "File in Networks"
-    words = item.reason.full.removeprefix("Similar to 3 documents in Networks (").removesuffix(")").split(", ")
+    words = item.reason.text().removeprefix("Best match: compared with 3 examples in Networks; shares ").split(", ")
     assert 2 <= len(words) <= 4 and set(words) <= set(SUBJECTS["Networks"].split())   # the words it shares
     assert item.others.isVisible() and item.others.text().count("<a ") == 2   # the other two: quiet, one click
-    shown = " ".join([item.reason.full, item.others.text(), item.others.toolTip(), item.primary.text()])
+    assert "Weaker match" in item.others.toolTip() and "Similar to" not in item.others.toolTip()
+    shown = " ".join([item.reason.text(), item.others.text(), item.others.toolTip(), item.primary.text()])
     assert "%" not in shown and not any(a.isdigit() and b == "." for a, b in zip(shown, shown[1:]))  # no scores
     assert item.choose.isVisible() and not item.expanded.isVisible()       # new names only under "Choose another…"
     item.choose.click()
@@ -1137,7 +1144,7 @@ def test_cards_offer_the_best_matching_categories_once_matching_is_updated(app, 
     item.toggle_expanded()
     assert not other.matches and not other.others.isVisible()              # no category fits: a new name instead
     assert _said(other).startswith("Suggested new category: ")
-    assert other.reason.full == "No close match among your categories"
+    assert other.reason.text() == "No close match among your categories"
     assert other.primary.text() == "Choose category…"
 
     second = item.matches[1][0]
@@ -1196,7 +1203,7 @@ def test_a_clear_match_is_filed_automatically_and_listed_with_its_reason(app, ma
     assert d.isVisible() and d.title.full == "clear.pdf" and item.inspected
     assert (d.category.caption.text(), d.category.value.text()) == ("Filed in", "Networks")
     assert d.state.value.text().startswith("Filed automatically · not reviewed yet")
-    assert d.why.text().startswith("Filed automatically. Similar to 3 documents in Networks (")   # with key words
+    assert d.why.text().startswith("Filed automatically. Best match: compared with 3 examples in Networks; shares ")
     assert w.org.catalog.document_row(_doc(w, "clear.pdf"))["provenance"] == "machine-assigned"
     QTest.keyClick(item, Qt.Key_Escape)
     assert not d.isVisible() and item.hasFocus()
@@ -1486,7 +1493,8 @@ def test_every_button_has_a_name_light_and_dark_and_leave_pending_is_in_the_menu
     assert [b.text() for b in card.findChildren(QAbstractButton) if b.isVisible() and b.text() != "⋯"] == \
         ["File in Algebra", "Choose another…", "Details"]          # the rest is under "more", at the row's end
     assert card.more_menu.x() > card.details.x() and "Networks" in card.others.text()
-    assert [a.text() for a in card.more_menu.menu().actions()] == ["Leave pending", "Remove from ClassiFile"]
+    assert [a.text() for a in card.more_menu.menu().actions() if a.isVisible()] == ["Leave pending",
+                                                                                     "Remove from ClassiFile"]
     card.pending.trigger()
     assert w.toast.label.text() == "Left pending. It stays here until you decide."
     assert w.decision.items[-1].title.full == "algebra-8.pdf"       # moved to the end, still waiting
@@ -1658,6 +1666,80 @@ def test_the_sidebar_hides_slides_back_and_stays_as_left(app, make_org):
     assert w2.sidebar.isVisible() and w2.sidebar.x() == 0              # at once with reduced motion
     widgets.set_motion("system")
     _close(w2, rec)
+
+
+def test_stop_reads_what_has_started_and_leaves_the_rest_unread_not_failed(app, make_org, pdfs):
+    """designImp2 item 10: Stop is not a failure; the summary counts the stopped documents on their own."""
+    w, rec = _window(make_org)
+    said = []
+    w.toast.show_message = lambda text, *a, **k: said.append(text)
+    w.import_paths([pdfs / f"S{n}.pdf" for n in range(1, 7)])
+    assert w.stop_button.isVisible()
+    w.stop_reading()
+    _pump(app, lambda: not w.inflight and w.run is None)
+    docs = w.org.catalog.all_documents()
+    assert len(docs) < 6 and all(d["status"] == "needs_decision" for d in docs)   # read, or not read at all
+    assert f"{6 - len(docs)} not read (stopped)" in said[-1] and "couldn't be read" not in said[-1]
+    assert not w.stop_button.isVisible()
+    _close(w, rec)
+
+
+def test_learning_says_which_files_taught_nothing_and_tries_them_again(app, make_org, tmp_path):
+    """designImp2 item 11: nested folders are disclosed before learning; afterwards Settings says, per folder,
+    which files couldn't be read or were already in ClassiFile, and Try again reads the unread ones once more.
+    The file names stay in the catalog, never in the problem report."""
+    import pymupdf
+
+    from classifile.app.learn import LearnDialog
+    from classifile.app.main import problem_report
+
+    mine = tmp_path / "mine"
+    (mine / "Garden" / "2024").mkdir(parents=True)
+    for n, where in enumerate(["Garden", "Garden", "Garden/2024"]):
+        d = pymupdf.open()
+        d.new_page().insert_text((72, 72), f"compost soil seedling mulch part {n}")
+        d.save(mine / where / f"g{n}.pdf")
+        d.close()
+    (mine / "Garden" / "broken.pdf").write_bytes(b"%PDF-1.4 not really")
+    w, rec = _window(make_org)
+    found = w.org.scan_folder(mine)
+    dialog = LearnDialog(w, mine, found, {})
+    assert "1 of the 4 are in folders inside it." in dialog.rows[0][2].text()
+    dialog.close()
+    w.pick_folder = lambda title: str(mine)
+    w.ask_learn = lambda root, found: [(sub.name, sub, files) for sub, files in found]
+    w.learn_folders()
+    _pump(app, lambda: w.learning is None and not w.moving)
+    w.show_view(SETTINGS)
+    rows = [l.text() for l in w.learned.findChildren(QLabel)]
+    assert rows == ["Garden → Garden · 3 documents · 1 couldn't be read"]
+    shown = []
+    w.ask_list = lambda title, text, action=None: shown.append((text, action)) or True
+    details = [b for b in w.learned.findChildren(QPushButton) if b.text() == "Details…"]
+    details[0].click()
+    assert shown == [("Couldn't be read:\nbroken.pdf", "Try again")]
+    _pump(app, lambda: w.learning is None and not w.moving)            # read again: still unreadable
+    assert "broken.pdf" not in problem_report(w.org.catalog)
+    _close(w, rec)
+
+
+def test_closing_waits_for_work_under_way_and_takes_no_new_work(app, make_org):
+    """designImp2 item 5: a copy, move or update that has started keeps the window (and so the catalog's lock,
+    released only when main()'s event loop ends) until it ends; reads that only wait are dropped."""
+    import threading
+
+    w, rec = _window(make_org)
+    running, release, finished = threading.Event(), threading.Event(), []
+    w._background(lambda: (running.set(), release.wait(10)), finished.append)
+    assert running.wait(5)
+    _close(w, rec)
+    assert w.closing and w.isVisible() and not w.isEnabled()           # held open while the job runs
+    assert w.processing.isVisible() and w.processing.text().startswith("Closing")
+    assert w.workers.workers[0].closed                                 # no reader process starts again
+    w._read_done("x.pdf", RuntimeError("internal error (X)"))         # a read that ends now is not recorded
+    assert not w.read_results
+    release.set()
+    _pump(app, lambda: not w.isVisible(), timeout=10)                  # and then it closes by itself
 
 
 def test_new_folders_by_itself_with_one_summary_and_a_one_click_rename(app, make_org, tmp_path):
@@ -1840,6 +1922,7 @@ def test_tour_steps_and_learning_from_existing_folders_in_the_window(app, make_o
                 if sub.name != "New folder"]                # the user unticks one and renames one
     w.ask_learn = untick_and_rename
     w.learn_folders()
+    _pump(app, lambda: not (w.learning or {}).get("scanning"))     # the folder is looked through off this thread
     assert asked == [[("Algebra", 3), ("Networks", 3), ("New folder", 3)]]
     assert w.processing.isVisible() and "Learning from your folders" in w.processing.text()
     _pump(app, lambda: w.learning is None and not w.moving)
@@ -1869,7 +1952,7 @@ def test_two_filing_actions_at_once_keep_their_own_messages_and_feedback(app, ma
         ids[name], _ = w.org.record(path, *read_and_analyze(path))
     w.refresh()
     jobs, said = {}, []
-    w.pool.submit = lambda fn, doc_id, cat_id: jobs.__setitem__(doc_id, (fn, doc_id, cat_id))
+    w._submit = lambda fn, doc_id, cat_id: jobs.__setitem__(doc_id, (fn, doc_id, cat_id))
     w.toast.show_message = lambda text, *a, **k: said.append(text)
     w.file_docs([ids["a1.pdf"], ids["a2.pdf"]], "Alpha", feedback="")   # the suggestions set aside, no reason
     w.file_docs([ids["b1.pdf"]], "Beta")
@@ -1935,6 +2018,31 @@ def test_the_open_choices_reach_the_cards_right_edge(app, make_org, make_pdf):
     assert abs(right(item.expanded) - right(item.more_menu)) <= 2      # no empty band at the right (owner's rule)
     assert item.expanded.width() > 900                                  # the old 680 cap is gone
     _close(w, rec)
+
+
+def test_a_preview_waits_only_for_its_newest_page(app):
+    """designImp2 item 9: pages asked for while an older one is drawn replace each other; the one passed are never
+    drawn, and another preview's request keeps its own turn."""
+    import threading
+
+    from classifile.app.widgets import PageService
+
+    service = PageService()
+    _pump(app, lambda: not service.wanted, timeout=10)                 # the first "ping" has been taken
+    drawn, gate = [], threading.Event()
+    service.worker.run = lambda request: (gate.wait(5), drawn.append(request))[1]
+    answers = []
+    service.done.connect(lambda token, out: answers.append(token))
+    service.ask(("a", 1), ("page", 1))                                 # being drawn, slowly
+    _pump(app, lambda: not service.wanted, timeout=5)
+    for n in (2, 3, 4):
+        service.ask(("a", n), ("page", n))                             # quick paging: only the newest waits
+    service.ask(("b", 1), ("page", "other"))
+    gate.set()
+    _pump(app, lambda: ("b", 1) in answers, timeout=10)
+    assert drawn == [("page", 1), ("page", 4), ("page", "other")]
+    assert [a for a in answers if a] == [("a", 1), ("a", 4), ("b", 1)]
+    service.stop()
 
 
 @pytest.mark.parametrize("how", ["hang", "crash"])

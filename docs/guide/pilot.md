@@ -14,6 +14,15 @@ documents. The full guide is `guide-en.md`.
    one is wrong.
 5. **Any day.** Try **Rename**, a new category, and **Check these** if it appears.
 
+## Known limitations
+
+- English documents work best; photos (JPG, PNG) can't be added yet.
+- A new catalog knows nothing about your subjects: it learns from what you file and from your own folders. It never
+  inherits anyone else's catalog.
+- A document with pictures that couldn't be read always waits for you.
+- This is a release candidate: install it only on a computer where a problem would not matter, and back up the
+  catalog (**Settings → Advanced**) now and then.
+
 ## What to send
 
 - **Help → Copy problem report…**, then **Copy**, pasted into a message. It shows you everything it contains: no

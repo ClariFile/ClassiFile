@@ -1,5 +1,6 @@
 """Small shared widgets and the visual style of the main window."""
 import sys
+import threading
 from pathlib import Path
 
 from PySide6.QtCore import (
@@ -1100,8 +1101,10 @@ class DropOverlay(QFrame):
 class PageService(QObject):
     """Page pictures drawn in one worker process (classifile.pages.serve), off the interface thread: a damaged or
     slow file can neither freeze nor end the window, and a page not drawn within PREVIEW_TIMEOUT stops its process
-    (a new one starts with the next request). One request at a time, answered through done. One per application
-    (page_service); the process is started at once, so the first preview does not wait for it."""
+    (a new one starts with the next request). One request at a time, answered through done. A preview waits only
+    for its newest request: one it asks for while an older one still waits replaces it, so paging quickly never
+    queues up pages already passed. One per application (page_service); the process is started at once, so the
+    first preview does not wait for it."""
 
     done = Signal(object, object)               # the request's token, its answer (None: failed or timed out)
 
@@ -1109,18 +1112,32 @@ class PageService(QObject):
         super().__init__()
         self.worker = Worker(pages.serve, timeout=PREVIEW_TIMEOUT / 1000, on_failure=lambda request, reason: None)
         self.queue = None                       # the thread that waits on the process, started with a request
+        self.wanted = {}                        # who asked (the token's first part) -> its newest waiting request
+        self.lock = threading.Lock()
         self.ask(None, ("ping",))
 
     def ask(self, token, request):
         if self.queue is None:                  # first use, or again after stop()
             from concurrent.futures import ThreadPoolExecutor
             self.queue = ThreadPoolExecutor(1)
-        self.queue.submit(lambda: self.done.emit(token, self.worker.run(request)))
+        owner = token[0] if isinstance(token, tuple) else token
+        with self.lock:
+            waiting = owner in self.wanted      # its turn is queued already: this request takes its place
+            self.wanted[owner] = (token, request)
+        if not waiting:
+            self.queue.submit(self._serve, owner)
+
+    def _serve(self, owner):
+        with self.lock:
+            token, request = self.wanted.pop(owner)
+        self.done.emit(token, self.worker.run(request))
 
     def stop(self):
         if self.queue is not None:
             self.queue.shutdown(wait=False, cancel_futures=True)
             self.queue = None
+        with self.lock:
+            self.wanted.clear()
         self.worker.stop()
 
 
@@ -1147,6 +1164,7 @@ class Preview(QWidget):
         self.service.done.connect(self._answer)
         self.fit_width = fit_width
         self.drawn, self.shown, self.draws = {}, None, 0   # page -> (width, picture); the one shown; drawings made
+        self.shown_page = None                  # the page whose picture is in view
         self.settle = QTimer(self)              # one drawing when the resizing has stopped
         self.settle.setSingleShot(True)
         self.settle.setInterval(PREVIEW_SETTLE)
@@ -1211,7 +1229,7 @@ class Preview(QWidget):
         then(out)
 
     def close_pdf(self):
-        self.count, self.waiting = None, None
+        self.count, self.waiting, self.shown_page = None, None, None
         self.drawn = {}
         self.settle.stop()
 
@@ -1262,7 +1280,10 @@ class Preview(QWidget):
         if not self.count:
             return
         self.page = max(0, min(self.count - 1, index))
-        self.page_label.setText(f"Page {self.page + 1} of {self.count}")
+        # The page the picture shows is the page the label names: until another page arrives, it says so.
+        shown = self.page in self.drawn or self.shown_page == self.page
+        self.page_label.setText(f"Page {self.page + 1} of {self.count}" if shown
+                                else f"Loading page {self.page + 1} of {self.count}…")
         self.prev.show()
         self.next.show()
         self.prev.setEnabled(self.page > 0)
@@ -1272,6 +1293,7 @@ class Preview(QWidget):
         kept = self.drawn.pop(self.page, None)
         if kept is not None:
             self.drawn[self.page] = kept        # the latest last; the oldest go
+            self.shown_page = self.page
             if kept[0] == size:
                 self.waiting = None             # what was asked for before is no longer wanted
                 return self._fit(kept[1])
@@ -1287,6 +1309,8 @@ class Preview(QWidget):
         pix.loadFromData(out)
         pix.setDevicePixelRatio(size[1])
         self.draws += 1
+        self.shown_page = page
+        self.page_label.setText(f"Page {page + 1} of {self.count}")
         self.drawn.pop(page, None)
         self.drawn[page] = (size, pix)
         for old in list(self.drawn)[:-PREVIEW_KEEP]:

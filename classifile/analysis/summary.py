@@ -13,8 +13,9 @@ import re
 from collections import Counter
 
 from classifile.analysis.candidates import is_boilerplate_title
+from classifile.reader import unread_gap
 
-SUMMARY_VERSION = "summary-4"
+SUMMARY_VERSION = "summary-5"   # 5: unresolved gaps include pictures OCR left unread
 KEYPHRASES = 12
 MAX_PHRASE_WORDS = 4
 DIGEST_SENTENCES = 5
@@ -181,7 +182,7 @@ def _flags(record, text):
              "ocr": ocr,
              # Suspected gaps OCR did not resolve; decisions made while they remain are provisional (B3).
              "unresolved_gaps": [u.index for u in record.units
-                                 if u.suspected_unread and u.ocr_status not in ("done", "no_text")],
+                                 if unread_gap(u.suspected_unread, u.ocr_status, u.ocr_pictures)],
              # OCR read something, but all of it looked like junk (photos, decorations) and was discarded.
              "ocr_text_discarded": [u.index for u in record.units if u.ocr_discarded_chars and not u.ocr_text]}
     if not any(c.isalpha() for u in record.units for c in u.text):

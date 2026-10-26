@@ -9,7 +9,7 @@ from .common import (
     read_snapshot, suspect,
 )
 
-READER_VERSION = "pdf-5"   # extraction method; bump when output for the same bytes changes
+READER_VERSION = "pdf-6"   # extraction method; bump when output for the same bytes changes (6: OCR outcomes)
 
 LAYOUT_FLAGS = pymupdf.TEXTFLAGS_DICT & ~pymupdf.TEXT_PRESERVE_IMAGES  # text only; no image bytes
 pymupdf.TOOLS.mupdf_display_errors(False)  # MuPDF warnings could echo content; keep stderr clean

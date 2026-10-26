@@ -158,3 +158,4 @@ PREVIEW_SETTLE = 150    # after the last resize step, before the page is drawn a
 PREVIEW_TIMEOUT = 20000 # a page not drawn by then: the preview process is replaced and the page says so
 TOAST = 5000            # how long a message stays
 TOAST_LONG = 10000      # a message that says something went wrong, or more than one thing
+CLOSE_POLL = 100        # while closing, how often the window looks whether the work under way has ended

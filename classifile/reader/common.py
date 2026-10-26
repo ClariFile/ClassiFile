@@ -12,7 +12,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from xml.etree import ElementTree as ET
 
-RECORD_VERSION = 6         # format of DocumentRecord/UnitRecord; bump when fields change
+RECORD_VERSION = 7         # format of DocumentRecord/UnitRecord; bump when fields change (7: ocr_pictures)
 
 # Suspected-unread / selective-OCR rule (decision record B3), adopted from E8 on development data: any
 # non-repeated picture covering at least 5% of its page or slide, regardless of the unit's native text.
@@ -53,6 +53,27 @@ class UnitRecord:
     # the line height as a fraction of the picture height, and each line says whether the junk filter kept it.
     ocr_layout: list = field(default_factory=list)
     pictures: list = field(default_factory=list)  # package paths of the unit's pictures (PPTX/DOCX/ODT)
+    # What became of each picture OCR was to read, in order: {"picture": n, "outcome": one of PICTURE_OUTCOMES}.
+    # A unit can read one picture and fail another; ocr_status then says "partial" (record version 7).
+    ocr_pictures: list = field(default_factory=list)
+
+
+# The outcome of one picture OCR was to read: its text was read; it was read and held no usable text; it could
+# not be turned into an image (e.g. EMF/WMF, a damaged picture); the OCR engine failed on it; the document's OCR
+# time ran out before it. The last three leave the picture unread.
+PICTURE_OUTCOMES = ("read", "no_text", "render_failed", "engine_failed", "not_attempted")
+UNREAD_OUTCOMES = ("render_failed", "engine_failed", "not_attempted")
+# Unit OCR statuses that leave content unread (reader/ocr.py lists them all); "done" and "no_text" read everything.
+UNREAD_STATUSES = ("partial", "failed", "no_readable_image", "unavailable", "deferred", "disabled")
+
+
+def unread_gap(suspected, status, pictures=()):
+    """True when a unit flagged suspected_unread still holds content nothing has read: OCR did not run, or left a
+    picture unread (pictures: the unit's ocr_pictures). A record older than version 7 has no per-picture outcomes,
+    and its status alone decides. The one answer for every reader of the record (ClassiFile, SummarEase)."""
+    if not suspected:
+        return False
+    return status not in ("done", "no_text") or any(p.get("outcome") in UNREAD_OUTCOMES for p in pictures or ())
 
 
 @dataclass

@@ -3,11 +3,22 @@
 FIRST_TEXT = {"page": "on the cover", "slide": "on the title slide", "block": "at the start"}
 
 
-def similar_reason(count, category, words=()):
-    """Why a category matches a document: the documents of it the matcher compared with, and the words the
-    document shares most with them (2 to 4; fewer say too little to show). Never a score."""
-    shared = f" ({', '.join(words[:4])})" if len(words) >= 2 else ""
-    return f"Similar to {count} document{'s' if count != 1 else ''} in {category}{shared}"
+def similar_reason(count, category, words=(), best=True):
+    """Why a category is offered for a document: what the matcher compared it with (the category's examples, as
+    one average: it says nothing about each of them) and the words the document shares most with them (2 to 4;
+    one says too little to show). The other choices, offered so there are three (B2), say they are weaker, and
+    say so when they share no words at all. Never a score."""
+    examples = f"{count} example{'s' if count != 1 else ''}"
+    shared = f"; shares {', '.join(words[:4])}" if len(words) >= 2 else "" if words else "; no words in common"
+    return f"{'Best match' if best else 'Weaker match'}: compared with {examples} in {category}{shared}"
+
+
+def unread_text(units, unit="page"):
+    """Where a waiting document holds pictures nothing could read (Catalog.unread_units), and what follows."""
+    noun = unit if unit in ("page", "slide") else None
+    where = f"on {noun}{'s' if len(units) > 1 else ''} {page_list(units)}" if noun else "in this document"
+    return (f"⚠ Some pictures {where} couldn't be read, so ClassiFile won't file it by itself. Look at them in "
+            "Details and choose, or Read again from ⋯.")
 
 
 def new_folder_reason(words):

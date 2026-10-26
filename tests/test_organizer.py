@@ -75,7 +75,7 @@ def test_persistence_across_reopen(pdfs, make_org):
     org.startup()
     assert _snapshot(org) == before
     assert org.catalog.analysis(ids["S1.pdf"]) == analysis
-    assert org.catalog.schema_version == 12
+    assert org.catalog.schema_version == 14
     assert {d[2] for d in before[2]} == {"needs_decision"} and len(before[2]) == 5
 
 
@@ -136,7 +136,7 @@ def test_office_formats_full_import_preserves_sources(office, make_org):
         assert (org.output_root / "Mixed" / path.name).read_bytes() == path.read_bytes()
     assert source_state(office) == before
     formats = {r["format"]: r["record_version"] for r in org.catalog.all("SELECT format, record_version FROM extractions")}
-    assert formats == {"docx": 6, "pptx": 6, "odt": 6}
+    assert formats == {"docx": 7, "pptx": 7, "odt": 7}
     summaries = org.catalog.all("SELECT summary_json FROM extractions")
     assert all(s["summary_json"] for s in summaries)
 
@@ -174,7 +174,7 @@ def test_catalog_migrates_v1_pdf_rows(tmp_path, monkeypatch):
     old.close()
     monkeypatch.undo()
     cat = db.Catalog(path)
-    assert cat.schema_version == len(db.MIGRATIONS) == 12
+    assert cat.schema_version == len(db.MIGRATIONS) == 14
     e = cat.one("SELECT format, unit, unit_count, record_version FROM extractions")
     assert tuple(e) == ("pdf", "page", 1, 1)  # old rows keep their record version
     u = cat.one("SELECT unit_index, kind, text, text_area FROM extraction_units")
