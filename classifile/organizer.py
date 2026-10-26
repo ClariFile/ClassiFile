@@ -49,6 +49,7 @@ class Organizer:
         self._counts = {}           # doc_id -> matching.terms() of its stored text
         self._words = {}            # (model version, doc_id, category id) -> the key words a card gives
         self._groups = (None, [])   # the last new_subject_groups() question and its answer
+        self._audit = (None, None)  # (the labels it was counted for, learning_audit() without conflicts)
 
     @property
     def output_root(self):
@@ -631,11 +632,27 @@ class Organizer:
         document with readable text, the user's explicit choices, and the families they are held out by (the
         owner's family labels where recorded, tools.evaluate --set-families)."""
         counts = {d: matching.terms(t) for d, t in self.catalog.texts().items()}
-        owner = self.catalog.family_labels()
-        files = {r["document_id"]: (r["sha256"], r["file_name"], owner.get(r["sha256"], ""))
-                 for r in self.catalog.all("SELECT document_id, sha256, file_name FROM snapshots ORDER BY id")}
         labels = self.catalog.explicit_labels()
-        return counts, labels, {d: d for d in labels} | evaluation.families(counts, files)
+        return counts, labels, {d: d for d in labels} | evaluation.families(counts, self._files())
+
+    def _files(self):
+        owner = self.catalog.family_labels()
+        return {r["document_id"]: (r["sha256"], r["file_name"], owner.get(r["sha256"], ""))
+                for r in self.catalog.all("SELECT document_id, sha256, file_name FROM snapshots ORDER BY id")}
+
+    def learning_audit(self):
+        """What matching may learn from now, for Advanced in Settings: {"documents": explicit labels with
+        readable text, "families": how many independent families they are (versions and twins count once),
+        "unreadable": labels whose document has no readable words (they teach nothing), "conflicts": family
+        members filed apart (left out, B4)}. Counted again only when the labels change."""
+        labels = self.catalog.explicit_labels()
+        key = tuple(sorted(labels.items()))
+        if self._audit[0] != key:
+            readable = {d: c for d in labels if (c := self._terms(d))}
+            groups = evaluation.families(readable, self._files())
+            self._audit = (key, {"documents": len(readable), "families": len(set(groups.values())),
+                                 "unreadable": len(labels) - len(readable)})
+        return self._audit[1] | {"conflicts": len(self.catalog.family_conflicts())}
 
     def check_level(self):
         """The level the update check counts automatic filings at: the one in use, or Strict when it is off."""

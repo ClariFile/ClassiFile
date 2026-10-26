@@ -131,3 +131,47 @@ def test_family_members_filed_apart_teach_nothing_until_resolved(make_org, filed
     assert set(org.evaluation_inputs()[1]) == {c}                # the evaluation reads the same definition
     org.move(b, org.catalog.active_primary(a)["category_id"])   # the owner resolves it
     assert set(org.catalog.explicit_labels()) == {a, b, c} and org.catalog.family_conflicts() == set()
+
+
+def test_learning_follows_choices_corrections_also_and_forget_across_a_restart(make_org, filed_pdf, make_pdf):
+    """The whole learning sequence (designImp review): choose, train, correct, update, "also belongs to", learn
+    from a folder and forget it, restart; only the user's latest primary choices teach, and the counts say so."""
+    import json
+
+    from classifile.organizer import read_and_analyze
+
+    org = make_org()
+    words = {"Garden": ["compost soil seedling", "mulch pruning hedge", "greenhouse tomato watering"],
+             "Travel": ["hotel booking passport", "flight luggage visa", "train ticket timetable"]}
+    docs = {(cat, n): filed_pdf(org, f"{cat}{n}.pdf", w, cat) for cat, ws in words.items() for n, w in enumerate(ws)}
+    blank = filed_pdf(org, "blank.pdf", "", "Travel")                       # no readable words: teaches nothing
+    assert org.update_matching()["outcome"] == "updated"
+    assert org.learning_audit() == {"documents": 6, "families": 6, "unreadable": 1, "conflicts": 0}
+    garden, travel = (org.catalog.category_by_key(k)["id"] for k in ("garden", "travel"))
+
+    moved = docs[("Garden", 2)]
+    org.move(moved, travel)                                                 # the user's correction
+    assert org.matching_status()["since"] == 1 and org.update_matching()["outcome"] in ("updated", "kept previous")
+    newest = org.catalog.all("SELECT bundle_json FROM matchers ORDER BY version DESC LIMIT 1")[0]["bundle_json"]
+    assert json.loads(newest)["training"][str(moved)] == travel             # the latest choice is what it learned
+
+    labels = org.catalog.explicit_labels()
+    org.also(docs[("Travel", 0)], garden)                                   # a second copy, not a second label
+    assert org.catalog.explicit_labels() == labels and org.matching_status()["since"] == 0
+    assert org.update_matching()["outcome"] == "up to date"
+
+    recipes = org.category_for("Recipes")
+    for n, w in enumerate(["garlic onion simmer", "flour butter oven"]):
+        path = make_pdf(f"r{n}.pdf", w, folder="mine/Recipes")
+        assert org.learn(path, *read_and_analyze(path), recipes, path.parent) == "learned"
+    assert org.learning_audit()["documents"] == 8
+    assert org.forget_folder(path.parent) == 2
+    def check(org):
+        assert org.catalog.explicit_labels() == labels and blank in labels
+        assert org.learning_audit() == {"documents": 6, "families": 6, "unreadable": 1, "conflicts": 0}
+        active = json.loads(org.catalog.active_matcher()["bundle_json"])
+        assert set(active["documents"]) == {str(garden), str(travel)}      # Recipes taught nothing it kept
+        assert org.matching_status()["since"] == 0
+
+    check(org)
+    check(make_org())                                                       # and the same after a restart

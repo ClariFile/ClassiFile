@@ -127,7 +127,8 @@ def render(out, size=(1280, 720), theme="light", views=VIEWS):
     def mask(w):
         """The temporary folders hold the user's account name: Settings shows made-up folders instead."""
         w.root_label.setText(r"C:\Users\You\Documents\ClassiFile")
-        w.tech.setText(w.tech.text().split("\n")[0] + "\n" + r"Data folder: C:\Users\You\AppData\Local\ClassiFile")
+        lines = w.tech.text().split("\n")
+        w.tech.setText("\n".join([lines[0], r"Data folder: C:\Users\You\AppData\Local\ClassiFile"] + lines[2:]))
 
     def shot(w, name):
         if name in views:

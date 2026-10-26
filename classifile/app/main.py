@@ -93,6 +93,20 @@ def check_text(found):
     return text + (f" (the version before: {old['first']} and {old['wrong']})" if old else "")
 
 
+def learning_text(audit):
+    """Advanced in Settings: what matching may learn from now, and what is left out and why."""
+    plural = lambda n, word: f"{n} {word}{'' if n == 1 else 's'}"
+    text = (f"Matching can learn from {plural(audit['documents'], 'document')} you filed, confirmed or gave as "
+            f"examples, in {audit['families']} famil{'y' if audit['families'] == 1 else 'ies'} (versions and "
+            "format twins count once).")
+    if audit["conflicts"]:
+        text += (f" Left out: {plural(audit['conflicts'], 'document')} in one family but filed in different "
+                 "categories; file them in one category to include them.")
+    if audit["unreadable"]:
+        text += f" Left out: {plural(audit['unreadable'], 'document')} with no readable words."
+    return text
+
+
 # Problem reasons that are fixed wording (reader, worker, organizer). Any other reason may name a file or folder,
 # so the problem report says only what kind of problem it was.
 FIXED_REASONS = re.compile(
@@ -1926,10 +1940,7 @@ class MainWindow(QWidget):
         self.tech.setText(
             f"ClassiFile {__version__} · matching version {m.get('version', 'none yet')} · catalog schema "
             f"{self.org.catalog.schema_version} · extraction record {RECORD_VERSION}\nData folder: "
-            f"{wrappable(self.org.catalog.path.parent)}"
-            + ((f"\n{n} document{'s' if n != 1 else ''} left out of learning: in one family, but filed in different"
-                " categories. File them in one category to include them.")
-               if (n := len(self.org.catalog.family_conflicts())) else ""))
+            f"{wrappable(self.org.catalog.path.parent)}\n" + learning_text(self.org.learning_audit()))
         lines = []
         for r in self.org.catalog.matcher_log():
             found = json.loads(r["check_json"]) if r["check_json"] else None

@@ -1117,6 +1117,8 @@ def test_cards_offer_the_best_matching_categories_once_matching_is_updated(app, 
     assert w.toast.label.text() == "Matching updated (version 1): 9 documents in 3 categories."
     assert w.matching_label.text().startswith("Learned from 9 documents in 3 categories on ")
     assert "matching version 1" in w.tech.text()                      # the version: in Advanced
+    assert "Matching can learn from 9 documents you filed, confirmed or gave as examples" in w.tech.text()
+    assert "Left out" not in w.tech.text()
     assert w.matching_label.text().endswith("Nothing was filed or moved since.")
 
     w.review()
