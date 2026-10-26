@@ -6,6 +6,7 @@ import json
 import os
 import platform
 import re
+import sqlite3
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
@@ -42,7 +43,8 @@ from classifile.app.widgets import (
     Collapsible, DropOverlay, ElidedLabel, Notices, PickerDialog, PreviewOverlay, Toast, wrappable, wrapped,
 )
 from classifile.copies.engine import CopyError
-from classifile.catalog.db import Catalog, apply_restore, default_data_dir, stage_restore
+from classifile.catalog.db import (Catalog, apply_restore, cancel_restore, default_data_dir, now, stage_restore,
+                                   staged_restore)
 from classifile import matching, version_text
 from classifile.matching import AUTO_DEFAULT, AUTO_MIN_CONFIRMED, LEVELS
 from classifile.reader import RECORD_VERSION
@@ -122,6 +124,39 @@ def learning_text(audit):
     return text
 
 
+def _json_setting(catalog, key):
+    try:
+        value = json.loads(catalog.get_setting(key) or "null")
+    except ValueError:
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def backup_text(catalog):
+    """Settings, "Backup": the last backup, a restore chosen for the next start, and what the last restore did. It
+    stays until something newer replaces it (no toast to miss)."""
+    lines = []
+    made = _json_setting(catalog, "last_backup")
+    lines.append(f"Last backup: {made['file']}, made {short_date(made['at'])}." if made else "No backup made yet.")
+    plan = staged_restore(catalog)
+    if plan:
+        lines.append("Restore chosen: ClassiFile switches to the backup"
+                     + (f" made {short_date(plan['made_at'])}" if plan.get("made_at") else "")
+                     + " the next time it starts. The catalog in use now is then kept in the data folder.")
+    done = _json_setting(catalog, "restore_result")
+    if done:
+        when, kept = short_date(done.get("at")), done.get("kept")
+        lines.append({
+            "switched": f"Last restore, {when}: switched to the backup. The catalog used before is kept in the data "
+                        f"folder as “{kept}”.",
+            "not used": f"Last restore, {when}: the backup couldn't be used, so nothing changed."
+                        + (f" It is kept in the data folder as “{kept}”." if kept else ""),
+            "interrupted": f"Last restore, {when}: the switch was interrupted, so ClassiFile went back to the catalog "
+                           "used before. Choose the backup again to restore it.",
+        }.get(done.get("outcome"), f"Last restore, {when}: unknown outcome."))
+    return "\n".join(lines)
+
+
 # Problem reasons that are fixed wording (reader, worker, organizer). Any other reason may name a file or folder,
 # so the problem report says only what kind of problem it was.
 FIXED_REASONS = re.compile(
@@ -173,6 +208,10 @@ def problem_report(catalog):
         lines.append(f"  version {r['version']} · {short_date(r['created_at'])} · {r['trigger'] or 'user'} · "
                      f"{r['documents']} documents, {r['categories']} categories · {r['status']}"
                      + (f" · {check_text(found)}" if check_text(found) else ""))
+    made, done = _json_setting(catalog, "last_backup"), _json_setting(catalog, "restore_result")
+    lines.append(f"Backup: {'last made ' + short_date(made['at']) if made else 'none made'} · restore chosen: "
+                 f"{'yes' if staged_restore(catalog) else 'no'}"
+                 + (f" · last restore {short_date(done.get('at'))}: {done.get('outcome')}" if done else ""))
     problems = catalog.all("SELECT rowid, status, status_reason, updated_at FROM documents WHERE status_reason IS NOT"
                          " NULL AND status != 'filed' ORDER BY updated_at DESC LIMIT 10")
     lines.append("Last problems:" + ("" if problems else " none"))
@@ -228,6 +267,7 @@ class MainWindow(QWidget):
         self.learning = None        # "Learn from my existing folders" under way: its counts
         self.update_note = None     # the note at the top after matching updated by itself (A7, record 2.6)
         self.moving = 0             # moves and renames under way (they copy files, so they run off this thread)
+        self.backup_busy = None     # "Making a backup…" while a backup or a restore check runs
         self.picker_dialog = None
         self.deferred = []          # "Leave pending": moved to the end of the decision page for this session
         self.view = (ALL, None)     # ("all" | "decide" | "recent" | "settings" | "category", category id)
@@ -820,18 +860,25 @@ class MainWindow(QWidget):
         a.addWidget(self.matching_log)
         a.addSpacing(RELATED)
         a.addWidget(self.tech)
-        backup = QPushButton("Back up the catalog…")
-        backup.setToolTip("Saves your categories, choices and what matching learned to a file you choose. "
-                          "Your documents and copies stay where they are.")
-        backup.clicked.connect(self.backup_catalog)
-        restore = QPushButton("Restore a backup…")
-        restore.setToolTip("Switches to a backup at the next start. The catalog in use now is kept beside it.")
-        restore.clicked.connect(self.restore_catalog)
+        self.backup_button = QPushButton("Back up the catalog…")
+        self.backup_button.setToolTip("Saves your categories, choices and what matching learned to a file you "
+                                      "choose. Your documents and copies stay where they are.")
+        self.backup_button.clicked.connect(self.backup_catalog)
+        self.restore_button = QPushButton("Restore a backup…")
+        self.restore_button.setToolTip("Switches to a backup at the next start. The catalog in use now is kept "
+                                       "beside it.")
+        self.restore_button.clicked.connect(self.restore_catalog)
+        self.cancel_restore_button = QPushButton("Cancel restore")
+        self.cancel_restore_button.setObjectName("link")
+        self.cancel_restore_button.setToolTip("Keep the catalog in use now; the backup itself isn't touched")
+        self.cancel_restore_button.clicked.connect(self.cancel_restore)
         keep = box(QHBoxLayout(), spacing=RELATED)
-        keep.addWidget(backup)
-        keep.addWidget(restore)
+        keep.addWidget(self.backup_button)
+        keep.addWidget(self.restore_button)
+        keep.addWidget(self.cancel_restore_button)
         keep.addStretch(1)
-        a.addLayout(keep)
+        self.backup_status = QLabel()             # the last backup, a restore chosen, what the last restore did
+        self.backup_status.setObjectName("secondary")
         self.advanced = Collapsible("Advanced", advanced_body)   # starts closed: details for reporting a problem
         for combo in (self.auto_level, self.auto_scope, self.appearance, self.motion):
             combo.setFixedWidth(SETTING_CHOICE)   # one width: their edges line up down the page
@@ -849,6 +896,10 @@ class MainWindow(QWidget):
                                   "never changed.", row))
         v.addWidget(settings_card("Appearance", "", look_row, motion_row))
         v.addWidget(settings_card("When closing", "", self.close_toggle))
+        v.addWidget(settings_card(
+            "Backup", "A backup holds your categories, your choices and what ClassiFile learned. It is not a copy of "
+            "your documents: they, their originals and the filed copies stay where they are, and restoring doesn't "
+            "change them.", wrapped(self.backup_status), keep))
         v.addWidget(self.advanced)
         v.addStretch(1)
         return outer
@@ -953,7 +1004,10 @@ class MainWindow(QWidget):
     def refresh(self, select_docs=None, recheck=True):
         """Bring the window in line with the catalog, in place: rows, cards and counts that did not change are
         left alone, so what is typed, opened, selected or scrolled to stays. Six queries, whatever the size.
-        recheck: look on disk for the waiting documents' originals again (a background read ending is no reason)."""
+        recheck: look on disk for the waiting documents' originals again (a background read ending is no reason).
+        While closing, nothing is drawn again: no preview or question starts, and "Closing…" stays in view."""
+        if self.closing:
+            return
         cats = self._fill_categories()
         self.waiting_docs = waiting = self.decision_docs(recheck, cats)
         n = len(waiting)
@@ -999,6 +1053,7 @@ class MainWindow(QWidget):
             self.close_toggle.blockSignals(True)
             self.close_toggle.setChecked(self.org.catalog.get_setting("close_notice") != "off")
             self.close_toggle.blockSignals(False)
+            self._show_backup()
         elif key == DECIDE:
             self.decision.show_checks(self.checks)
             self.decision.show_items(waiting, {c["name_key"]: c for c in cats},
@@ -1402,6 +1457,8 @@ class MainWindow(QWidget):
             self.root_moving = None
             self.change_root.setEnabled(True)
             self._show_processing()
+            if self.closing:
+                return
             if isinstance(report, Exception):
                 why = report if isinstance(report, ValueError) else type(report).__name__
                 self.toast.show_message(f"The output folder wasn't changed: {why}.")
@@ -1411,7 +1468,10 @@ class MainWindow(QWidget):
             self.refresh()
 
         progress = lambda n, total: self.bridge.job_done.emit(lambda r: step(*r), (n, total))
-        self._background(lambda: self.org.set_output_root(path, move=answer == "move", progress=progress), done)
+        if not self._background(lambda: self.org.set_output_root(path, move=answer == "move", progress=progress),
+                                done):
+            self.root_moving = None
+            self.change_root.setEnabled(True)
 
     def _root_changed(self, answer, report):
         counts = {k: sum(1 for _, o in report if o == k) for k in ("moved", "edited", "missing", "failed")}
@@ -1461,7 +1521,8 @@ class MainWindow(QWidget):
                                                ms=TOAST_LONG)
             self._learn_chosen(Path(path), found)
 
-        self._background(lambda: self.org.scan_folder(path), done)
+        if not self._background(lambda: self.org.scan_folder(path), done):
+            self.learning = None
 
     def _learn_chosen(self, path, found):
         chosen = self.ask_learn(path, found)
@@ -1476,7 +1537,7 @@ class MainWindow(QWidget):
         self._learn_files(jobs, [str(folder) for _, folder, _ in chosen or ()])
 
     def _learn_files(self, jobs, folders):
-        if not jobs:
+        if not jobs or self.closing:
             return
         self.learning = {"total": len(jobs), "done": 0, "learned": 0, "known": 0, "unread": 0, "folders": folders}
         for job in jobs:
@@ -1546,31 +1607,71 @@ class MainWindow(QWidget):
         return QFileDialog.getOpenFileName(self, title, str(Path.home() / "Documents"),
                                            "ClassiFile catalog (*.sqlite3)")[0]
 
+    def _show_backup(self):
+        busy = bool(self.backup_busy)
+        self.backup_status.setText((self.backup_busy + "\n" if busy else "") + backup_text(self.org.catalog))
+        self.backup_button.setEnabled(not busy)
+        self.restore_button.setEnabled(not busy)
+        self.cancel_restore_button.setVisible(not busy and staged_restore(self.org.catalog) is not None)
+
+    def _backup_job(self, busy, job, done):
+        """Backup and restore read and write the whole catalog: off this thread, one at a time, said in Settings."""
+        self.backup_busy = busy
+
+        def finished(result):
+            self.moving -= 1
+            self.backup_busy = None
+            if not self.closing:
+                done(result)
+                self.refresh(recheck=False)
+
+        if self._background(job, finished):
+            self.refresh(recheck=False)
+        else:
+            self.backup_busy = None
+
     def backup_catalog(self):
-        """Advanced, "Back up the catalog…": a consistent copy in a new file (designImp2 item 12)."""
+        """Settings, "Back up the catalog…": a consistent copy in a new file (designImp2 item 12)."""
         path = self.ask_save_path("Back up the catalog", f"ClassiFile catalog {date.today().isoformat()}.sqlite3")
         if not path:
             return
-        try:
-            self.org.catalog.backup(path)
-        except (ValueError, OSError) as e:
-            why = e if isinstance(e, ValueError) else "the file couldn't be written."
-            return self.toast.show_message(f"No backup was made: {why}", ms=TOAST_LONG)
-        self.toast.show_message(f"Backed up to {Path(path).name}. Keep it with your other backups.", ms=TOAST_LONG)
+
+        def done(result):
+            if isinstance(result, Exception):
+                why = result if isinstance(result, ValueError) else "the file couldn't be written."
+                return self.toast.show_message(f"No backup was made: {why}", ms=TOAST_LONG)
+            self.toast.show_message(f"Backed up to {Path(path).name}. Keep it with your other backups.",
+                                    ms=TOAST_LONG)
+
+        self._backup_job("Making a backup…", lambda: self.org.catalog.backup(path), done)
 
     def restore_catalog(self):
-        """Advanced, "Restore a backup…": checked now, switched in at the next start (catalog.db.apply_restore);
-        the catalog in use now is kept beside it, never overwritten."""
+        """Settings, "Restore a backup…": what restoring changes is said first; the backup is then checked on a copy
+        and switched in at the next start (catalog.db.apply_restore); the catalog in use now is kept beside it."""
+        if not self.ask_list("Restore a backup", (
+                "Restoring replaces your categories, your choices and what ClassiFile learned with the backup's, the "
+                "next time ClassiFile starts. Anything you filed or learned after the backup was made is then not in "
+                "the catalog.\n\nYour documents, their originals and the filed copies aren't part of a catalog "
+                "backup: restoring doesn't bring back, change or delete any of them. The catalog in use now is kept "
+                "in the data folder, and you can cancel the restore until you close ClassiFile."), "Choose a backup…"):
+            return
         path = self.ask_open_path("Restore a backup")
         if not path:
             return
-        try:
-            stage_restore(path, self.org.catalog.path.parent)
-        except (ValueError, OSError) as e:
-            why = e if isinstance(e, ValueError) else "it could not be copied."
-            return self.toast.show_message(f"Not restored: {why}", ms=TOAST_LONG)
-        self.toast.show_message("Close and open ClassiFile again to switch to the backup. The catalog in use now is "
-                                "kept beside it.", ms=TOAST_LONG)
+
+        def done(result):
+            if isinstance(result, Exception):
+                why = result if isinstance(result, ValueError) else "it could not be copied."
+                return self.toast.show_message(f"Not restored: {why}", ms=TOAST_LONG)
+            self.toast.show_message("Close and open ClassiFile again to switch to the backup. The catalog in use now "
+                                    "is kept beside it.", ms=TOAST_LONG)
+
+        self._backup_job("Checking the backup…", lambda: stage_restore(path, self.org.catalog), done)
+
+    def cancel_restore(self):
+        if cancel_restore(self.org.catalog):
+            self.toast.show_message("Restore cancelled. ClassiFile keeps the catalog in use now.")
+        self.refresh(recheck=False)
 
     def ask_list(self, title, text, action=None):
         """A list to read, with an optional action; True when the action was chosen. Replaced in tests."""
@@ -1612,6 +1713,8 @@ class MainWindow(QWidget):
         self.import_paths(self._drag_paths(e))
 
     def import_paths(self, paths):
+        if self.closing:                        # nothing new once closing has begun
+            return
         refused = []
         for p in paths:
             p = str(Path(p).resolve())
@@ -1696,7 +1799,7 @@ class MainWindow(QWidget):
         docs = [d for d in docs if d and d["status"] == "needs_decision" and d["id"] not in self.filing
                 and not self.org.original_missing(d["id"])]
         name = " ".join(name.split())
-        if not docs or not name:
+        if not docs or not name or self.closing:
             return
         if self.failure and set(self.failure[0]) & {d["id"] for d in docs}:
             self.failure = None  # a new attempt; a new failure replaces it
@@ -1769,11 +1872,10 @@ class MainWindow(QWidget):
     def file_automatically(self, ids):
         """File those of these waiting documents whose match is clear, off this thread. The others wait."""
         for doc_id in ids:
-            choice = None if doc_id in self.filing else self.org.auto_choice(doc_id)
-            if choice:
+            choice = None if doc_id in self.filing or self.closing else self.org.auto_choice(doc_id)
+            if choice and self._submit(self._auto_job, doc_id):    # marked as filing only once it is accepted
                 self.filing[doc_id] = choice[0]
                 self.auto_running += 1
-                self._submit(self._auto_job, doc_id)
 
     def _auto_job(self, doc_id):
         try:
@@ -1812,16 +1914,15 @@ class MainWindow(QWidget):
             if not self.org.auto_folders() or len(ids) < 2:
                 run["folders"] = []
             else:
-                run["creating"] = True
-
                 def done(result):
                     self.moving -= 1
                     run["creating"] = False
                     run["folders"] = [] if isinstance(result, Exception) else result
-                    self.refresh(recheck=False)
-                    self._run_step()
+                    if not self.closing:
+                        self.refresh(recheck=False)
+                        self._run_step()
 
-                self._background(lambda: self.org.create_folders(ids), done)
+                run["creating"] = self._background(lambda: self.org.create_folders(ids), done)
                 return
         self.run = None
         self.import_summary(run)
@@ -1894,6 +1995,8 @@ class MainWindow(QWidget):
     def recheck_waiting(self):
         """Look at the waiting documents again: the level, the selection or the model changed, or the user
         confirmed documents and a category may now hold the three it takes to be filed into."""
+        if self.closing:                        # work that ends while closing schedules nothing more
+            return
         self.file_automatically([d["id"] for d in self.waiting()])
 
     def set_auto_level(self, name):
@@ -1994,7 +2097,8 @@ class MainWindow(QWidget):
             self.toast.show_message(text.strip(), ms=TOAST_LONG if problems else TOAST)
             self.refresh()
 
-        self._background(job, done)
+        if not self._background(job, done) and created:
+            self.org.discard_unused_category(cat_id)
 
     def _show_filed(self, cat_id, ids):
         if self.org.catalog.category(cat_id):
@@ -2205,6 +2309,8 @@ class MainWindow(QWidget):
         self.learned.setVisible(self.learned_rows.count() > 0)
 
     def update_matching(self):
+        if self.closing:
+            return
         self.matching_button.setEnabled(False)
         self.matching_button.setText("Updating…")
 
@@ -2229,18 +2335,21 @@ class MainWindow(QWidget):
                     text = (f"Matching updated (version {result['version']}): {result['documents']} documents in "
                             f"{result['categories']} categories" + (f"; {said}." if result["check"].get("previous")
                                                                      else "."))
+            if self.closing:
+                return
             self.toast.show_message(text, ms=TOAST_LONG)
             self.recheck_waiting()              # with what it knows now
             self.refresh()
 
-        self._background(self.org.update_matching, done)
+        if not self._background(self.org.update_matching, done):
+            self.matching_button.setEnabled(True)
+            self.matching_button.setText("Update matching")
 
     def update_if_due(self):
         """Learning by itself (A7, record 2.6): after every 10 confirmations or moves, matching updates in the
         background with its usual check; the previous version stays if the new one does worse."""
-        if self.updating or not self.org.update_due():
+        if self.updating or self.closing or not self.org.update_due():
             return
-        self.updating = True
 
         def done(result):
             self.moving -= 1
@@ -2253,10 +2362,11 @@ class MainWindow(QWidget):
             else:
                 self.update_note = (f"Matching tried a new version by itself and kept version {result['version']}, "
                                     "which did better.")
-            self.recheck_waiting()
-            self.refresh()
+            if not self.closing:
+                self.recheck_waiting()
+                self.refresh()
 
-        self._background(lambda: self.org.update_matching("automatic"), done)
+        self.updating = self._background(lambda: self.org.update_matching("automatic"), done)
 
     def _dismiss_update_note(self):
         self.update_note = None
@@ -2272,22 +2382,32 @@ class MainWindow(QWidget):
             self.import_paths([d["source_path"] for d in docs])
 
     def _submit(self, fn, *args):
-        """Every job off this thread goes through here, so closing knows what is still running."""
-        future = self.pool.submit(fn, *args)
+        """Every job off this thread goes through here, so closing knows what is still running. Once closing has
+        begun nothing new is accepted (designImp3 ticket 3): None, and the caller changes no count or state; it
+        marks work as under way only once this has returned the job."""
+        if self.closing:
+            return None
+        try:
+            future = self.pool.submit(fn, *args)
+        except RuntimeError:                    # the pool has shut down
+            return None
         self.jobs.add(future)
         future.add_done_callback(self.jobs.discard)
         return future
 
     def _background(self, job, done):
-        """Run job() off this thread, then done(result or the exception) in the window."""
+        """Run job() off this thread, then done(result or the exception) in the window. False when it was not
+        accepted (closing): done is then never called."""
         def run():
             try:
                 result = job()
             except Exception as e:
                 result = e
             self.bridge.job_done.emit(done, result)
-        self.moving += 1
-        self._submit(run)
+        if self._submit(run) is None:
+            return False
+        self.moving += 1                        # done() runs later, in the window: after this
+        return True
 
     def move_docs(self, ids):
         ids = [i for i in ids if (self.org.catalog.document(i) or {"status": ""})["status"] == "filed"]
@@ -2332,6 +2452,8 @@ class MainWindow(QWidget):
                          else f" {edited} copies were changed after filing: they stay in their old folders, flagged.")
             if problems:
                 text += f" {len(problems)} couldn't be moved. {problems[0]}"
+            if self.closing:                    # settled; nothing new is started, no question asked
+                return
             self.toast.show_message(text, ms=TOAST_LONG if edited or problems else TOAST)
             self.recheck_waiting()
             if moved:
@@ -2342,7 +2464,8 @@ class MainWindow(QWidget):
             if empty and self.ask_delete_empty(len(empty)):  # asked once, for all of them
                 self.delete_categories(empty, quiet=True)
 
-        self._background(job, done)
+        if not self._background(job, done) and created:
+            self.org.discard_unused_category(cat_id)
 
     def delete_categories(self, cat_ids, quiet=False):
         kept, deleted = [], 0
@@ -2484,6 +2607,25 @@ def catalog_lock(catalog_path):
     return lock if lock.tryLock(0) else None
 
 
+def open_catalog(path):
+    """At start, with the lock held: a restore chosen last time is switched in (or a switch that stopped half-way
+    is undone), then the catalog is opened. (catalog, what the restore did or None), or (None, a plain sentence)
+    when it can't be opened: a catalog that exists is never replaced by a new empty one."""
+    try:
+        try:
+            restored = apply_restore(path)
+        except OSError:                         # stopped part-way: once more, which finds and undoes it
+            restored = apply_restore(path)
+        catalog = Catalog(path)
+    except (OSError, sqlite3.Error, RuntimeError) as e:
+        return None, (f"ClassiFile couldn't open its catalog ({type(e).__name__}). Nothing was deleted: the catalog "
+                      f"and any backup it was switching to are in {path.parent}. Close other programs that may use "
+                      "that folder and start ClassiFile again.")
+    if restored is not None:
+        catalog.set_setting("restore_result", json.dumps(restored | {"at": now()}))
+    return catalog, restored
+
+
 def main():
     app = make_app(sys.argv)
     smooth_scrolling(app)
@@ -2495,13 +2637,14 @@ def main():
         QMessageBox.information(None, "ClassiFile is already open",
                                 "ClassiFile is already open. Switch to its window on the taskbar.")
         sys.exit(0)
-    restored = apply_restore(path)              # a backup chosen last time becomes the catalog now
-    w = MainWindow(Organizer(Catalog(path)))
+    catalog, restored = open_catalog(path)
+    if catalog is None:
+        QMessageBox.critical(None, "ClassiFile couldn't start", restored)
+        sys.exit(1)
+    w = MainWindow(Organizer(catalog))
     w.show()
     if restored is not None:
-        w.toast.show_message("The backup could not be used, so nothing changed." if restored == "not used" else
-                             "Switched to the backup." + (f" The earlier catalog is kept as “{restored}”."
-                                                         if restored else ""), ms=TOAST_LONG)
+        w.toast.show_message(backup_text(catalog).splitlines()[-1], ms=TOAST_LONG)
     code = app.exec()
     lock.unlock()
     sys.exit(code)

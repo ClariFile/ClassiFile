@@ -1742,6 +1742,97 @@ def test_closing_waits_for_work_under_way_and_takes_no_new_work(app, make_org):
     _pump(app, lambda: not w.isVisible(), timeout=10)                  # and then it closes by itself
 
 
+@pytest.mark.parametrize("ending", ["update", "move", "output folder"])
+def test_work_that_ends_while_closing_starts_nothing_new(app, make_org, tmp_path, monkeypatch, ending):
+    """designImp3 ticket 3: a matching update, a move or an output-folder change ends after Close. What it did is
+    settled, but no filing, update, question or preview starts; no counter is left behind; the catalog opens."""
+    import sys
+    import threading
+
+    from test_matching import _add
+
+    org, src = make_org(), tmp_path / "src"
+    for n in range(3):
+        _add(org, src, "Algebra", n)
+        _add(org, src, "Networks", n)
+    org.update_matching()
+    org.set_auto_level("off")
+    waiting = _add(org, src, "Networks", 7, file_it=False)              # a clear match, waiting while it is off
+    org.set_auto_level("strict")
+    assert org.auto_choice(waiting)
+    errors = []
+    monkeypatch.setattr(sys, "excepthook", lambda *e: errors.append(e))
+    w, rec = _window(lambda: org)
+    gate, release = threading.Event(), threading.Event()
+
+    def held(real):
+        return lambda *a, **k: (gate.set(), release.wait(10), real(*a, **k))[-1]
+    if ending == "update":
+        monkeypatch.setattr(w.org, "update_matching", held(w.org.update_matching))
+        w.update_matching()
+    elif ending == "move":
+        monkeypatch.setattr(w.org, "move", held(w.org.move))
+        rec.delete_answer = True
+        first = next(d["id"] for d in w.org.catalog.all_documents() if d["status"] == "filed")
+        w._move([first], w.org.catalog.category_by_key("algebra")["id"], "Algebra")
+    else:
+        monkeypatch.setattr(w.org, "set_output_root", held(w.org.set_output_root))
+        w.pick_folder = lambda title: str(tmp_path / "new-out")
+        rec.move_answer = "move"
+        w.change_output_root()
+    assert gate.wait(5)
+    _close(w, rec)
+    assert w.closing and w.isVisible()
+    release.set()
+    _pump(app, lambda: not w.isVisible(), timeout=10)
+    app.processEvents()
+    assert not errors and not w.filing and not w.auto_running and not w.moving and not w.updating
+    assert rec.empties == []                                           # no question asked while closing
+    assert org.catalog.document(waiting)["status"] == "needs_decision"
+    assert w._submit(lambda: None) is None and not w._background(lambda: None, print)
+    org.catalog.close()
+    assert make_org().catalog.document(waiting)["status"] == "needs_decision"
+
+
+def test_backup_and_restore_say_what_they_do_and_stay_in_view(app, make_org, tmp_path):
+    from classifile.app.main import SETTINGS, open_catalog
+    from classifile.catalog import db
+
+    w, rec = _window(make_org)
+    w.show_view(SETTINGS)
+    assert w.backup_status.text() == "No backup made yet." and not w.cancel_restore_button.isVisible()
+    dest = tmp_path / "keep" / "my catalog #1.sqlite3"
+    dest.parent.mkdir()
+    w.ask_save_path = lambda title, name: str(dest)
+    w.backup_catalog()
+    _pump(app, lambda: not w.moving)
+    assert w.backup_status.text().startswith("Last backup: my catalog #1.sqlite3, made ")
+    asked = []
+    w.ask_list = lambda title, text, action=None: asked.append(text) or True
+    w.ask_open_path = lambda title: str(dest)
+    w.restore_catalog()
+    _pump(app, lambda: not w.moving)
+    assert "aren't part of a catalog backup" in asked[0]
+    assert "Restore chosen: ClassiFile switches to the backup made " in w.backup_status.text()
+    assert w.cancel_restore_button.isVisible()
+    w.cancel_restore_button.click()
+    assert "Restore chosen" not in w.backup_status.text() and not db.staged_restore(w.org.catalog)
+    w.restore_catalog()
+    _pump(app, lambda: not w.moving)
+    path = w.org.catalog.path
+    _close(w, rec)
+    w.org.catalog.close()
+    catalog, restored = open_catalog(path)                             # the next start
+    assert restored["outcome"] == "switched"
+    assert "Last restore, " in backup_text_of(catalog) and "switched to the backup" in backup_text_of(catalog)
+    catalog.close()
+
+
+def backup_text_of(catalog):
+    from classifile.app.main import backup_text
+    return backup_text(catalog)
+
+
 def test_new_folders_by_itself_with_one_summary_and_a_one_click_rename(app, make_org, tmp_path):
     from classifile.app.main import AUTO
     from test_matching import SUBJECTS, _add, _pdf

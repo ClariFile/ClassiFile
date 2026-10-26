@@ -1,4 +1,6 @@
 """SQLite catalog in the app's data folder. Stable IDs; content hashes identify bytes, never documents."""
+import functools
+import itertools
 import json
 import os
 import sqlite3
@@ -9,6 +11,7 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 
+from classifile.copies.engine import _hash as file_hash, _publish as publish
 from classifile.reader import unread_gap
 
 APP_NAME = "ClassiFile"
@@ -270,71 +273,246 @@ def now():
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
-# -- backup and restore (designImp2 item 12) ----------------------------------------------------------------------
-# A backup is a consistent copy of the catalog (SQLite's backup API, also while the app runs). Restoring never
-# overwrites: the backup is checked, put beside the catalog as RESTORE_NAME, and switched in by apply_restore() at
-# the next start, before the catalog is opened; the catalog it replaces is kept under another name. The documents,
-# the originals and the filed copies are never touched; a copy changed or gone since the backup is flagged as
-# usual when it is next looked at.
-RESTORE_NAME = "restore.sqlite3"
+# -- backup and restore (designImp2 item 12, designImp3 tickets 1 and 2) ------------------------------------------
+# A backup is a consistent copy of the catalog (SQLite's backup API, also while the app runs): categories, choices
+# and what matching learned, not the documents. Every file made here gets a new unique name and is created
+# exclusively, so it is ClassiFile's own; a file is deleted only by the operation that made it, or through the record
+# that names it with its hash. A name that merely looks like ours is left alone. Restoring never overwrites: the
+# chosen backup is only read; a copy of it is staged beside the catalog, brought up to date and tried there, and
+# recorded in the catalog in use (setting STAGED, with its hash). At the next start, before the catalog is opened,
+# apply_restore() switches it in; the catalog it replaces is kept beside it under a new name. Documents, originals
+# and filed copies are never touched.
+STAGED = "restore_staged"       # {"file", "sha256", "at", "made_at"}: the restore chosen for the next start
+NOT_CATALOG = "This isn't a ClassiFile catalog."
+
+
+def _read_only(path):
+    """A read-only connection; the path goes into the URI encoded (spaces, #, %, any script)."""
+    return sqlite3.connect(Path(path).resolve().as_uri() + "?mode=ro", uri=True)
+
+
+def _new_file(folder, stem, suffix):
+    """A new empty file under a name nobody has: created exclusively, so it is ours."""
+    while True:
+        path = Path(folder) / f"{stem}{uuid.uuid4().hex[:12]}{suffix}"
+        try:
+            with open(path, "xb"):
+                return path
+        except FileExistsError:
+            continue
+
+
+def _move_aside(path, stem):
+    """Rename a file of ours to "<stem> <time>.sqlite3" beside it ((2), (3)… when taken), never over another
+    file. Returns the new path."""
+    stamp = datetime.now().strftime("%Y-%m-%d %H%M%S")
+    for n in itertools.count(1):
+        target = path.with_name(f"{stem} {stamp}{f' ({n})' if n > 1 else ''}.sqlite3")
+        try:
+            publish(path, target)
+            return target
+        except FileExistsError:
+            continue
+
+
+def _setting(path, key):
+    """A JSON setting of the catalog file at path, read only; None when absent or unreadable."""
+    try:
+        db = _read_only(path)
+        try:
+            row = db.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+        finally:
+            db.close()
+        return json.loads(row[0]) if row else None
+    except (sqlite3.Error, ValueError, TypeError):
+        return None
+
+
+def _plan(value):
+    return value if isinstance(value, dict) and {"file", "sha256"} <= value.keys() else None
+
+
+def _put_setting(path, key, value):
+    """Set (None: remove) a JSON setting in a catalog file of ClassiFile's own that is not open."""
+    db = sqlite3.connect(path)
+    try:
+        with db:
+            if value is None:
+                db.execute("DELETE FROM settings WHERE key = ?", (key,))
+            else:
+                db.execute("INSERT INTO settings VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                           (key, json.dumps(value)))
+    finally:
+        db.close()
 
 
 def check_backup(path):
-    """None when path is a ClassiFile catalog this version can open, else a plain reason. Opened read-only."""
+    """None when path looks like a ClassiFile catalog this version may open, else a plain reason. Opened
+    read-only; whether it really works is tried on ClassiFile's own copy (_usable)."""
     try:
-        db = sqlite3.connect(f"file:{Path(path).as_posix()}?mode=ro", uri=True)
+        db = _read_only(path)
         try:
             if db.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
                 return "This file is damaged."
-            version = db.execute("SELECT version FROM schema_version").fetchone()[0]
+            rows = db.execute("SELECT version FROM schema_version").fetchall()
             db.execute("SELECT 1 FROM documents LIMIT 1")
         finally:
             db.close()
-    except sqlite3.Error:
-        return "This isn't a ClassiFile catalog."
-    if version > len(MIGRATIONS):
+    except (sqlite3.Error, OSError, ValueError):
+        return NOT_CATALOG
+    if len(rows) != 1 or type(rows[0][0]) is not int or rows[0][0] < 1:
+        return NOT_CATALOG
+    if rows[0][0] > len(MIGRATIONS):
         return "This catalog is from a newer ClassiFile. Update ClassiFile first."
     return None
 
 
-def stage_restore(backup, data_dir):
-    """Check a backup and put a copy of it beside the catalog, to be switched in at the next start. Raises
-    ValueError with a plain reason; never overwrites (an earlier staged restore is replaced only by asking again)."""
+def _schema(db):
+    """{(type, name): column names} of every table, index and trigger."""
+    return {(t, n): {r[1] for r in db.execute(f"PRAGMA table_info('{n}')")} if t == "table" else set()
+            for t, n in db.execute("SELECT type, name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'").fetchall()}
+
+
+@functools.cache
+def _required_schema():
+    """What a new catalog of this version has: a usable catalog has all of it."""
+    fresh = Catalog(":memory:")
+    try:
+        return _schema(fresh.db)
+    finally:
+        fresh.close()
+
+
+def _usable(path):
+    """None when the catalog at path (ClassiFile's own copy: it is brought up to date here) has everything this
+    version needs and its everyday reads work, else a plain reason."""
+    try:
+        cat = Catalog(path)
+    except (sqlite3.Error, RuntimeError, TypeError, ValueError):
+        return "This backup can't be brought up to date by this ClassiFile."
+    try:
+        have = _schema(cat.db)
+        if any(k not in have or not cols <= have[k] for k, cols in _required_schema().items()):
+            return "This backup is missing parts ClassiFile needs."
+        for read in (cat.learning_revision, cat.categories, cat.all_documents, cat.explicit_labels,
+                     cat.active_matcher, cat.copies, cat.pending_moves, cat.unread_units):
+            read()
+    except (sqlite3.Error, TypeError, ValueError):
+        return "This backup is missing parts ClassiFile needs."
+    finally:
+        cat.close()
+    return None
+
+
+def staged_restore(catalog):
+    """The restore chosen for the next start ({"file", "sha256", "at", "made_at"}), or None."""
+    try:
+        return _plan(json.loads(catalog.get_setting(STAGED) or "null"))
+    except ValueError:
+        return None
+
+
+def _discard_staged(folder, plan):
+    """Delete a staged copy its record names, only while its bytes are still the ones recorded."""
+    path = Path(folder) / plan["file"]
+    try:
+        if path.is_file() and file_hash(path) == plan["sha256"]:
+            path.unlink()
+    except OSError:
+        pass                                    # left in place; without its record it is never switched in
+
+
+def stage_restore(backup, catalog):
+    """Check a backup, copy it beside the catalog, bring the copy up to date and try it, then record it as the
+    restore of the next start. Raises ValueError with a plain reason. The chosen file is only read; a restore chosen
+    before is replaced only once the new one is ready."""
+    backup, folder = Path(backup).resolve(), catalog.path.parent
+    plan = staged_restore(catalog)
+    if backup == catalog.path.resolve():
+        raise ValueError("This is the catalog in use now.")
+    if plan and backup == (folder / plan["file"]).resolve():
+        raise ValueError("This backup is already chosen: ClassiFile switches to it at the next start.")
     reason = check_backup(backup)
     if reason:
         raise ValueError(reason)
-    staged = Path(data_dir) / RESTORE_NAME
-    staged.unlink(missing_ok=True)          # only ClassiFile's own staged copy, never the catalog
-    src = sqlite3.connect(f"file:{Path(backup).as_posix()}?mode=ro", uri=True)
+    staged = _new_file(folder, "restore ", ".sqlite3")
     try:
-        dst = sqlite3.connect(staged)
+        src = _read_only(backup)
         try:
-            src.backup(dst)
+            dst = sqlite3.connect(staged)
+            try:
+                src.backup(dst)
+            finally:
+                dst.close()
         finally:
-            dst.close()
-    finally:
-        src.close()
+            src.close()
+        reason = _usable(staged)
+        if reason:
+            raise ValueError(reason)
+        _put_setting(staged, STAGED, None)      # a restore recorded inside the backup is not this one
+        new = {"file": staged.name, "sha256": file_hash(staged), "at": now(),
+               "made_at": (_setting(staged, "backup_info") or {}).get("made_at")}
+    except BaseException:
+        staged.unlink(missing_ok=True)          # made by this call: ours
+        raise
+    with catalog.lock:
+        old = staged_restore(catalog)
+        catalog.set_setting(STAGED, json.dumps(new))
+    if old:
+        _discard_staged(folder, old)
     return staged
 
 
+def cancel_restore(catalog):
+    """Settings, "Cancel restore": the record goes, and the staged copy with it while it is still the one recorded.
+    True when a restore was chosen."""
+    with catalog.lock:
+        plan = staged_restore(catalog)
+        catalog.run("DELETE FROM settings WHERE key = ?", STAGED)
+    if plan:
+        _discard_staged(catalog.path.parent, plan)
+    return plan is not None
+
+
 def apply_restore(catalog_path):
-    """At start, before the catalog is opened: a staged restore that still checks becomes the catalog, and the
-    catalog it replaces is kept beside it as "catalog before restore <time>.sqlite3". Returns that name (or the
-    reason the staged file was set aside), else None. Renames only; nothing is overwritten or deleted."""
+    """At start, before the catalog is opened. None (nothing to do), or {"outcome", "kept"}: "switched" (the staged
+    restore is the catalog now; the one it replaced is kept as "kept"), "not used" (it was gone, changed or no longer
+    usable; set aside as "kept" when it was there) or "interrupted" (a switch stopped between its two renames: the
+    catalog in use before is back, and the restore is set aside). Renames only; nothing is overwritten."""
     catalog_path = Path(catalog_path)
-    staged = catalog_path.parent / RESTORE_NAME
-    if not staged.is_file():
+    folder = catalog_path.parent
+    if not catalog_path.exists():
+        return _recover_switch(catalog_path)
+    plan = _plan(_setting(catalog_path, STAGED))
+    if not plan:
         return None
-    stamp = datetime.now().strftime("%Y-%m-%d %H%M%S")
-    if check_backup(staged):
-        staged.rename(staged.with_name(f"restore not used {stamp}.sqlite3"))
-        return "not used"
-    kept = None
-    if catalog_path.exists():
-        kept = catalog_path.with_name(f"catalog before restore {stamp}.sqlite3")
-        catalog_path.rename(kept)
-    staged.rename(catalog_path)
-    return kept.name if kept else ""
+    staged = folder / plan["file"]
+    if not staged.is_file() or file_hash(staged) != plan["sha256"]:
+        _put_setting(catalog_path, STAGED, None)    # gone or changed since: no longer ours to switch in
+        return {"outcome": "not used", "kept": None}
+    if check_backup(staged) or _usable(staged):
+        aside = _move_aside(staged, "restore not used")
+        _put_setting(catalog_path, STAGED, None)
+        return {"outcome": "not used", "kept": aside.name}
+    _put_setting(catalog_path, STAGED, plan | {"sha256": file_hash(staged)})   # as brought up to date just now
+    kept = _move_aside(catalog_path, "catalog before restore")
+    publish(staged, catalog_path)
+    return {"outcome": "switched", "kept": kept.name}
+
+
+def _recover_switch(catalog_path):
+    """No catalog: when a switch stopped after the catalog was set aside, the set-aside catalog whose record names
+    the staged restore (by its hash) comes back, and the restore is set aside. None when there is no such thing."""
+    folder = catalog_path.parent
+    for kept in sorted(folder.glob("catalog before restore *.sqlite3")):
+        plan = _plan(_setting(kept, STAGED))
+        staged = plan and folder / plan["file"]
+        if plan and staged.is_file() and file_hash(staged) == plan["sha256"]:
+            publish(kept, catalog_path)
+            _move_aside(staged, "restore not used")
+            _put_setting(catalog_path, STAGED, None)
+            return {"outcome": "interrupted", "kept": None}
+    return None
 
 
 class Catalog:
@@ -347,7 +525,11 @@ class Catalog:
         self.db = sqlite3.connect(path, check_same_thread=False)
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA foreign_keys = ON")
-        self._migrate()
+        try:
+            self._migrate()
+        except BaseException:
+            self.db.close()                     # a catalog that can't be brought up to date is not held open
+            raise
 
     @classmethod
     def open_default(cls):
@@ -359,27 +541,36 @@ class Catalog:
 
     def backup(self, dest):
         """A consistent copy of the catalog in a new file dest (never over an existing one), with the app and
-        schema version it came from. Written under a temporary name first, then renamed into place."""
+        schema version it came from. Written under a new unique name of its own first, checked, then published
+        without any overwrite path; on failure only that file is removed."""
         dest = Path(dest)
+        exists = "A file with that name exists already. Choose another name."
         if dest.exists():
-            raise ValueError("A file with that name exists already. Choose another name.")
-        part = dest.with_name(dest.name + ".part")
-        part.unlink(missing_ok=True)        # only a leftover of ClassiFile's own unfinished backup
-        out = sqlite3.connect(part)
+            raise ValueError(exists)
+        part = _new_file(dest.parent, f"{dest.name}.", ".part")
         try:
-            with self.lock:
-                self.db.backup(out)
-            from classifile import __version__
-            with out:
-                out.execute("INSERT INTO settings VALUES ('backup_info', ?) ON CONFLICT(key) DO UPDATE SET"
-                            " value = excluded.value", (json.dumps({"app": __version__, "schema": self.schema_version,
-                                                                    "made_at": now()}),))
-        finally:
-            out.close()
-        if check_backup(part):
-            part.unlink()
-            raise ValueError("The backup couldn't be checked, so it was not kept. Try again.")
-        part.rename(dest)                   # fails rather than replace a file that appeared meanwhile
+            out = sqlite3.connect(part)
+            try:
+                with self.lock:
+                    self.db.backup(out)
+                from classifile import __version__
+                with out:
+                    out.execute("INSERT INTO settings VALUES ('backup_info', ?) ON CONFLICT(key) DO UPDATE SET"
+                                " value = excluded.value", (json.dumps(
+                                    {"app": __version__, "schema": self.schema_version, "made_at": now()}),))
+                    out.execute("DELETE FROM settings WHERE key = ?", (STAGED,))
+            finally:
+                out.close()
+            if check_backup(part):
+                raise ValueError("The backup couldn't be checked, so it was not kept. Try again.")
+            try:
+                publish(part, dest)             # fails rather than replace a file that appeared meanwhile
+            except FileExistsError:
+                raise ValueError(exists) from None
+        except BaseException:
+            part.unlink(missing_ok=True)        # made by this call: ours
+            raise
+        self.set_setting("last_backup", json.dumps({"file": dest.name, "at": now()}))
         return dest
 
     def _migrate(self):
