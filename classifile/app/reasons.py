@@ -13,12 +13,23 @@ def similar_reason(count, category, words=(), best=True):
     return f"{'Best match' if best else 'Weaker match'}: compared with {examples} in {category}{shared}"
 
 
-def unread_text(units, unit="page"):
-    """Where a waiting document holds pictures nothing could read (Catalog.unread_units), and what follows."""
+def where_text(units, unit="page"):
+    """"on pages 2–4", "on slide 3", or "in this document" for formats without pages."""
     noun = unit if unit in ("page", "slide") else None
-    where = f"on {noun}{'s' if len(units) > 1 else ''} {page_list(units)}" if noun else "in this document"
-    return (f"⚠ Some pictures {where} couldn't be read, so ClassiFile won't file it by itself. Look at them in "
-            "Details and choose, or Read again from ⋯.")
+    return f"on {noun}{'s' if len(units) > 1 else ''} {page_list(units)}" if noun else "in this document"
+
+
+def unread_text(units, unit="page", then="Look at them in Details and choose, or Read again from ⋯."):
+    """Where a waiting document holds pictures nothing could read (Catalog.unread_units), and what follows. The
+    text it has was read; that is not the same as every picture having been read (B3)."""
+    return f"⚠ Some pictures {where_text(units, unit)} couldn't be read, so ClassiFile won't file it by itself. {then}"
+
+
+def legacy_text(units, unit="page"):
+    """Where pictures were read by an earlier ClassiFile, which noted only that OCR ran, not what became of each
+    picture (Catalog.legacy_scans): neither complete nor incomplete until it is read again."""
+    return (f"The pictures {where_text(units, unit)} were read by an earlier ClassiFile, before it noted which "
+            "pictures it could read. Read again to check them.")
 
 
 def new_folder_reason(words):

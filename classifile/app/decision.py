@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
 )
 
 from classifile.analysis.candidates import name_key, top_names
-from classifile.app.reasons import reason_text, similar_reason, unread_text
+from classifile.app.reasons import legacy_text, reason_text, similar_reason, unread_text
 from classifile.app.widgets import (
     BAR, BUTTON_TEXT_MAX, CONTROL, FILE_ICON, GROUP, NAME_FIELD_MAX, RELATED, TEXT_MIN, TIGHT,
     CategoryPicker, ElidedLabel, ListRow, box, collapse, format_icon, restyle, scroll_area_of, unfold, wrappable,
@@ -65,7 +65,7 @@ def card_state(members, categories):
     return ([(d["id"], d["file_name"]) for d in members], first["status"], first["status_reason"], first["missing"],
             first["source_path"], first["suggestions"], first["unit"],
             existing["name"] if existing else bool(categories), first.get("matches"), first.get("abstained"),
-            first.get("unread"))
+            first.get("unread"), first.get("legacy"))
 
 
 def shorten(name, limit=BUTTON_TEXT_MAX):
@@ -139,8 +139,11 @@ class DecisionItem(ListRow):
         self.primary.setObjectName("primary")
         self.primary.clicked.connect(self.primary_action)
         # The second and third matching categories: one click each (decision record B2), as quiet links that wrap.
-        self.others = QLabel("Or file in: " + " · ".join(
-            f'<a href="{n}">{html.escape(m[0])}</a>' for n, m in enumerate(self.matches) if n))
+        # They are weaker by construction, and one that shares no words with the document says so on the card, not
+        # only in Details (designImp3 ticket 10). Never a score.
+        self.others = QLabel("Weaker matches: " + " · ".join(
+            f'<a href="{n}">{html.escape(m[0])}</a>' + ("" if m[2] else " (no words in common)")
+            for n, m in enumerate(self.matches) if n))
         self.others.setObjectName("secondary")
         wrapped(self.others)
         self.others.setTextFormat(Qt.RichText)
@@ -174,7 +177,7 @@ class DecisionItem(ListRow):
         self.pending = menu.addAction("Leave pending", lambda: self.c.leave_pending(self.ids))
         self.read_again = menu.addAction("Read again", lambda: self.c.retry_docs(self.ids))
         self.read_again.setToolTip("Read the original file again, pictures too")
-        self.read_again.setVisible(bool(first.get("unread")))
+        self.read_again.setVisible(bool(first.get("unread") or first.get("legacy")))
         menu.addAction("Remove from ClassiFile", lambda: self.c.remove_docs(self.ids))
         self.more_menu.setMenu(menu)
 
@@ -281,6 +284,9 @@ class DecisionItem(ListRow):
                 self._say(self.line, (self.line.text() + "\n" if self.line.text() else "")
                           + unread_text(first["unread"], first["unit"]))
                 self.line.setObjectName("warning")
+            elif first.get("legacy"):
+                self._say(self.line, (self.line.text() + "\n" if self.line.text() else "")
+                          + legacy_text(first["legacy"], first["unit"]))
             if first["status_reason"]:
                 self._say(self.line, (self.line.text() + "\n" if self.line.text() else "")
                           + f"Last attempt: {wrappable(first['status_reason'])}")

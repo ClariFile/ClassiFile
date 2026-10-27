@@ -1,14 +1,17 @@
 """How long the window takes to do its everyday work, on a made-up catalog (docs/archive/UI_PROPOSAL.md, section 1).
 
-Usage: python -m tools.measure_ui [--base DIR] [--json FILE]
+Usage: python -m tools.measure_ui [--documents N] [--base DIR] [--json FILE]
 
-Builds 200 one-page-title PDFs (140 filed in 30 categories, 60 waiting) and 20 more to import, in DIR (a temporary
-folder by default, removed afterwards), then opens the real window off-screen at 1536x864 and times:
+Builds 200 (or N) one-page-title PDFs (70% filed in 30 categories, the rest waiting), 10 examples learned from a
+folder, and 20 more to import, in DIR (a temporary folder by default, removed afterwards), then opens the real
+window off-screen at 1536x864 and times:
   - importing 20 documents while "Needs your decision" is showing: decision cards built, and how long the
     interface thread was busy (it cannot answer the mouse or keyboard meanwhile);
   - one refresh of each page and of the sidebar, with the database statements it ran;
   - one search key (nine are typed: most leave the list as it is, the last one halves it);
-  - whether text typed in a decision card, its open panel, the cursor and the scroll position survive the imports.
+  - whether text typed in a decision card, its open panel, the cursor and the scroll position survive the imports;
+  - Settings (opened three times, and its Advanced section), a catalog backup (the longest stall while it runs off
+    the interface thread) and Forget of the learned folder (designImp3 ticket 10).
 Times include the layout and painting a change causes. They describe this machine and this catalog only.
 No real document is read; nothing outside DIR is written.
 """
@@ -42,7 +45,7 @@ def make_pdf(path, text):
     d.close()
 
 
-def build(base):
+def build(base, documents=DOCUMENTS):
     from classifile.catalog.db import Catalog
     from classifile.organizer import Organizer, read_and_analyze
     for name in ("src", "out", "more"):
@@ -50,13 +53,18 @@ def build(base):
     org = Organizer(Catalog(base / "data" / "catalog.sqlite3"))
     org.set_output_root(base / "out")
     cats = [org.create_category(f"{WORDS[i % 20]} {'Systems' if i < 20 else 'Methods'}") for i in range(CATEGORIES)]
-    for n in range(DOCUMENTS):
+    for n in range(documents):
         path = base / "src" / f"Lecture {n:03d} - {title(n)} with a fairly long file name.pdf"
         make_pdf(path, title(n))
         doc, _ = org.record(path, *read_and_analyze(path))
-        if n < FILED:
+        if n < documents * FILED // DOCUMENTS:
             org.file(doc, cats[n % CATEGORIES])
-    for n in range(DOCUMENTS, DOCUMENTS + IMPORTS):
+    mine = base / "mine" / "Examples"
+    mine.mkdir(parents=True)
+    for n in range(10):
+        make_pdf(mine / f"example {n}.pdf", f"Example {title(n + 7)}")
+        org.learn(mine / f"example {n}.pdf", *read_and_analyze(mine / f"example {n}.pdf"), cats[0], mine)
+    for n in range(documents, documents + IMPORTS):
         make_pdf(base / "more" / f"Lecture {n:03d} - {title(n)}.pdf", title(n))
     org.catalog.close()
 
@@ -67,7 +75,7 @@ def measure(base):
     from PySide6.QtWidgets import QScrollArea
 
     from classifile.app import decision, make_app
-    from classifile.app.main import ALL, DECIDE, MainWindow
+    from classifile.app.main import ALL, DECIDE, SETTINGS, MainWindow
     from classifile.catalog.db import Catalog
     from classifile.organizer import Organizer
 
@@ -172,6 +180,25 @@ def measure(base):
                     "focus_in_field": bool(same and same.picker.field.hasFocus()),
                     "scroll_before": at, "scroll_after": bar.value(),
                     "card_y_before": on_screen, "card_y_after": same.mapTo(view, QPoint()).y() if same else None}
+
+    def settings():
+        w.show_view(SETTINGS)
+        app.processEvents()
+        w.show_view(ALL)
+    out["settings_entry"] = timed(settings, 3)
+    w.show_view(SETTINGS)
+    pump()
+    out["advanced_open"] = timed(lambda: (w.advanced.toggle.click(), app.processEvents(), w.advanced.toggle.click()), 3)
+    w.ask_save_path = lambda title, name: str(base / "backup.sqlite3")
+    del stalls[:]
+    w.backup_catalog()
+    pump(lambda: not w.backup_busy)
+    out["backup_longest_stall_ms"] = round(max(stalls))
+    statements.clear()
+    t = time.perf_counter()
+    w.forget_folder(str(base / "mine" / "Examples"))
+    app.processEvents()
+    out["forget"] = (round((time.perf_counter() - t) * 1000, 1), len(statements))
     w.close()
     return out
 
@@ -192,6 +219,10 @@ def report(out):
         row("Sidebar", "sidebar"),
         row("One search key (median of 9)", "search_key"),
         row("One search key (slowest)", "search_key_slowest"),
+        row("Settings opened (and left)", "settings_entry"),
+        row("Advanced opened and closed", "advanced_open"),
+        f"  {'Backup: longest stall while it runs':<34}{out['backup_longest_stall_ms']:>8} ms",
+        row("Forget a folder of 10 examples", "forget"),
         f"A card in use during the imports: {'kept' if kept else 'not kept'} (panel open {d['panel_open']},"
         f" text {d['text']!r}, cursor {d['cursor']}, focus {d['focus_in_field']},"
         f" card on screen at {d['card_y_before']} -> {d['card_y_after']} px)"])
@@ -201,6 +232,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--base", type=Path, help="an empty or new folder to build in (kept afterwards)")
     ap.add_argument("--json", type=Path, help="also write the numbers here")
+    ap.add_argument("--documents", type=int, default=DOCUMENTS, help="documents in the made-up catalog")
     a = ap.parse_args(argv)
     os.environ["QT_QPA_PLATFORM"] = "offscreen"
     os.environ["CLASSIFILE_OCR"] = "off"
@@ -208,7 +240,7 @@ def main(argv=None):
     if base.exists() and any(base.iterdir()):
         sys.exit(f"Refusing: {base} is not empty.")
     try:
-        build(base)
+        build(base, a.documents)
         out = measure(base)
     finally:
         if not a.base:

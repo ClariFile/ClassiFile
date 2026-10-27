@@ -2,6 +2,7 @@ import csv
 import json
 import math
 from collections import Counter
+from pathlib import Path
 
 import pymupdf
 import pytest
@@ -725,6 +726,65 @@ def test_an_update_check_measures_both_versions_under_the_same_scan_rule(make_or
     _add(org, src, "Algebra", 5)
     found = org.update_matching()["check"]
     assert found["new"]["safety"] == found["previous"]["safety"] == 1    # the unread one waits in both
+
+
+def _as_old_read(org, doc, unit=1):
+    """The document's stored read as an earlier ClassiFile (extraction record 6) left it: OCR "done", no outcome per
+    picture."""
+    ext = "(SELECT e.id FROM extractions e JOIN snapshots s ON s.id = e.snapshot_id WHERE s.document_id = ?)"
+    org.catalog.run(f"UPDATE extractions SET record_version = 6 WHERE id = {ext}", doc)
+    org.catalog.run(f"UPDATE extraction_units SET suspected_unread = 1, ocr_status = 'done', ocr_pictures = NULL"
+                    f" WHERE unit_index = ? AND extraction_id = {ext}", unit, doc)
+
+
+@pytest.mark.parametrize("found", ["complete", "partial", "failed"])
+@pytest.mark.parametrize("status", ["waiting", "filed"])
+def test_a_scan_from_an_earlier_reader_can_be_checked_again(make_org, tmp_path, monkeypatch, found, status):
+    """designImp3 ticket 7: an old record that says only "OCR done" is said as such (neither complete nor not) and
+    can be read again from the same bytes; a new read showing a picture left unread stops automatic filing; a
+    read that fails keeps the earlier one; a filed document keeps its category, copy and confirmation."""
+    import dataclasses
+
+    from classifile.app.reasons import legacy_text
+
+    org, src = make_org(), tmp_path / "src"
+    for n in range(3):
+        _add(org, src, "Algebra", n)
+        _add(org, src, "Networks", n)
+    org.update_matching()
+    doc = _add(org, src, "Networks", 7, file_it=status == "filed")
+    path = src / "networks-7.pdf"
+    cats = {c["name"]: c["id"] for c in org.catalog.categories()}
+    copies = [dict(c) for c in org.catalog.document_copies(doc)]
+    _as_old_read(org, doc)
+    assert org.catalog.legacy_scans() == {doc: [1]} and org.catalog.unread_units() == {}
+    assert "earlier ClassiFile" in legacy_text([1]) and "Read again" in legacy_text([1])
+    org = make_org()                                                       # a restart in between changes nothing
+    result, analysis, summary = read_and_analyze(path)
+    if found == "partial":
+        units = [dataclasses.replace(u, suspected_unread=True, ocr_status="partial",
+                                     ocr_pictures=[{"picture": 0, "outcome": "render_failed"}]) if u.index == 1 else u
+                 for u in result.record.units]
+        result = dataclasses.replace(result, record=dataclasses.replace(result.record, units=units))
+    elif found == "failed":
+        result = dataclasses.replace(result, status="failed", reason="reading timed out", record=None)
+    org._terms(doc)
+    revision = org.catalog.learning_revision()
+    _, note = org.record(path, result, analysis if found != "failed" else None, summary)
+    assert note == ("not read again" if found == "failed" else "read again")
+    gaps = org.catalog.scan_gaps(doc)
+    assert gaps == {"complete": ({}, {}), "partial": ({doc: [1]}, {}), "failed": ({}, {doc: [1]})}[found]
+    if found != "failed":
+        assert doc not in org._counts and org.catalog.learning_revision() > revision   # nothing stale kept
+    if status == "filed":
+        assert org.catalog.document(doc)["status"] == "filed"
+        assert org.catalog.active_primary(doc)["category_id"] == cats["Networks"]
+        assert [dict(c) for c in org.catalog.document_copies(doc)] == copies and Path(copies[0]["path"]).is_file()
+    else:
+        assert org.catalog.document(doc)["status"] == "needs_decision"
+        assert bool(org.auto_choice(doc)) == (found != "partial")          # a newly shown gap waits (B3)
+    assert org.record(path, *read_and_analyze(path))[1] in (("already imported",) if found == "complete" else (
+        "read again",))                                                    # nothing left to check: never read over
 
 
 def test_unread_text_names_the_pages():

@@ -950,7 +950,7 @@ class MainWindow(QWidget):
         Once matching is in use, a document's stored text is read and scored the first time it is seen."""
         names = {c["id"]: c["name"] for c in (self.org.catalog.categories() if cats is None else cats)}
         matching = bool(self.org.matcher())
-        unread = self.org.catalog.unread_units()
+        unread, legacy = self.org.catalog.scan_gaps()
         docs = []
         for d in self.org.catalog.waiting_documents():
             if d["status"] not in WAITING:
@@ -968,7 +968,7 @@ class MainWindow(QWidget):
             matches = [(names[c], n, w) for c, n, w in self.org.matches(d["id"], names)] if ready and matching else []
             docs.append(d | {"missing": missing, "suggestions": analysis.get("suggestions", []),
                              "unit": analysis.get("unit", "page"), "matches": matches,
-                             "unread": unread.get(d["id"], []),
+                             "unread": unread.get(d["id"], []), "legacy": legacy.get(d["id"], []),
                              "abstained": ready and matching and not matches})
         self.missing = {d["id"]: d["missing"] for d in docs}
         by_id = {d["id"]: d for d in docs}
@@ -1542,7 +1542,8 @@ class MainWindow(QWidget):
     def _learn_files(self, jobs, folders):
         if not jobs or self.closing:
             return
-        self.learning = {"total": len(jobs), "done": 0, "learned": 0, "known": 0, "unread": 0, "folders": folders}
+        self.learning = {"total": len(jobs), "done": 0, "learned": 0, "known": 0, "unread": 0, "folders": folders,
+                         "cats": {str(folder): cat for _, cat, folder in jobs}}
         for job in jobs:
             self._submit(self._learn_job, *job)
         self.refresh()
@@ -1581,25 +1582,46 @@ class MainWindow(QWidget):
         self.refresh()
 
     def _keep_learn_results(self, run):
-        """The files of each learned folder that taught nothing (unread, already in ClassiFile, stopped), kept in
-        the catalog for Settings. They stay on this computer: the problem report never includes them."""
+        """The files of each folder learned from that taught nothing (unread, already in ClassiFile, stopped),
+        with the category the folder goes to, kept in the catalog for Settings: also an attempt that taught nothing
+        at all keeps its row, its Details and Try again (designImp3 ticket 8). They stay on this computer: the
+        problem report never includes them."""
         kept = self._setting("learn_results", {})
         for folder in run.get("folders", ()):
-            kept[folder] = run.get("files", {}).get(folder, {})
+            files = run.get("files", {}).get(folder, {})
+            kept[folder] = files and files | {"category": run.get("cats", {}).get(folder)}
         self._save("learn_results", {f: r for f, r in kept.items() if r})
+
+    def _learn_target(self, folder):
+        """The category a folder learned from goes to: the one its attempt recorded, else (records before
+        2026-10-27) the one its examples are in. None when it was deleted since."""
+        cat = self._setting("learn_results", {}).get(folder, {}).get("category") or next(
+            (c for f, c, _, _ in self.org.catalog.learned_folders() if f == folder), None)
+        row = cat and self.org.catalog.category(cat)
+        return cat if row and row["deleted_at"] is None else None
 
     def show_learn_results(self, folder):
         """Settings, a learned folder's "Details…": which of its files taught nothing, and why; Try again reads
-        the ones that couldn't be read (or were stopped) once more."""
+        the ones that couldn't be read (or were stopped) once more, into the folder's category."""
         result = self._setting("learn_results", {}).get(folder, {})
-        words = {"unread": "Couldn't be read", "known": "Already in ClassiFile (they teach as they are)",
+        words = {"unread": "Couldn't be read",
+                 "known": "Already in ClassiFile, so not learned again from this folder (those you filed teach as "
+                          "filed; waiting ones teach nothing until you file them)",
                  "stopped": "Not read (stopped)"}
-        text = "\n\n".join(f"{words[k]}:\n" + "\n".join(Path(p).name for p in v) for k, v in result.items() if v)
+        text = "\n\n".join(f"{words[k]}:\n" + "\n".join(Path(p).name for p in result[k]) for k in words
+                            if result.get(k))
         again = [p for k in ("unread", "stopped") for p in result.get(k, ())]
-        if self.ask_list(f"Learned from {Path(folder).name}", text, "Try again" if again else None):
-            cat = next((c for f, c, _, _ in self.org.catalog.learned_folders() if f == folder), None)
-            if cat and not self.learning:
-                self._learn_files([(Path(p), cat, folder) for p in again if Path(p).is_file()], [folder])
+        if not self.ask_list(f"Learned from {Path(folder).name}", text, "Try again" if again else None):
+            return
+        cat, there = self._learn_target(folder), [Path(p) for p in again if Path(p).is_file()]
+        if cat is None:
+            self.toast.show_message("This folder's category was deleted. Use Learn from my existing folders… to "
+                                    "choose a category for it again.", ms=TOAST_LONG)
+        elif not there:
+            self.toast.show_message("Those files are no longer where they were. Your folder wasn't changed.",
+                                    ms=TOAST_LONG)
+        elif not self.learning:
+            self._learn_files([(p, cat, folder) for p in there], [folder])
 
     def ask_save_path(self, title, name):
         """Where to save a new file; "" when cancelled. Replaced in tests."""
@@ -1691,8 +1713,8 @@ class MainWindow(QWidget):
         if kept.pop(str(folder), None) is not None:
             self._save("learn_results", kept)
         n = self.org.forget_folder(folder)
-        self.toast.show_message(f"Forgot {n} example{'s' if n != 1 else ''} from {Path(folder).name}. "
-                                "Your files weren't touched.")
+        self.toast.show_message((f"Forgot {n} example{'s' if n != 1 else ''} from {Path(folder).name}." if n else
+                                 f"Forgot the attempt to learn from {Path(folder).name}.") + " Your files weren't touched.")
         self.refresh()
 
     @staticmethod
@@ -1788,6 +1810,9 @@ class MainWindow(QWidget):
                 run["unread"] += 1
             elif note == "already imported":
                 self.toast.show_message(f"{Path(path).name} is already in ClassiFile.")
+            elif note == "not read again":
+                self.toast.show_message(f"{Path(path).name} couldn't be read again. ClassiFile keeps its earlier "
+                                        "reading.")
             else:
                 run["docs"].append(doc_id)
                 self.file_automatically([doc_id])   # a clear match is filed without a question (A0)
@@ -2286,14 +2311,21 @@ class MainWindow(QWidget):
             row = self.learned_rows.takeAt(0).widget()
             row.setParent(None)                 # gone at once, not at the next turn of the event loop
             row.deleteLater()
-        for folder, _, name, n in self.org.catalog.learned_folders():
+        results = self._setting("learn_results", {})
+        learned = self.org.catalog.learned_folders()
+        tried = [(f, None, None, 0) for f in results if f not in {x[0] for x in learned}]   # nothing learned yet
+        for folder, _, name, n in sorted(learned + tried, key=lambda r: r[0].casefold()):
             row = QWidget()
             h = box(QHBoxLayout(row), spacing=GROUP)
-            result = self._setting("learn_results", {}).get(folder, {})
+            result = results.get(folder, {})
+            if name is None:
+                cat = self._learn_target(folder)
+                name = self.org.catalog.category(cat)["name"] if cat else "a deleted category"
             untaught = ", ".join(f"{len(v)} {w}" for k, w in (("unread", "couldn't be read"),
                                                                 ("known", "already in ClassiFile"),
                                                                 ("stopped", "not read")) if (v := result.get(k)))
-            text = QLabel(f"{Path(folder).name} → {name} · {n} document{'s' if n != 1 else ''}"
+            text = QLabel(f"{Path(folder).name} → {name} · "
+                          + (f"{n} document{'s' if n != 1 else ''} learned" if n else "nothing learned")
                           + (f" · {untaught}" if untaught else ""))
             text.setObjectName("secondary")
             text.setToolTip(folder)
@@ -2378,11 +2410,11 @@ class MainWindow(QWidget):
         self.refresh()
 
     def retry_docs(self, ids):
-        """Read documents again from their originals: those that couldn't be read, and waiting ones with pictures
-        left unread (a better read clears the warning)."""
-        unread = self.org.catalog.unread_units()
+        """Read documents again from their originals: those that couldn't be read, and waiting or filed ones with
+        pictures left unread or read by an earlier ClassiFile (a better read clears or shows the warning)."""
+        recheck = set().union(*(gaps.keys() for gaps in self.org.catalog.scan_gaps()))
         docs = [d for d in (self.org.catalog.document(i) for i in ids) if d and (
-            d["status"] in ("failed", "pending") or (d["status"] == "needs_decision" and d["id"] in unread))]
+            d["status"] in ("failed", "pending") or (d["status"] in ("needs_decision", "filed") and d["id"] in recheck))]
         if docs:
             self.import_paths([d["source_path"] for d in docs])
 

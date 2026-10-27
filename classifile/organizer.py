@@ -185,16 +185,20 @@ class Organizer:
                 self._unlearn([doc_id], "pending")
                 return doc_id, None
             # A failed read (e.g. a timeout) is retried by importing the same bytes again; a failed copy is not. So
-            # is a waiting document with parts left unread (Read again): a better read can clear them.
+            # is a document, waiting or filed, with parts left unread or read before each picture's outcome was
+            # recorded (Read again, designImp3 ticket 7): a better read can clear or show them. A recheck that fails
+            # keeps the earlier usable read; a filed document keeps its category and copies.
             status = self.catalog.document(doc_id)["status"]
-            if not self.catalog.active_primary(doc_id) and (status in ("failed", "pending") or (
-                    status == "needs_decision" and result.status == "ok" and self.catalog.unread_units(doc_id))):
-                self.catalog.replace_extraction(doc_id, result, analysis, summary)
+            primary = self.catalog.active_primary(doc_id)
+            recheck = status in ("needs_decision", "filed") and any(self.catalog.scan_gaps(doc_id))
+            if (not primary and status in ("failed", "pending")) or (recheck and result.status == "ok"):
+                self.catalog.replace_extraction(doc_id, result, analysis, summary, keep_status=status == "filed")
                 for cache in (self._counts, self._ranked):
                     cache.pop(doc_id, None)
                 self._words = {k: v for k, v in self._words.items() if k[1] != doc_id}
+                self._audit, self._groups = (None, None), (None, [])
                 return doc_id, "read again"
-            return doc_id, "already imported"
+            return doc_id, "not read again" if recheck else "already imported"
         return self.catalog.add_document(result, Path(path).resolve(), analysis, summary), None
 
     # -- "Learn from my existing folders" (decision record 2.9) -------------------------------------------------

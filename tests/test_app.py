@@ -1712,7 +1712,7 @@ def test_learning_says_which_files_taught_nothing_and_tries_them_again(app, make
     _pump(app, lambda: w.learning is None and not w.moving)
     w.show_view(SETTINGS)
     rows = [l.text() for l in w.learned.findChildren(QLabel)]
-    assert rows == ["Garden → Garden · 3 documents · 1 couldn't be read"]
+    assert rows == ["Garden → Garden · 3 documents learned · 1 couldn't be read"]
     shown = []
     w.ask_list = lambda title, text, action=None: shown.append((text, action)) or True
     details = [b for b in w.learned.findChildren(QPushButton) if b.text() == "Details…"]
@@ -1720,6 +1720,49 @@ def test_learning_says_which_files_taught_nothing_and_tries_them_again(app, make
     assert shown == [("Couldn't be read:\nbroken.pdf", "Try again")]
     _pump(app, lambda: w.learning is None and not w.moving)            # read again: still unreadable
     assert "broken.pdf" not in problem_report(w.org.catalog)
+    _close(w, rec)
+
+
+def test_a_learning_attempt_that_taught_nothing_keeps_its_row_and_can_be_tried_again(app, make_org, tmp_path):
+    """designImp3 ticket 8: every file unreadable, then fixed: the attempt has a row in Settings (also after a
+    restart), its Details and Try again reach the same category; files already in ClassiFile are said to be so,
+    not counted as learned; a deleted category is said, never replaced by another."""
+    import pymupdf
+
+    mine = tmp_path / "mine"
+    (mine / "Garden").mkdir(parents=True)
+    broken = mine / "Garden" / "broken.pdf"
+    broken.write_bytes(b"%PDF-1.4 not really")
+    w, rec = _window(make_org)
+    w.pick_folder = lambda title: str(mine)
+    w.ask_learn = lambda root, found: [(sub.name, sub, files) for sub, files in found]
+    w.learn_folders()
+    _pump(app, lambda: w.learning is None and not w.moving)
+    path = w.org.catalog.path
+    _close(w, rec)
+    w.org.catalog.close()
+    w, rec = _window(make_org)                                         # a restart
+    w.show_view(SETTINGS)
+    assert [l.text() for l in w.learned.findChildren(QLabel)] == ["Garden → Garden · nothing learned · 1 couldn't be read"]
+    shown = []
+    w.ask_list = lambda title, text, action=None: shown.append((text, action)) or True
+    d = pymupdf.open()                                                 # the owner fixes the file
+    d.new_page().insert_text((72, 72), "compost soil seedling mulch")
+    broken.unlink()
+    d.save(broken)
+    d.close()
+    [b for b in w.learned.findChildren(QPushButton) if b.text() == "Details…"][0].click()
+    assert shown == [("Couldn't be read:\nbroken.pdf", "Try again")]
+    _pump(app, lambda: w.learning is None and not w.moving)
+    assert [l.text() for l in w.learned.findChildren(QLabel)] == ["Garden → Garden · 1 document learned"]
+    w.pick_folder = lambda title: str(mine)                             # the same folder again: already known
+    w.ask_learn = lambda root, found: [(sub.name, sub, files) for sub, files in found]
+    w.learn_folders()
+    _pump(app, lambda: w.learning is None and not w.moving)
+    assert [l.text() for l in w.learned.findChildren(QLabel)] == [
+        "Garden → Garden · 1 document learned · 1 already in ClassiFile"]
+    [b for b in w.learned.findChildren(QPushButton) if b.text() == "Details…"][0].click()
+    assert "not learned again from this folder" in shown[-1][0] and shown[-1][1] is None
     _close(w, rec)
 
 
@@ -2022,12 +2065,12 @@ def test_tour_steps_and_learning_from_existing_folders_in_the_window(app, make_o
     assert source_state(mine) == before and not list(w.org.output_root.iterdir())
     w.show_view(SETTINGS)
     rows = [l.text() for l in w.learned.findChildren(QLabel)]
-    assert rows == ["Algebra → Linear algebra · 3 documents", "Networks → Networks · 3 documents"]
+    assert rows == ["Algebra → Linear algebra · 3 documents learned", "Networks → Networks · 3 documents learned"]
     assert w.org.matcher() is not None                                      # learned from them at once
     forget = [b for b in w.learned.findChildren(QPushButton) if b.text() == "Forget"]
     forget[0].click()
     assert [l.text() for l in w.learned.findChildren(QLabel)] == [
-        "Networks → Networks · 3 documents"]
+        "Networks → Networks · 3 documents learned"]
     assert source_state(mine) == before
     _close(w, rec)
 

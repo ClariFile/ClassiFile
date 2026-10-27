@@ -644,17 +644,21 @@ class Catalog:
             self._add_extraction(snap, result, analysis, summary, t)
         return doc_id
 
-    def replace_extraction(self, doc_id, result, analysis, summary=None):
-        """A new read of the same snapshot replaces its extraction and the document's read status."""
+    def replace_extraction(self, doc_id, result, analysis, summary=None, keep_status=False):
+        """A new read of the same snapshot replaces its extraction, in one transaction, and the document's read
+        status (keep_status: a filed document stays filed, with its placement and copies). The text matching reads
+        has changed, so the learning revision counts up: an update trained on the old text is not published."""
         t = now()
         with self.lock, self.db:
+            self.db.execute("UPDATE settings SET value = value + 1 WHERE key = 'learning_revision'")
             snap = self.db.execute("SELECT id FROM snapshots WHERE document_id = ?", (doc_id,)).fetchone()[0]
             self.db.execute("DELETE FROM extraction_units WHERE extraction_id IN"
                             " (SELECT id FROM extractions WHERE snapshot_id = ?)", (snap,))
             self.db.execute("DELETE FROM extractions WHERE snapshot_id = ?", (snap,))
             self._add_extraction(snap, result, analysis, summary, t)
-            self.db.execute("UPDATE documents SET status = ?, status_reason = ?, updated_at = ? WHERE id = ?",
-                            (self.STATUS_FOR_READ[result.status], result.reason, t, doc_id))
+            if not keep_status:
+                self.db.execute("UPDATE documents SET status = ?, status_reason = ?, updated_at = ? WHERE id = ?",
+                                (self.STATUS_FOR_READ[result.status], result.reason, t, doc_id))
 
     def _add_extraction(self, snap, result, analysis, summary, t):
         rec = result.record
@@ -806,14 +810,27 @@ class Catalog:
         """{document id: [unit numbers]} of the units that still hold content nothing has read (reader.unread_gap:
         OCR did not run, or left a picture unread), for one document or for all. A document with any is not filed
         by itself (B3: a decision while a gap remains would be provisional)."""
-        out = {}
-        for r in self.all("SELECT s.document_id, u.unit_index, u.ocr_status, u.ocr_pictures FROM extraction_units u"
-                          " JOIN extractions e ON e.id = u.extraction_id JOIN snapshots s ON s.id = e.snapshot_id"
-                          " WHERE u.suspected_unread = 1" + (" AND s.document_id = ?" if doc_id else "")
-                          + " ORDER BY s.document_id, u.unit_index", *([doc_id] if doc_id else [])):
+        return self.scan_gaps(doc_id)[0]
+
+    def legacy_scans(self, doc_id=None):
+        """{document id: [unit numbers]} of the pictures' units read before extraction record 7 that OCR called
+        read: such a record says only that OCR ran, not what became of each picture, so it can't show a picture left
+        unread (designImp3 ticket 7). Neither complete nor incomplete: Read again tells."""
+        return self.scan_gaps(doc_id)[1]
+
+    def scan_gaps(self, doc_id=None):
+        """(unread_units(), legacy_scans()) from one query."""
+        unread, legacy = {}, {}
+        for r in self.all("SELECT s.document_id, u.unit_index, u.ocr_status, u.ocr_pictures, e.record_version"
+                          " FROM extraction_units u JOIN extractions e ON e.id = u.extraction_id JOIN snapshots s"
+                          " ON s.id = e.snapshot_id WHERE u.suspected_unread = 1"
+                          + (" AND s.document_id = ?" if doc_id else "") + " ORDER BY s.document_id, u.unit_index",
+                          *([doc_id] if doc_id else [])):
             if unread_gap(True, r["ocr_status"], json.loads(r["ocr_pictures"] or "[]")):
-                out.setdefault(r["document_id"], []).append(r["unit_index"])
-        return out
+                unread.setdefault(r["document_id"], []).append(r["unit_index"])
+            elif r["ocr_pictures"] is None and (r["record_version"] or 0) < 7:
+                legacy.setdefault(r["document_id"], []).append(r["unit_index"])
+        return unread, legacy
 
     def explicit_labels(self):
         """{document id: category id} for filed documents whose category the user chose or corrected (A7): the

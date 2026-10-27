@@ -7,7 +7,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea, QVBoxLayout, QWidget
 
 from classifile.analysis.candidates import name_key, top_names
-from classifile.app.reasons import new_folder_reason, reason_text, similar_reason
+from classifile.app.reasons import legacy_text, new_folder_reason, reason_text, similar_reason, unread_text, where_text
 from classifile.app.widgets import (
     GROUP, PANEL, RELATED, TIGHT, Collapsible, ElidedLabel, Preview, box, wrappable, wrapped,
 )
@@ -95,8 +95,11 @@ class DetailsPanel(QFrame):
         self.restore_button = QPushButton("Make a new copy")
         self.restore_button.setToolTip("A new verified copy in this category, from the original or another copy")
         self.restore_button.clicked.connect(lambda: self.c.restore_copy(self.doc_id))
+        self.read_button = QPushButton("Read again")
+        self.read_button.setToolTip("Read the original file again, pictures too. Its category and copies stay.")
+        self.read_button.clicked.connect(lambda: self.c.retry_docs([self.doc_id]))
         buttons = box(QHBoxLayout())
-        for b in (self.open_button, self.folder_button, self.locate_button, self.restore_button):
+        for b in (self.open_button, self.folder_button, self.locate_button, self.restore_button, self.read_button):
             buttons.addWidget(b)
         buttons.addStretch(1)
         self.why_caption = QLabel("WHY THIS CATEGORY")
@@ -136,7 +139,8 @@ class DetailsPanel(QFrame):
 
     def _all_parts(self):
         return (self.name, self.same_name, self.copy_name, self.category, self.also, self.state, self.open_button,
-                self.folder_button, self.locate_button, self.restore_button, self.why_caption, self.why, self.locations_section)
+                self.folder_button, self.locate_button, self.restore_button, self.read_button, self.why_caption, self.why,
+                self.locations_section)
 
     def show_nothing(self):
         """Open with no document selected: say what to do."""
@@ -190,6 +194,15 @@ class DetailsPanel(QFrame):
                      else f"Couldn't be read: {wrappable(d['status_reason'] or 'unknown reason')}")
             if missing:
                 state += "\nThe original file has moved. Locate it to file this document."
+        catalog = self.c.org.catalog
+        unread, legacy = (gaps.get(doc_id) for gaps in catalog.scan_gaps(doc_id))
+        unit = (catalog.analysis(doc_id) or {}).get("unit", "page")
+        if unread and filed:
+            state += f"\nSome pictures {where_text(unread, unit)} couldn't be read. Read again to try them once more."
+        elif unread:        # the safety wait, said where the decision is (designImp3 ticket 10)
+            state += "\n" + unread_text(unread, unit, "Look at those pages here, then choose, or Read again.")
+        elif legacy:
+            state += "\n" + legacy_text(legacy, unit)
         self.state.set(state)
         self.preview.show_document(self.c.preview_source(doc_id),
                                    "" if filed or d["file_name"].lower().endswith(".pdf")
@@ -199,6 +212,8 @@ class DetailsPanel(QFrame):
         self.folder_button.setVisible(has_copy)
         self.locate_button.setVisible(missing)
         self.restore_button.setVisible(gone)
+        self.read_button.setVisible(bool(unread or legacy) and d["status"] in ("needs_decision", "filed")
+                                    and not missing)
         locations = [f"Original: {wrappable(d['source_path'])}"]
         if d.get("copy_path"):
             locations.append(f"Filed copy: {wrappable(d['copy_path'])}" + (" (not there now)" if gone else ""))
