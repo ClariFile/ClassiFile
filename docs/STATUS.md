@@ -4,15 +4,13 @@
 
 ## Now (read this first)
 
-- **Where it stands:** v1 release candidate 1.0.0-rc.9, built and checked without installing. A third outside
-  inspection (designImp3, 2026-10-27) reproduced release blockers in rc.9 (backup and restore, closing while busy,
-  learning eligibility, family inference, evaluation parity, old scan records, learning attempts that taught
-  nothing). They are fixed in the source after rc.9, with regression tests, and **not built yet**: rc.9 still has
-  them. CP5 is done: the matcher was frozen (record 2.10) and the final evaluation ran once, on 2026-10-16.
+- **Where it stands:** v1 release candidate 1.0.0-rc.10, with the fixes of the third outside inspection
+  (designImp3, 2026-10-27: backup and restore, closing while busy, learning eligibility, family inference,
+  evaluation parity, old scan records, learning attempts that taught nothing). rc.9 still has those problems:
+  use rc.10. CP5 is done: the matcher was frozen (record 2.10) and the final evaluation ran once, on 2026-10-16.
   `data\final-eval` is not read again, and `tools.final_eval` refuses a second run whatever its options.
-- **Next:** the owner reviews the designImp3 work; then a new release candidate (rc.10), then the clean-machine
-  installer test (`docs/INSTALLER_TEST.md`; never on the owner's own laptop) and one friend's first-use run.
-  Until those are done the state is "implementation complete; independent release checks pending".
+- **Next:** the clean-machine installer test (`docs/INSTALLER_TEST.md`; never on the owner's own laptop) and one
+  friend's first-use run. Until those are done the state is "implementation complete; independent release checks pending".
 - Everything under "Done" is history: a "Next" line inside an entry was the next step at the time, not now.
 
 ## Done
@@ -494,7 +492,7 @@
   files, so an upgrade leaves no stale file.
 - **Not tested:** install, first run, OCR, filing, upgrade and uninstall of the setup file on any Windows (as rc.4).
 
-**The third outside inspection, designImp3 (2026-10-27; in the source, not built)**
+**The third outside inspection, designImp3 (2026-10-27; built as rc.10)**
 - **Backup and restore own their files (ticket 1):** every file they make has a new unique name, created
   exclusively; only a file an operation made (or one its record names with its hash) is ever removed. A name that
   merely looks like ClassiFile's (`<backup>.part`, `restore.sqlite3`) is left alone; nothing is overwritten.

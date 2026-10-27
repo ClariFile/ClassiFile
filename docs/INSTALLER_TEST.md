@@ -18,7 +18,9 @@ computer someone depends on. Disposable test documents only.
       second ClassiFile started meanwhile says it is already open.
 - [ ] Build: About and Advanced show "(build …)"; it matches the commit in `ClassiFile-<version>-hashes.txt`, and
       the setup file's SHA-256 matches that file.
-- [ ] Backup and restore (step 13b): the restored catalog has the same categories.
+- [ ] Backup and restore (step 13b): the restored catalog has the same categories; Cancel restore keeps the
+      catalog in use.
+- [ ] Closing during a matching update and during a move (step 13c): it waits, closes, and opens again as it was.
 - [ ] Portable and installed side by side (step 20): each keeps its own catalog.
 - [ ] Self-test (step 14): PASS.
 - [ ] Upgrade (step 19): the newer setup over the older keeps categories and documents.
@@ -67,9 +69,15 @@ The detailed steps follow.
     can go off now.
     - 13a. Add five documents and press Close at once. Expected: "Closing… finishing the work under way", then the
       window closes. Start ClassiFile twice quickly: the second says it is already open.
-    - 13b. **Settings → Advanced → Back up the catalog…** to the desktop; make a new category; **Restore a
-      backup…** with that file; close and open ClassiFile. Expected: "Switched to the backup", the new category
-      gone, a "catalog before restore …" file beside the catalog.
+    - 13b. **Settings → Backup → Back up the catalog…** to the desktop. Expected: the Backup card says "Last
+      backup: …". Make a new category; **Restore a backup…**, read the message, choose that file. Expected: the
+      card says "Restore chosen…" with **Cancel restore**. Press Cancel restore, then choose the backup again.
+      Close and open ClassiFile. Expected: "Last restore, …: switched to the backup", the new category gone, a
+      "catalog before restore …" file beside the catalog (in `%LOCALAPPDATA%\ClassiFile`), and the backup file on
+      the desktop unchanged.
+    - 13c. **Settings → Update matching** and press Close at once; then select two filed documents, **Move to…**
+      another category and press Close at once. Expected each time: "Closing… finishing the work under way", no
+      error, the window closes; opened again, the moved documents are in their new category with one copy each.
 
 ## 4. Built-in check (optional, two minutes)
 
@@ -116,7 +124,8 @@ The detailed steps follow.
 | 12 | Original unchanged, nothing new beside it | |
 | 13 | Same state after reopening, offline | |
 | 13a | Closing during work waits, then closes; a second copy is refused | |
-| 13b | Backup and restore bring the catalog back | |
+| 13b | Backup and restore bring the catalog back; Cancel restore works | |
+| 13c | Closing during a matching update or a move: no error, nothing half-done | |
 | 15 | Self-test PASS | |
 | 16–17 | Uninstall removes the program, keeps copies, catalog and originals | |
 | 19 | Upgrade keeps categories and documents | |
