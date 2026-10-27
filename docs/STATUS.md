@@ -492,6 +492,17 @@
   files, so an upgrade leaves no stale file.
 - **Not tested:** install, first run, OCR, filing, upgrade and uninstall of the setup file on any Windows (as rc.4).
 
+**1.0.0-rc.10 (2026-10-27): a release candidate, not verified on a clean machine**
+- rc.9 plus the third outside inspection below, built from commit `c2f674d`. `dist\ClassiFile-1.0.0-rc.10-setup.exe`
+  (about 49 MB), `dist\ClassiFile-1.0.0-rc.10-portable.zip` (about 68 MB) and
+  `dist\ClassiFile-1.0.0-rc.10-hashes.txt` (the SHA-256 of all three, as recorded, checked again after the build).
+- Checked without installing, on the build laptop: 354 tests; `tools.check_ui` no failures; the built app's
+  self-test with only its bundled OCR data, on copies of the six samples: PASS, the same counts as rc.9, also from
+  the unpacked portable zip; the setup file and the app ask for `asInvoker`; rc.10 ships the same 235 files as rc.9.
+- **Not tested:** install, first run, OCR, filing, upgrade and uninstall of the setup file on any Windows; the
+  preview process inside the built app; closing during work, backup, restore and Cancel restore, and portable
+  beside installed in the built app (`docs/INSTALLER_TEST.md`, steps 13a–13c and 19–20).
+
 **The third outside inspection, designImp3 (2026-10-27; built as rc.10)**
 - **Backup and restore own their files (ticket 1):** every file they make has a new unique name, created
   exclusively; only a file an operation made (or one its record names with its hash) is ever removed. A name that
