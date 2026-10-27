@@ -64,6 +64,7 @@ class Organizer:
         self._words = {}            # (model version, doc_id, category id) -> the key words a card gives
         self._groups = (None, [])   # the last new_subject_groups() question and its answer
         self._audit = (None, None)  # (the labels it was counted for, learning_audit() without conflicts)
+        self._label_families = (None, None)     # (the labels, (readable terms, families, bridges)) of _families()
 
     @property
     def output_root(self):
@@ -705,8 +706,7 @@ class Organizer:
         labels = self.catalog.explicit_labels()
         key = tuple(sorted(labels.items()))
         if self._audit[0] != key:
-            readable, bridges = {d: c for d in labels if (c := self._terms(d))}, set()
-            groups = evaluation.families(readable, self._files(), bridges)
+            readable, groups, bridges = self._families(labels)
             cats = {}
             for d, g in groups.items():
                 cats.setdefault(g, set()).add(labels[d])
@@ -721,8 +721,7 @@ class Organizer:
         ones)], by name. Three near-copies are not broad evidence, so the families are counted too; the rule for
         filing by itself stays matching.AUTO_MIN_CONFIRMED confirmed documents (record 2.10)."""
         labels = self.catalog.explicit_labels()
-        readable = {d: c for d in labels if (c := self._terms(d))}
-        groups = evaluation.families(readable, self._files())
+        readable, groups, _ = self._families(labels)
         out = []
         for cat in self.catalog.categories():
             mine = [d for d, c in labels.items() if c == cat["id"]]
@@ -730,6 +729,16 @@ class Organizer:
                 out.append((cat["name"], len(mine), len({groups[d] for d in mine if d in groups}),
                             sum(d not in readable for d in mine)))
         return out
+
+    def _families(self, labels):
+        """(readable terms, families, bridges) of the documents that may teach: worked out once per state of the
+        labels, the owner's family ids and the stored texts, for the audit and readiness alike."""
+        key = (tuple(sorted(labels.items())), tuple(sorted(self.catalog.family_labels().items())),
+               self.catalog.learning_revision())
+        if self._label_families[0] != key:
+            readable, bridges = {d: c for d in labels if (c := self._terms(d))}, set()
+            self._label_families = (key, (readable, evaluation.families(readable, self._files(), bridges), bridges))
+        return self._label_families[1]
 
     def check_level(self):
         """The level the update check counts automatic filings at: the one in use, or Strict when it is off."""

@@ -130,7 +130,7 @@ def run(base):
         found = []
 
         def look(view):
-            pump(timeout=0.25)                  # the details panel slides in
+            pump(lambda: not layout_problems(), timeout=2)   # the details panel slides in: real clipping stays
             found.extend(f"{view}: {p}" for p in layout_problems())
 
         w.close_details()
@@ -322,7 +322,9 @@ def run(base):
     item.picker.field.setFocus()
     item.picker.field.setCursorPosition(3)
     pump()
-    at, built, make = area.value(), [], decision.DecisionItem.__init__
+    view = w.decision.findChild(QScrollArea).viewport()
+    first = next(i for i in w.decision.items if i.isVisible() and i.y() + i.height() > area.value())
+    at, built, make = first.mapTo(view, QPoint()).y(), [], decision.DecisionItem.__init__
 
     def counting(self, *a, **k):
         built.append(1)
@@ -339,9 +341,10 @@ def run(base):
         found.append("the open panel or the typed text was lost")
     if not item.picker.field.hasFocus() or item.picker.field.cursorPosition() != 3:
         found.append("the cursor left the field or moved")
-    if area.value() != at:
-        found.append(f"the page scrolled from {at} to {area.value()}")
-    results.append((f"Typing in a card while {IMPORTS} documents import: text, panel, cursor and scroll stay", found, ""))
+    if first not in w.decision.items or first.mapTo(view, QPoint()).y() != at:
+        found.append(f"the row in view moved on screen from {at} to {first.mapTo(view, QPoint()).y()} px")
+    results.append((f"Typing in a card while {IMPORTS} documents import: text, panel, cursor and what is in view "
+                    "stay", found, ""))
     found = []
     widgets.set_motion("reduce")                # Settings, "Motion": Reduce motion
     try:
@@ -393,6 +396,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--scale", type=float, help="display scaling for this run only, e.g. 1.25")
     a = ap.parse_args(argv)
+    sys.stdout.reconfigure(errors="replace")   # a console without "…" or "✕" must not end the report
     os.environ["QT_QPA_PLATFORM"] = "offscreen"
     os.environ["CLASSIFILE_OCR"] = "off"
     if a.scale:

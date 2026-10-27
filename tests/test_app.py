@@ -2069,6 +2069,7 @@ def test_tour_steps_and_learning_from_existing_folders_in_the_window(app, make_o
     assert w.org.matcher() is not None                                      # learned from them at once
     forget = [b for b in w.learned.findChildren(QPushButton) if b.text() == "Forget"]
     forget[0].click()
+    _pump(app, lambda: not w.moving)
     assert [l.text() for l in w.learned.findChildren(QLabel)] == [
         "Networks → Networks · 3 documents learned"]
     assert source_state(mine) == before

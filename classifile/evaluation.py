@@ -71,11 +71,31 @@ def families(counts, files, bridges=None):
                 join(d, seen.setdefault(key, d), inferred=kind == "name")
     idf = matching.fit_idf([counts[d] for d in docs])     # for finding versions only: no model sees these vectors
     vectors = {d: matching.vector(counts[d], idf) for d in docs}
-    for i, a in enumerate(docs):
-        for b in docs[:i]:
-            if vectors[a] and matching.dot(vectors[a], vectors[b]) >= matching.NEAR_TEXT:
-                join(a, b, inferred=True)
+    for a, b in near_pairs(docs, vectors, matching.NEAR_TEXT):
+        join(a, b, inferred=True)
     return {d: find(d) for d in docs}
+
+
+def near_pairs(docs, vectors, level):
+    """Every pair (a, b), b before a in docs, whose vectors (length 1) have a dot product of at least level, in the
+    order a plain loop over all pairs finds them, without comparing all pairs. Exact: a's words are taken from its
+    heaviest down until the rest of it (its length) is below level; by Cauchy-Schwarz the rest can add less than
+    level to a dot product with any vector of length 1, so a pair that reaches level shares one of those words."""
+    where, index = {d: i for i, d in enumerate(docs)}, {}
+    for d in docs:
+        for t in vectors[d]:
+            index.setdefault(t, []).append(d)
+    for i, a in enumerate(docs):
+        rest, words = 1.0, []
+        for t, x in sorted(vectors[a].items(), key=lambda kv: (-kv[1], kv[0])):
+            if math.sqrt(max(rest, 0.0)) < level:
+                break
+            words.append(t)
+            rest -= x * x
+        seen = sorted({b for t in words for b in index[t] if where[b] < i}, key=where.get)
+        for b in seen:
+            if matching.dot(vectors[a], vectors[b]) >= level:
+                yield a, b
 
 
 def evaluate(counts, labels, groups, training=None, live=None, unread=(), scope=None):

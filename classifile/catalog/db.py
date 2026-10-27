@@ -551,8 +551,14 @@ class Catalog:
         try:
             out = sqlite3.connect(part)
             try:
-                with self.lock:
-                    self.db.backup(out)
+                # From a connection of its own, a few pages at a time, without the catalog's lock: the window keeps
+                # reading and writing meanwhile, and SQLite starts the copy again if a write lands in between, so
+                # what is copied is always one committed state.
+                src = _read_only(self.path)
+                try:
+                    src.backup(out, pages=256)
+                finally:
+                    src.close()
                 from classifile import __version__
                 with out:
                     out.execute("INSERT INTO settings VALUES ('backup_info', ?) ON CONFLICT(key) DO UPDATE SET"

@@ -793,3 +793,20 @@ def test_unread_text_names_the_pages():
     assert unread_text([2], "page").startswith("⚠ Some pictures on page 2 couldn't be read")
     assert "on slides 3, 4 and 9" in unread_text([3, 4, 9], "slide")
     assert "in this document" in unread_text([12], "block")
+
+
+def test_near_pairs_finds_exactly_the_pairs_a_full_comparison_finds():
+    """The versions search compares candidates only (designImp3 ticket 10: Settings took seconds on 1,000
+    documents); it must find the same pairs, in the same order, as comparing every pair."""
+    import random
+
+    rng = random.Random(3)
+    words, docs, counts = [f"w{i}" for i in range(60)], [f"d{i:03d}" for i in range(150)], {}
+    for i, d in enumerate(docs):
+        base = list(counts[docs[i - 1]]) if i % 3 == 0 and i else rng.sample(words, 8)
+        counts[d] = {w: rng.randint(1, 3) for w in base + rng.sample(words, rng.choice([0, 1, 3]))}
+    idf = matching.fit_idf(list(counts.values()))
+    vectors = {d: matching.vector(counts[d], idf) for d in docs}
+    for level in (0.9, 0.5, 0.2):
+        every = [(a, b) for i, a in enumerate(docs) for b in docs[:i] if matching.dot(vectors[a], vectors[b]) >= level]
+        assert list(evaluation.near_pairs(docs, vectors, level)) == every and every

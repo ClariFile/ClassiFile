@@ -2,7 +2,7 @@
 import html
 from collections import Counter
 
-from PySide6.QtCore import QCoreApplication, QEvent, Qt
+from PySide6.QtCore import QCoreApplication, QEvent, Qt, QTimer
 from PySide6.QtWidgets import (
     QApplication, QBoxLayout, QButtonGroup, QCheckBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QMenu,
     QPushButton, QScrollArea, QToolButton, QVBoxLayout, QWidget,
@@ -673,6 +673,7 @@ class DecisionPage(QWidget):
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
         scroll.setWidget(self.holder)
+        self.scroll = scroll
         self.empty = QLabel("Nothing needs your decision right now.")
         self.empty.setObjectName("secondary")
         self.empty.setAlignment(Qt.AlignCenter)
@@ -710,6 +711,14 @@ class DecisionPage(QWidget):
         categories = self.c.categories_by_key() if categories is None else categories
         focus = QApplication.focusWidget()
         at = next((n for n, i in enumerate(self.items) if focus and (i is focus or i.isAncestorOf(focus))), None)
+        # The row in use when it is in view (else the first row in view) stays where it is on screen when rows come
+        # or go above it: documents read meanwhile never push what the user is reading or typing in out of sight.
+        bar = self.scroll.verticalScrollBar()
+        in_view = lambda i: i.isVisible() and i.y() + i.height() > bar.value() and i.y() < bar.value() + \
+            self.scroll.viewport().height()
+        anchor = self.items[at] if at is not None and in_view(self.items[at]) else next(
+            (i for i in self.items if in_view(i)), None)
+        anchor_y = anchor.y() - bar.value() if anchor is not None else None
         old = {tuple(i.ids): i for i in self.items}
         items, kept = [], []
         for members in group_items(docs):
@@ -741,6 +750,11 @@ class DecisionPage(QWidget):
                 item.refresh_choices()
         self.items, self.version = items, version
         self.empty.setVisible(not items and not self.checks)
+        if anchor in kept and bar.value():          # at the very top, new rows above simply show
+            self.holder.layout().activate()
+            bar.setValue(anchor.y() - anchor_y)
+            # Wrapped text settles its height in a later layout pass: placed once more when it has.
+            QTimer.singleShot(0, lambda: anchor in self.items and bar.setValue(anchor.y() - anchor_y))
         shown = [i for i in items if self._matches(i)]
         if shown and (refocus or (enter and at is None)):
             target = items[min(at or 0, len(items) - 1)]

@@ -30,7 +30,7 @@ FILES = {
 NEW_SUBJECT = ("Photography", "aperture shutter lens exposure tripod focus portrait landscape",
                ["Camera settings", "Night photos", "Lens comparison"])
 VIEWS = ("empty", "all", "category", "decide", "choices", "focus", "decide-details", "auto", "auto-details", "settings",
-         "settings-advanced", "help", "about", "learn", "tour", "report")
+         "settings-backup", "settings-advanced", "help", "about", "learn", "tour", "report")
 
 
 def make_pdf(path, title, words, n):
@@ -182,6 +182,15 @@ def render(out, size=(1280, 720), theme="light", views=VIEWS):
         w.show_view(SETTINGS)
         mask(w)
         shot(w, "settings")
+        if "settings-backup" in views:          # a backup made and a restore chosen: the card says both
+            from classifile.catalog.db import stage_restore
+            w.org.catalog.backup(tmp / "ClassiFile catalog.sqlite3")
+            stage_restore(tmp / "ClassiFile catalog.sqlite3", w.org.catalog)
+            w.refresh()
+            mask(w)
+            pump()
+            w.settings_page.verticalScrollBar().setValue(w.settings_page.verticalScrollBar().maximum())
+            shot(w, "settings-backup")
         w.advanced.toggle.setChecked(True)
         mask(w)
         pump()

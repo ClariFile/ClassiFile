@@ -1709,13 +1709,24 @@ class MainWindow(QWidget):
         return go is not None and box_.clickedButton() is go
 
     def forget_folder(self, folder):
+        """Forget learns again from what remains, which takes seconds on a large catalog: off this thread."""
         kept = self._setting("learn_results", {})
         if kept.pop(str(folder), None) is not None:
             self._save("learn_results", kept)
-        n = self.org.forget_folder(folder)
-        self.toast.show_message((f"Forgot {n} example{'s' if n != 1 else ''} from {Path(folder).name}." if n else
-                                 f"Forgot the attempt to learn from {Path(folder).name}.") + " Your files weren't touched.")
-        self.refresh()
+
+        def done(n):
+            self.moving -= 1
+            if self.closing:
+                return
+            if isinstance(n, Exception):
+                self.toast.show_message(f"Something went wrong while forgetting ({type(n).__name__}). Try again.")
+            else:
+                self.toast.show_message((f"Forgot {n} example{'s' if n != 1 else ''} from {Path(folder).name}."
+                                         if n else f"Forgot the attempt to learn from {Path(folder).name}.")
+                                        + " Your files weren't touched.")
+            self.refresh()
+
+        self._background(lambda: self.org.forget_folder(folder), done)
 
     @staticmethod
     def _drag_paths(e):

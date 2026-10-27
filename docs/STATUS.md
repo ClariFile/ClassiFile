@@ -1,14 +1,18 @@
 # ClassiFile status
 
-2026-10-26 · decision record version 2.12
+2026-10-27 · decision record version 2.12
 
 ## Now (read this first)
 
-- **Where it stands:** v1 release candidate 1.0.0-rc.9, built and checked without installing. CP5 is done: the
-  matcher was frozen (record 2.10) and the final evaluation ran once, on 2026-10-16. `data\final-eval` is not read
-  again, and `tools.final_eval` refuses a second run whatever its options.
-- **Next:** the clean-machine installer test (`docs/INSTALLER_TEST.md`; never on the owner's own laptop), then
-  the pilot.
+- **Where it stands:** v1 release candidate 1.0.0-rc.9, built and checked without installing. A third outside
+  inspection (designImp3, 2026-10-27) reproduced release blockers in rc.9 (backup and restore, closing while busy,
+  learning eligibility, family inference, evaluation parity, old scan records, learning attempts that taught
+  nothing). They are fixed in the source after rc.9, with regression tests, and **not built yet**: rc.9 still has
+  them. CP5 is done: the matcher was frozen (record 2.10) and the final evaluation ran once, on 2026-10-16.
+  `data\final-eval` is not read again, and `tools.final_eval` refuses a second run whatever its options.
+- **Next:** the owner reviews the designImp3 work; then a new release candidate (rc.10), then the clean-machine
+  installer test (`docs/INSTALLER_TEST.md`; never on the owner's own laptop) and one friend's first-use run.
+  Until those are done the state is "implementation complete; independent release checks pending".
 - Everything under "Done" is history: a "Next" line inside an entry was the next step at the time, not now.
 
 ## Done
@@ -489,6 +493,42 @@
   the unpacked portable zip; the app asks for `asInvoker` (no administrator prompt); rc.4 and rc.5 ship the same 234
   files, so an upgrade leaves no stale file.
 - **Not tested:** install, first run, OCR, filing, upgrade and uninstall of the setup file on any Windows (as rc.4).
+
+**The third outside inspection, designImp3 (2026-10-27; in the source, not built)**
+- **Backup and restore own their files (ticket 1):** every file they make has a new unique name, created
+  exclusively; only a file an operation made (or one its record names with its hash) is ever removed. A name that
+  merely looks like ClassiFile's (`<backup>.part`, `restore.sqlite3`) is left alone; nothing is overwritten.
+- **A restore must work before it is chosen (ticket 2):** one version row of the right type, every table, column,
+  index and trigger this version needs, the migrations and everyday reads, all tried on ClassiFile's own copy (the
+  chosen file is only read). Paths are URI-encoded (`#`, `%`, spaces). A switch that stopped between its two
+  renames brings the catalog back at the next start, never a new empty one. Settings has a Backup card: what a
+  backup is (not the documents), the last backup, a restore chosen with Cancel restore, what the last restore did.
+- **Closing starts no new work (ticket 3):** once closing has begun no job is accepted and a job that ends
+  schedules no filing, update, question or redraw; counters change only for accepted work.
+- **Pending examples teach nothing (ticket 4):** an example imported for a decision empties every version that
+  learned from it at once, and matching is rebuilt from what may teach (trigger "pending").
+- **Owner families are never bridged (ticket 5):** an inferred name or text join never joins two groups with
+  different owner ids; a document that resembles two families is counted with one and said in Advanced.
+- **One filing rule (ticket 6):** `matching.may_file` decides for the app and every replay (the update check,
+  `tools.evaluate`, the error ledger, the folder replay): unread parts and selected-category scope included.
+  Waits for unread parts are counted apart ("safety"). Earlier reports keep their numbers as measured.
+- **Old scans (ticket 7):** a read from before extraction record 7 is said as such (neither complete nor not), with
+  Read again on the card and in Details, also for filed documents, which keep their category and copies.
+- **Learning attempts that taught nothing (ticket 8)** keep a row in Settings with Details and Try again.
+- **Held-out folders and snapshots (ticket 9):** one guard for every tool (final-eval, validation, final-check;
+  children, parents, case, links); diagnostics read a consistent SQLite snapshot instead of a byte copy.
+- **Measured, then fixed (ticket 10):** `tools.measure_ui --documents 1000` (300 waiting, 30 categories) showed
+  Settings taking 5.1 s, a backup stalling the window 2.7 s and Forget 4.6 s on the window's thread. Now: Settings
+  0.34–0.43 s (an exact candidate search for versions, one shared cache), backup stall 0.14 s (copied from its own
+  connection), Forget off the window's thread; the card being typed in keeps its place on screen when cards arrive
+  above it. Still slow at that size: 20 imports keep the window busy about 8 s of 9 s (one refresh per document
+  read, about 0.24 s each with 300 waiting); at 200 documents it is 0.9 s of 1.5 s. Cards say "Weaker matches", and
+  "(no words in common)" where so. `tools.check_ui` waits for the details panel to finish sliding before looking.
+- On the owner's development catalog (a read-only snapshot), the evaluation gives the same counts before and after
+  (no filed document there has a known unread gap, and the families did not change); 104 of its filed documents
+  were read before record 7 and now offer Read again in Details.
+- Checks: 354 tests pass (in the last full run one preview-timing test failed while screenshots ran alongside;
+  alone it passed 3 of 3, and the window and tools tests passed again together); `tools.check_ui` no failures.
 
 **1.0.0-rc.9 (2026-10-26): a release candidate, not verified on a clean machine**
 - rc.8 plus the motion pass and the second outside review below, built from commit `73c2c68` (the first build
