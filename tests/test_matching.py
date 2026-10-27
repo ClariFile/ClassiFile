@@ -151,8 +151,8 @@ def test_update_matching_is_versioned_and_keeps_the_previous_version_if_the_new_
     poem = _add(org, src, "Poetry", 1)
     real = evaluation.evaluate
 
-    def one_more_wrong(counts, labels, groups, training=None, live=None):
-        rows = real(counts, labels, groups, training, live)
+    def one_more_wrong(counts, labels, groups, training=None, live=None, unread=()):
+        rows = real(counts, labels, groups, training, live, unread)
         if training is None:                # the new version: one more document filed in another category
             i = next(i for i, r in enumerate(rows) if not evaluation.filed(r, matching.LEVELS["strict"]))
             other = next(c for c in sorted(live) if c != rows[i]["category"])
@@ -671,6 +671,60 @@ def test_a_known_gap_stops_automatic_filing_and_new_folders_until_read_again(mak
     assert org.record(path, *read_and_analyze(path)) == (clear, "read again")   # Read again: no gap this time
     assert org.catalog.unread_units() == {} and org.file_automatically(clear) == cats["Networks"]
     assert org.record(path, *read_and_analyze(path)) == (clear, "already imported")   # filed: never read over
+
+
+@pytest.mark.parametrize("state", ["complete", "partial OCR", "no text", "too few confirmed", "not ticked"])
+def test_the_replay_decides_as_the_app_does(make_org, tmp_path, state):
+    """designImp3 ticket 6: the same question, asked of the app (auto_choice) and of the replay (evaluation.filed
+    on a row held out with the model the app uses), gets the same answer in every state; a wait for unread parts is
+    counted as a safety wait, apart from ordinary waits."""
+    org, src = make_org(), tmp_path / "src"
+    for n in range(3):
+        _add(org, src, "Algebra", n)
+        _add(org, src, "Networks", n)
+    _add(org, src, "Poetry", 0)
+    org.update_matching()
+    subject = "Poetry" if state == "too few confirmed" else "Networks"
+    if state == "no text":
+        d = pymupdf.open()
+        d.new_page()
+        d.save(src / "blank.pdf")
+        d.close()
+        q, _ = org.record(src / "blank.pdf", *read_and_analyze(src / "blank.pdf"))
+    else:
+        q = _add(org, src, subject, 7, file_it=False)
+    cats = {c["name"]: c["id"] for c in org.catalog.categories()}
+    if state == "partial OCR":
+        org.catalog.run("UPDATE extraction_units SET suspected_unread = 1, ocr_status = 'failed' WHERE unit_index = 1"
+                        " AND extraction_id = (SELECT e.id FROM extractions e JOIN snapshots s ON s.id = e.snapshot_id"
+                        " WHERE s.document_id = ?)", q)
+    scope = None
+    if state == "not ticked":
+        scope = {cats["Algebra"]}
+        org.set_auto_scope(scope)
+    counts, labels, _ = org.evaluation_inputs()
+    counts |= {q: matching.terms(org.catalog.texts(q).get(q, ""))}
+    row, = [r for r in evaluation.evaluate(counts, labels | {q: cats[subject]}, {d: d for d in labels} | {q: q},
+                                           training=labels, unread=org.catalog.unread_units(), scope=scope)
+            if r["doc"] == q]
+    level = matching.LEVELS["strict"]
+    assert evaluation.filed(row, level) == bool(org.auto_choice(q)) == (state == "complete")
+    assert evaluation.outcome(row, level) == {"complete": "right", "partial OCR": "safety"}.get(
+        state, evaluation.outcome(row, level))
+    summary = evaluation.summary([row], level)
+    assert summary["safety"] == (state == "partial OCR") and summary["waiting"] == (state != "complete")
+
+
+def test_an_update_check_measures_both_versions_under_the_same_scan_rule(make_org, tmp_path):
+    org, src = make_org(), tmp_path / "src"
+    docs = [_add(org, src, s, n) for n in range(3) for s in ("Algebra", "Networks")]
+    org.update_matching()
+    org.catalog.run("UPDATE extraction_units SET suspected_unread = 1, ocr_status = 'failed' WHERE extraction_id ="
+                    " (SELECT e.id FROM extractions e JOIN snapshots s ON s.id = e.snapshot_id WHERE s.document_id"
+                    " = ?)", docs[0])
+    _add(org, src, "Algebra", 5)
+    found = org.update_matching()["check"]
+    assert found["new"]["safety"] == found["previous"]["safety"] == 1    # the unread one waits in both
 
 
 def test_unread_text_names_the_pages():

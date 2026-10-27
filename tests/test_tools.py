@@ -118,6 +118,72 @@ def test_tools_refuse_final_eval(tmp_path, monkeypatch):
         inventory.main([str(held_out), "--out", str(tmp_path / "inv.csv")])
 
 
+def test_one_guard_keeps_every_held_out_folder_out_of_reach(tmp_path, monkeypatch):
+    """designImp3 ticket 9, on invented paths only: each held-out folder, a child, a parent a scan would reach it
+    from, another spelling of the case on Windows and a link to it are refused; an owner-authorized measurement
+    may name the one folder it reads."""
+    import os
+    import sys
+
+    import tools
+
+    data = tmp_path / "data"
+    for name in ("final-eval", "validation", "final-check", "development"):
+        (data / name).mkdir(parents=True)
+    monkeypatch.setattr(tools, "DATA", data)
+    monkeypatch.setattr(tools, "FINAL_EVAL", data / "final-eval")
+    for name in ("final-eval", "validation", "final-check"):
+        assert tools.held_out(data / name) == name
+        assert tools.held_out(data / name / "sub" / "x.pdf") == name
+    assert tools.held_out(data) and tools.held_out(tmp_path)              # a parent reaches them
+    assert tools.held_out(data / "development") is None
+    assert tools.held_out(data / "validation", allow=("validation",)) is None
+    assert tools.held_out(data, allow=("validation",)) == "final-eval"    # still refuses the others
+    if sys.platform == "win32":
+        assert tools.held_out(str(data / "VALIDATION").upper()) == "validation"
+    link = tmp_path / "alias"
+    try:
+        os.symlink(data / "final-check", link, target_is_directory=True)
+    except OSError:
+        pass                                                               # no right to make links here
+    else:
+        assert tools.held_out(link) == "final-check"
+    with pytest.raises(SystemExit, match="held out"):
+        tools.refuse_final_eval(data / "final-check")
+    from tools import offline_check
+    with pytest.raises(SystemExit, match="held out"):
+        offline_check.main([str(data / "validation")])
+
+
+def test_a_diagnostic_snapshot_is_consistent_while_the_app_writes(make_org, filed_pdf, tmp_path):
+    """designImp3 ticket 9: a snapshot taken during an unfinished write holds the catalog as last committed, checks
+    out, and the catalog itself is not changed by it."""
+    import hashlib
+    import sqlite3
+
+    from classifile.catalog.db import Catalog
+    from tools import catalog_snapshot
+
+    org = make_org()
+    filed_pdf(org, "a.pdf", "compost soil seedling", "Garden")
+    path = org.catalog.path
+    org.catalog.close()
+    writer = sqlite3.connect(path)
+    writer.execute("BEGIN IMMEDIATE")
+    writer.execute("INSERT INTO settings VALUES ('half-done', 'x')")      # not committed yet
+    before = hashlib.sha256(path.read_bytes()).hexdigest()
+    snap = catalog_snapshot(path, tmp_path / "snap.sqlite3")
+    assert hashlib.sha256(path.read_bytes()).hexdigest() == before
+    writer.commit()
+    writer.close()
+    copy = Catalog(snap)
+    try:
+        assert copy.one("PRAGMA integrity_check")[0] == "ok" and copy.get_setting("half-done") is None
+        assert len(copy.explicit_labels()) == 1
+    finally:
+        copy.close()
+
+
 def test_audit_terms_matching(tmp_path):
     from tools import audit_terms
     terms = tmp_path / "terms.txt"

@@ -32,7 +32,6 @@ import json
 import math
 import random
 import re
-import shutil
 import sys
 import tempfile
 from collections import Counter
@@ -42,7 +41,7 @@ from classifile.analysis.candidates import name_key
 from classifile.catalog.db import Catalog, default_data_dir
 from classifile.matching import LEVELS, TOKEN, Centroids, fit_idf, lead
 from classifile.reader import READERS, read_document, sha256_file
-from tools import refuse_final_eval
+from tools import catalog_snapshot, refuse_final_eval
 from tools.match_eval import csv_families, families, hits, right_within, trade_off
 
 STRICT = LEVELS["strict"]
@@ -244,7 +243,7 @@ def with_fewer(docs, fam, category, k, repeats=3):
 def load(catalog_path):
     """[{id, sha, file_name, category, parts}] for the documents whose category the owner chose."""
     with tempfile.TemporaryDirectory(prefix="classifile-accuracy-") as tmp:
-        shutil.copyfile(catalog_path, Path(tmp) / "catalog.sqlite3")
+        catalog_snapshot(catalog_path, Path(tmp) / "catalog.sqlite3")
         cat = Catalog(Path(tmp) / "catalog.sqlite3")
         try:
             labels = cat.explicit_labels()
@@ -339,7 +338,7 @@ def report(docs, fam, names, out=print):
 def validate(folder, rows, catalog_path, variant, progress=lambda n, total: None):
     """The matcher in use and one variant, both trained on the filed documents, asked for every labelled
     validation file: {"variants": {name: [per document: label, the category it means, ranked]}}."""
-    refuse_final_eval(folder)
+    refuse_final_eval(folder, allow=("validation",))      # the one validation measurement, owner-authorized
     docs = load(catalog_path)
     by_key = {name_key(d["category"]): d["category"] for d in docs}
     wanted = {r["sha256"]: r for r in rows if r["split"] == "validation"}

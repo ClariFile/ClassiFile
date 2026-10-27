@@ -43,14 +43,15 @@ def unmatched(docs, train, test):
     return out
 
 
-def waiting_without(docs, fam, category):
-    """(its own unmatched documents, the other unmatched documents) when `category` is unknown to the app."""
+def waiting_without(docs, fam, category, skip=frozenset()):
+    """(its own unmatched documents, the other unmatched documents) when `category` is unknown to the app. skip:
+    documents left out of grouping (the folder replay: those with parts left unread, as the app does)."""
     rest = [i for i, d in enumerate(docs) if d["category"] != category]
     own = unmatched(docs, rest, [i for i, d in enumerate(docs) if d["category"] == category])
     others = []
     for held in sorted({fam[i] for i in rest}):
         others += unmatched(docs, [i for i in rest if fam[i] != held], [i for i in rest if fam[i] == held])
-    return own, others
+    return [i for i in own if i not in skip], [i for i in others if i not in skip]
 
 
 def outcome(own, groups):
@@ -65,13 +66,13 @@ def outcome(own, groups):
     return ("kept together" if len(mine) == 1 and not alone else "split apart"), mine, alone
 
 
-def evaluate(docs, fam, level):
+def evaluate(docs, fam, level, skip=frozenset()):
     """One row per category: its documents, the unmatched ones, the verdict and the groups formed."""
     idf = fit_idf([d["terms"] for d in docs])       # as in the app: every stored document counts for word weights
     vectors = [vector(d["terms"], idf) for d in docs]
     rows = []
     for category, n in Counter(d["category"] for d in docs).most_common():
-        own, others = waiting_without(docs, fam, category)
+        own, others = waiting_without(docs, fam, category, skip)
         groups = similar_groups({i: vectors[i] for i in own + others}, level)
         verdict, mine, alone = outcome(own, groups)
         rows.append({"category": category, "documents": n, "unmatched": len(own), "company": len(others),
@@ -111,7 +112,8 @@ def replay(docs, fam, level=FOLDER_LEVEL, least=FOLDER_MIN):
     named: "repeated" (suggested for several of its documents), "best" or None (no free name: stays a question).
     least: the fewest documents a folder is made for (smaller groups stay questions)."""
     rows = []
-    for r in evaluate(docs, fam, level):
+    unread = {i for i, d in enumerate(docs) if d.get("unread")}     # the app's rule: never in a folder by itself
+    for r in evaluate(docs, fam, level, unread):
         taken = {name_key(d["category"]) for d in docs if d["category"] != r["category"]}
         folders = []
         for g in r["groups"]:

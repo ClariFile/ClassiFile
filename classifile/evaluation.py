@@ -31,14 +31,18 @@ def file_stem(file_name):
     return key if len(key) >= 4 and re.search(r"[a-z]", key) else ""
 
 
-def families(counts, files):
+def families(counts, files, bridges=None):
     """{document id: family id} for the documents of counts ({id: matching.terms()}). files: {id: (sha256, file
     name, the owner's family id or "")}. Documents are one family when the owner says so, or when they have the
     same bytes, the same file_stem(), or nearly the same text (matching.NEAR_TEXT). A name or text resemblance is
-    an inference, and the owner's ids overrule it: two documents the owner gave different family ids are never
-    joined by it (a shared file name such as "notes" is no proof). The family id is its smallest document id."""
+    an inference, and the owner's ids overrule it: it never joins two groups that hold different owner ids, also
+    through a document the owner gave no id that resembles both (designImp3 ticket 5). Such a document stays with
+    the first group it joined, by document id; bridges (a set), when given, receives it, so it can be shown rather
+    than silently counted with one family. The family id is its smallest document id."""
     docs = sorted(counts)
     parent = {d: d for d in docs}
+    owners = {d: files.get(d, ("", "", ""))[2] for d in docs}
+    owned = {d: {owners[d]} - {""} for d in docs}     # per group root: the owner ids its documents carry
 
     def find(d):
         while parent[d] != d:
@@ -46,36 +50,45 @@ def families(counts, files):
             d = parent[d]
         return d
 
-    def join(a, b):
-        a, b = find(a), find(b)
-        parent[max(a, b)] = min(a, b)
+    def join(a, b, inferred=False):
+        ra, rb = find(a), find(b)
+        if ra == rb:
+            return
+        if inferred and len(owned[ra] | owned[rb]) > 1:
+            if bridges is not None:
+                bridges.update(x for x in (a, b) if not owners[x])
+            return
+        lo, hi = min(ra, rb), max(ra, rb)
+        parent[hi] = lo
+        owned[lo] |= owned.pop(hi)
 
-    owners = {d: files.get(d, ("", "", ""))[2] for d in docs}
-    inferable = lambda a, b: not (owners[a] and owners[b] and owners[a] != owners[b])
     seen = {}
-    for d in docs:
-        sha, name, owner = files.get(d, ("", "", ""))
-        for key in (("owner", owner), ("bytes", sha), ("name", file_stem(name))):
-            if key[1] and (key[0] != "name" or inferable(d, seen.get(key, d))):
-                join(d, seen.setdefault(key, d))
+    for kind in ("owner", "bytes", "name"):          # the owner's ids and identical bytes first: they constrain
+        for d in docs:
+            sha, name, owner = files.get(d, ("", "", ""))
+            key = (kind, {"owner": owner, "bytes": sha, "name": file_stem(name)}[kind])
+            if key[1]:
+                join(d, seen.setdefault(key, d), inferred=kind == "name")
     idf = matching.fit_idf([counts[d] for d in docs])     # for finding versions only: no model sees these vectors
     vectors = {d: matching.vector(counts[d], idf) for d in docs}
     for i, a in enumerate(docs):
         for b in docs[:i]:
-            if vectors[a] and inferable(a, b) and matching.dot(vectors[a], vectors[b]) >= matching.NEAR_TEXT:
-                join(a, b)
+            if vectors[a] and matching.dot(vectors[a], vectors[b]) >= matching.NEAR_TEXT:
+                join(a, b, inferred=True)
     return {d: find(d) for d in docs}
 
 
-def evaluate(counts, labels, groups, training=None, live=None):
+def evaluate(counts, labels, groups, training=None, live=None, unread=(), scope=None):
     """One row per document of labels ({id: the user's category}), held out with its group (groups: {id: group};
     the families, or each document's category to make every document a new subject).
     training: what the models learn from, {id: category} (default: labels); an earlier version's training replays
-    that version on the same questions. live: the categories that may be named (default: any).
+    that version on the same questions. live: the categories that may be named (default: any). unread: the documents
+    with parts nothing has read (Catalog.unread_units), and scope: the ticked categories in selected-category mode
+    (None: all); they are the question's state, not the fold's, and the app files neither by itself (may_file).
     A row: doc, category, examples (training documents of its category in the fold), ranked ([(category,
     similarity)], best first; empty when nothing in the document is known), confirmed (training documents of the
-    best category in the fold) and neighbours (the categories of the NEIGHBOURS most similar training
-    documents, nearest first)."""
+    best category in the fold), neighbours (the categories of the NEIGHBOURS most similar training documents,
+    nearest first), unread and in_scope. ranked alone is the raw ranking; filed() is the filing decision."""
     learn = {d: c for d, c in (labels if training is None else training).items() if counts.get(d)}
     rows = []
     for g in sorted({groups[d] for d in labels}, key=str):
@@ -91,30 +104,36 @@ def evaluate(counts, labels, groups, training=None, live=None):
                             key=lambda kv: (-kv[1], kv[0]))
             near = sorted(((-matching.dot(x, v), learn[e]) for e, v in zip(fold, vectors)))[:NEIGHBOURS] if x else []
             rows.append({"doc": d, "category": labels[d], "examples": held[labels[d]], "ranked": ranked,
-                         "confirmed": held[ranked[0][0]] if ranked else 0, "neighbours": [c for _, c in near]})
+                         "confirmed": held[ranked[0][0]] if ranked else 0, "neighbours": [c for _, c in near],
+                         "unread": d in unread, "in_scope": scope is None or bool(ranked) and ranked[0][0] in scope})
     return rows
 
 
 def filed(row, level, rule=None):
-    """Would the app file this document by itself at this level (lead over the second, and enough confirmed
-    documents in the best category: matching.AUTO_MIN_CONFIRMED)? rule: a further condition to try."""
-    return (bool(row["ranked"]) and matching.lead(row["ranked"]) >= level
-            and row["confirmed"] >= matching.AUTO_MIN_CONFIRMED and (rule is None or rule(row)))
+    """Would the app file this document by itself at this level? The app's own rule (matching.may_file), on the
+    row's state. rule: a further condition to try."""
+    return matching.may_file(row["ranked"], row["confirmed"], level, row.get("unread", False),
+                             row.get("in_scope", True)) and (rule is None or rule(row))
 
 
 def outcome(row, level):
     """What happens to one document at this level: "right" (filed by itself in the user's category: a true
-    positive), "wrong" (filed by itself elsewhere: a false positive), "missed" (it waits although its first choice
-    is right: automation missed) or "wait" (it waits and its first choice is not right: a correct wait)."""
+    positive), "wrong" (filed by itself elsewhere: a false positive), "safety" (it waits because parts of it were
+    left unread, whatever its ranking: a safety wait, not a categorization failure), "missed" (it waits although its
+    first choice is right: automation missed) or "wait" (it waits and its first choice is not right: a correct
+    wait)."""
     first = row["ranked"][0][0] if row["ranked"] else None
     if filed(row, level):
         return "right" if first == row["category"] else "wrong"
+    if row.get("unread"):
+        return "safety"
     return "missed" if first == row["category"] else "wait"
 
 
 def summary(rows, level, rule=None):
     """{"documents", "known" (those whose category the fold had), "first", "top3" (of known), "right", "wrong",
-    "waiting" (automatic filing at level; filing a document whose category the fold did not have is wrong)}."""
+    "waiting" (automatic filing at level; filing a document whose category the fold did not have is wrong), "safety"
+    (of the waiting: those that wait because parts were left unread)}."""
     known = [r for r in rows if r["examples"]]
     out = {"documents": len(rows), "known": len(known),
            "first": sum(r["ranked"][0][0] == r["category"] for r in known if r["ranked"]),
@@ -124,6 +143,7 @@ def summary(rows, level, rule=None):
         if filed(r, level, rule):
             out["right" if r["ranked"][0][0] == r["category"] else "wrong"] += 1
     out["waiting"] = len(rows) - out["right"] - out["wrong"]
+    out["safety"] = sum(bool(r.get("unread")) and not filed(r, level, rule) for r in rows)
     return out
 
 

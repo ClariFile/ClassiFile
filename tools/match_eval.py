@@ -24,7 +24,6 @@ import csv
 import json
 import math
 import random
-import shutil
 import sys
 import tempfile
 from collections import Counter
@@ -34,6 +33,7 @@ from pathlib import Path
 from classifile.analysis.candidates import top_names
 from classifile.catalog.db import Catalog, default_data_dir
 from classifile.matching import GOOD_MATCH, LEVELS, Centroids, dot, fit_idf, lead, terms, vector
+from tools import catalog_snapshot
 from tools.inventory import _name_key
 
 NEAR_TEXT = 0.9     # documents this similar count as one family (a version or a format twin)
@@ -45,20 +45,23 @@ BANDS = ((1, 3, "1 to 3"), (4, 9, "4 to 9"), (10, 10 ** 9, "10 or more"))   # ex
 
 
 def load(catalog_path):
-    """[{id, sha, file_name, category, terms, names, suggested}] for the documents whose category the owner chose
-    (names: the category names suggested for the document, best first; suggested: the same with their scores)."""
+    """[{id, sha, file_name, category, terms, names, suggested, unread}] for the documents whose category the owner
+    chose (names: the category names suggested for the document, best first; suggested: the same with their scores;
+    unread: it has parts nothing has read, Catalog.unread_units)."""
     with tempfile.TemporaryDirectory(prefix="classifile-eval-") as tmp:
-        shutil.copyfile(catalog_path, Path(tmp) / "catalog.sqlite3")
+        catalog_snapshot(catalog_path, Path(tmp) / "catalog.sqlite3")
         cat = Catalog(Path(tmp) / "catalog.sqlite3")
         try:
             labels, texts = cat.explicit_labels(), cat.texts()
             cats = {c["id"]: c["name"] for c in cat.categories()}
             files = {r["document_id"]: r for r in cat.all("SELECT document_id, sha256, file_name FROM snapshots")}
             suggested = {d: top_names((cat.analysis(d) or {}).get("suggestions", [])) for d in labels}
+            unread = cat.unread_units()     # parts nothing has read: the app never puts these in a folder by itself
         finally:
             cat.close()
     return [{"id": d, "sha": files[d]["sha256"], "file_name": files[d]["file_name"], "category": cats[labels[d]],
-             "terms": terms(texts.get(d, "")), "names": [s["name"] for s in suggested[d]], "suggested": suggested[d]}
+             "terms": terms(texts.get(d, "")), "names": [s["name"] for s in suggested[d]], "suggested": suggested[d],
+             "unread": d in unread}
             for d in sorted(labels)]
 
 

@@ -1,6 +1,9 @@
-"""Development tools. None of them reads data/final-eval/ (the held-out final evaluation, decision record B4)
-except tools.final_eval, once, with the frozen version (record 2.10); the inventory labelling window shows its
-files to the owner when a split is named (tools.label_inventory)."""
+"""Development tools. None of them reads the held-out folders (data/final-eval, data/validation, data/final-check;
+decision record B4) except the owner-authorized one-shot measurements (tools.final_eval, once, with the frozen
+version, record 2.10; tools.match_validation and accuracy_round --validation, on validation, once); the inventory
+labelling window shows their files to the owner when a split is named (tools.label_inventory)."""
+import os
+import sqlite3
 import sys
 from pathlib import Path
 
@@ -8,11 +11,45 @@ DATA = Path(__file__).resolve().parent.parent / "data"
 FINAL_EVAL = DATA / "final-eval"
 
 
-def refuse_final_eval(path):
-    """Exit if path is the held-out folder, inside it, or a parent a recursive scan would reach it from."""
-    p = Path(path).resolve()
-    if p.is_relative_to(FINAL_EVAL) or FINAL_EVAL.is_relative_to(p):
-        sys.exit("Refusing: data/final-eval is held out for the final evaluation and is not read until approved.")
+def _canonical(path):
+    """The path as the file system knows it: absolute, links and junctions resolved, case folded on Windows."""
+    return Path(os.path.normcase(os.path.realpath(path)))
+
+
+def held_out(path, allow=()):
+    """The name of the held-out folder path is, is inside, or is a parent of (a recursive scan would reach it),
+    else None. allow: names an owner-authorized measurement may read (e.g. "validation")."""
+    p = _canonical(path)
+    for name, folder in {"final-eval": FINAL_EVAL, "validation": DATA / "validation",
+                         "final-check": DATA / "final-check"}.items():
+        f = _canonical(folder)
+        if name not in allow and (p.is_relative_to(f) or f.is_relative_to(p)):
+            return name
+    return None
+
+
+def refuse_final_eval(path, allow=()):
+    """Exit if path is a held-out folder (final-eval, validation, final-check), inside one, or a parent a recursive
+    scan would reach one from. The one guard for every tool (designImp3 ticket 9)."""
+    name = held_out(path, allow)
+    if name:
+        sys.exit(f"Refusing: data/{name} is held out (decision record B4) and is not read by this tool.")
+
+
+def catalog_snapshot(catalog_path, dest):
+    """A consistent copy of a catalog that may be open in the app, in dest (a new file in a folder of the caller's
+    own, e.g. a TemporaryDirectory): SQLite's backup API over a read-only connection. Unlike a byte copy it never
+    catches a write half-done, and the catalog itself is never written."""
+    src = sqlite3.connect(Path(catalog_path).resolve().as_uri() + "?mode=ro", uri=True)
+    try:
+        out = sqlite3.connect(dest)
+        try:
+            src.backup(out)
+        finally:
+            out.close()
+    finally:
+        src.close()
+    return Path(dest)
 
 
 def once(record, out, measure, already):

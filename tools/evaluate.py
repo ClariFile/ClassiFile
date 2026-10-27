@@ -27,7 +27,6 @@ are not accuracy estimates. data/validation and data/final-eval are never read.
 import argparse
 import json
 import re
-import shutil
 import sys
 import tempfile
 from collections import Counter, defaultdict
@@ -36,6 +35,7 @@ from pathlib import Path
 from classifile import evaluation, matching
 from classifile.catalog.db import Catalog, default_data_dir
 from classifile.organizer import Organizer
+from tools import catalog_snapshot
 from tools.match_eval import csv_families
 
 RULES = {   # the safer filing rules tried (item 3 of the owner's 2026-10-15 instruction); each adds to the one in use
@@ -54,7 +54,8 @@ BROAD = 0.30            # a folder holding at least this share of the training d
 SHARED_TOP = 0.75       # two folders whose centres are in the top quarter of folder pairs share much vocabulary
 STANDING = 3            # a line found in this many documents is template text (headers, logos, cover wording)
 OUTCOMES = (("right", "right (true positives)"), ("wrong", "wrong (false positives)"),
-            ("missed", "missed automation"), ("wait", "correct waits"))
+            ("missed", "missed automation"), ("wait", "correct waits"),
+            ("safety", "safety waits (parts left unread; not a categorization failure)"))
 
 
 def pct(k, n):
@@ -68,8 +69,9 @@ def measure(org):
     cat = org.catalog
     names = {c["id"]: c["name"] for c in cat.all("SELECT id, name FROM categories")}
     live = {c["id"] for c in cat.categories()}
-    rows = evaluation.evaluate(counts, labels, groups, live=live)
-    unseen = evaluation.evaluate(counts, labels, {d: c for d, c in labels.items()}, live=live)
+    unread = cat.unread_units()     # filing decisions replay the app's rule: a document with unread parts waits
+    rows = evaluation.evaluate(counts, labels, groups, live=live, unread=unread)
+    unseen = evaluation.evaluate(counts, labels, {d: c for d, c in labels.items()}, live=live, unread=unread)
     used = org.matcher()
     parts = defaultdict(lambda: ["", "", []])   # document: [native text, OCR text, lines]; in memory, never printed
     for d, text, notes, ocr in cat.all(
@@ -330,7 +332,7 @@ def main(argv=None):
     if not a.catalog.exists():
         sys.exit(f"No catalog at {a.catalog}")
     with tempfile.TemporaryDirectory(prefix="classifile-evaluate-") as tmp:
-        shutil.copyfile(a.catalog, Path(tmp) / "catalog.sqlite3")
+        catalog_snapshot(a.catalog, Path(tmp) / "catalog.sqlite3")
         cat = Catalog(Path(tmp) / "catalog.sqlite3")
         try:
             m = measure(Organizer(cat))

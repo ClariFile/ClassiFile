@@ -39,7 +39,7 @@ RECORD = DATA / "validation_matching.json"   # the one record of the measurement
 def measure(folder, rows, catalog_path, progress=lambda n, total: None):
     """The saved result: the model's facts and, per validation document, its label, the category that label
     means, and the categories ranked best first with their scores."""
-    refuse_final_eval(folder)
+    refuse_final_eval(folder, allow=("validation",))      # the one validation measurement, owner-authorized
     with tempfile.TemporaryDirectory(prefix="classifile-validation-") as tmp:
         shutil.copyfile(catalog_path, Path(tmp) / "catalog.sqlite3")
         cat = Catalog(Path(tmp) / "catalog.sqlite3")

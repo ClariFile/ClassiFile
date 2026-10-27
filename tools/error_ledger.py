@@ -9,7 +9,8 @@ Documents get neutral ids (D1, D2...); families too (F1...). --names writes the 
 separate file, for the owner to look a document up. Both files are created new, never overwritten, and hold category
 names: keep them in data\\ (not tracked), never in tracked files or messages.
 
-Columns: id, category, outcome at the level in use (right / wrong / missed / wait, evaluation.outcome), rank of
+Columns: id, category, outcome at the level in use (right / wrong / missed / wait / safety, evaluation.outcome:
+the app's own filing rule, unread parts included; "safety" is a wait for parts left unread), rank of
 the user's category, first three, lead (best over second; a similarity, never a probability), examples of the
 user's category in the fold, family, family size, unread units (pictures nothing read), model version, reason.
 The reason is a first guess from plain rules, chosen before looking at the documents, for the owner to correct:
@@ -23,7 +24,6 @@ estimates. data\\validation and data\\final-eval are never read.
 """
 import argparse
 import csv
-import shutil
 import sys
 import tempfile
 from collections import Counter
@@ -32,6 +32,7 @@ from pathlib import Path
 from classifile import evaluation, matching
 from classifile.catalog.db import Catalog, default_data_dir
 from classifile.organizer import Organizer
+from tools import catalog_snapshot
 
 
 def ledger(org):
@@ -39,8 +40,8 @@ def ledger(org):
     counts, labels, groups = org.evaluation_inputs()
     names = {c["id"]: c["name"] for c in org.catalog.all("SELECT id, name FROM categories")}
     files = {r["document_id"]: r["file_name"] for r in org.catalog.all("SELECT document_id, file_name FROM snapshots")}
-    rows = evaluation.evaluate(counts, labels, groups)
     level, unread = org.check_level(), org.catalog.unread_units()
+    rows = evaluation.evaluate(counts, labels, groups, unread=unread)
     active = org.catalog.active_matcher()
     family_ids, family_size = {}, Counter(groups[d] for d in labels)
     family_cats = {}
@@ -53,7 +54,7 @@ def ledger(org):
         fam = family_ids.setdefault(groups[d], f"F{len(family_ids) + 1}")
         what = evaluation.outcome(r, level)
         ranked = [c for c, _ in r["ranked"]]
-        reason = "" if what in ("right", "wait") else (
+        reason = "" if what in ("right", "wait") else "scan gap" if what == "safety" else (
             "incomplete extraction" if d in unread else
             "unfamiliar subject" if r["examples"] < matching.AUTO_MIN_CONFIRMED else
             "shared family" if len(family_cats[groups[d]]) > 1 else "to review")
@@ -87,7 +88,7 @@ def main(argv=None):
     if not a.catalog.exists():
         sys.exit(f"No catalog at {a.catalog}")
     with tempfile.TemporaryDirectory(prefix="classifile-ledger-") as tmp:
-        shutil.copyfile(a.catalog, Path(tmp) / "catalog.sqlite3")
+        catalog_snapshot(a.catalog, Path(tmp) / "catalog.sqlite3")
         cat = Catalog(Path(tmp) / "catalog.sqlite3")
         try:
             rows, ids = ledger(Organizer(cat))
@@ -98,7 +99,7 @@ def main(argv=None):
         write_new(a.names, [{"id": k, "file_name": v} for k, v in ids.items()], ["id", "file_name"])
     tally = Counter(r["outcome"] for r in rows)
     reasons = Counter(r["reason"] for r in rows if r["reason"])
-    print(f"{len(rows)} documents: " + ", ".join(f"{tally[k]} {k}" for k in ("right", "wrong", "missed", "wait")))
+    print(f"{len(rows)} documents: " + ", ".join(f"{tally[k]} {k}" for k in ("right", "wrong", "missed", "wait", "safety")))
     print("Reasons (first guesses): " + (", ".join(f"{n} {k}" for k, n in reasons.most_common()) or "none"))
     print(f"Written: {a.out}" + (f" and {a.names}" if a.names else "") + " (category names: keep them local)")
     return 0

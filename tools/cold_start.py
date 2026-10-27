@@ -23,7 +23,6 @@ data/validation and data/final-eval are never read.
 """
 import argparse
 import random
-import shutil
 import sys
 import tempfile
 from collections import Counter
@@ -31,6 +30,7 @@ from pathlib import Path
 
 from classifile import matching
 from classifile.catalog.db import Catalog, default_data_dir
+from tools import catalog_snapshot
 
 STRICT = matching.LEVELS["strict"]
 
@@ -135,7 +135,7 @@ def main(argv=None):
     if a.out and a.out.exists():
         sys.exit(f"Refusing to overwrite existing file: {a.out}")
     with tempfile.TemporaryDirectory(prefix="classifile-cold-") as tmp:
-        shutil.copyfile(a.catalog, Path(tmp) / "catalog.sqlite3")
+        catalog_snapshot(a.catalog, Path(tmp) / "catalog.sqlite3")
         cat = Catalog(Path(tmp) / "catalog.sqlite3")
         try:
             truth, texts = cat.explicit_labels(), cat.texts()

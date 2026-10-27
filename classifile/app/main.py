@@ -121,6 +121,9 @@ def learning_text(audit):
     if audit.get("related"):
         text += (f" {plural(audit['related'], 'document')} look like versions of one another by name or text but "
                  "are filed in different categories. They still teach matching; check they are where you want.")
+    if audit.get("bridges"):
+        text += (f" {plural(audit['bridges'], 'document')} without a family id look like versions of documents in two "
+                 "different families; each is counted with one of them only, so the families stay apart.")
     return text
 
 
@@ -2266,8 +2269,10 @@ class MainWindow(QWidget):
         lines = []
         for r in self.org.catalog.matcher_log():
             found = json.loads(r["check_json"]) if r["check_json"] else None
-            who = {"automatic": "by itself", "forget": "after Forget"}.get(r["trigger"], "by you")
-            what = {"active": "in use", "previous": "replaced", "forgotten": "emptied by Forget"}.get(
+            who = {"automatic": "by itself", "forget": "after Forget",
+                   "pending": "after an example was imported for filing"}.get(r["trigger"], "by you")
+            what = {"active": "in use", "previous": "replaced", "forgotten": "emptied: it learned from a document "
+                    "that may no longer teach"}.get(
                 r["status"], "not kept: it did worse")
             check = check_text(found) and f"; {check_text(found)}"
             lines.append(f"Version {r['version']} · {short_date(r['created_at'])} · {who} · {r['documents']} "

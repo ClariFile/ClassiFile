@@ -16,7 +16,6 @@ the user's development documents; they are not accuracy estimates. data/validati
 read.
 """
 import argparse
-import shutil
 import sys
 import tempfile
 from pathlib import Path
@@ -24,7 +23,7 @@ from pathlib import Path
 from classifile import evaluation, matching
 from classifile.catalog.db import Catalog, default_data_dir
 from classifile.organizer import Organizer
-from tools import evaluate, group_eval
+from tools import catalog_snapshot, evaluate, group_eval
 from tools.match_eval import families, load
 
 
@@ -78,7 +77,7 @@ def main(argv=None):
         sys.exit(f"No catalog at {a.catalog}")
     with tempfile.TemporaryDirectory(prefix="classifile-gate-") as tmp:
         copy = Path(tmp) / "catalog.sqlite3"
-        shutil.copyfile(a.catalog, copy)
+        catalog_snapshot(a.catalog, copy)
         cat = Catalog(copy)
         try:
             m = evaluate.measure(Organizer(cat))

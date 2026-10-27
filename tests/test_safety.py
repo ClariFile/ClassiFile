@@ -146,7 +146,8 @@ def test_learning_follows_choices_corrections_also_and_forget_across_a_restart(m
     docs = {(cat, n): filed_pdf(org, f"{cat}{n}.pdf", w, cat) for cat, ws in words.items() for n, w in enumerate(ws)}
     blank = filed_pdf(org, "blank.pdf", "", "Travel")                       # no readable words: teaches nothing
     assert org.update_matching()["outcome"] == "updated"
-    assert org.learning_audit() == {"documents": 6, "families": 6, "unreadable": 1, "conflicts": 0, "related": 0}
+    assert org.learning_audit() == {"documents": 6, "families": 6, "unreadable": 1, "conflicts": 0, "related": 0,
+                                    "bridges": 0}
     garden, travel = (org.catalog.category_by_key(k)["id"] for k in ("garden", "travel"))
 
     moved = docs[("Garden", 2)]
@@ -168,7 +169,8 @@ def test_learning_follows_choices_corrections_also_and_forget_across_a_restart(m
     assert org.forget_folder(path.parent) == 2
     def check(org):
         assert org.catalog.explicit_labels() == labels and blank in labels
-        assert org.learning_audit() == {"documents": 6, "families": 6, "unreadable": 1, "conflicts": 0, "related": 0}
+        assert org.learning_audit() == {"documents": 6, "families": 6, "unreadable": 1, "conflicts": 0, "related": 0,
+                                    "bridges": 0}
         active = json.loads(org.catalog.active_matcher()["bundle_json"])
         assert set(active["documents"]) == {str(garden), str(travel)}      # Recipes taught nothing it kept
         assert org.matching_status()["since"] == 0
@@ -261,6 +263,99 @@ def test_removing_a_learned_example_imported_for_filing_removes_what_it_taught(m
     check(org)
     check(make_org())
     assert hashlib.sha256(path.read_bytes()).hexdigest() == before      # the original is untouched
+
+
+def test_an_example_imported_for_a_decision_teaches_nothing_until_it_is_answered(make_org, make_pdf, filed_pdf,
+                                                                                 monkeypatch):
+    """designImp3 ticket 4: at once, before Remove or Forget, no version in use or kept holds the example, and its
+    own suggestions come from a model that never saw it; an update racing the change is not published. Filed by
+    the user later, it teaches once."""
+    import json
+    import threading
+
+    from classifile import matching
+    from classifile.organizer import read_and_analyze
+
+    org = make_org()
+    folder = _teach(org, make_pdf, filed_pdf)
+    filed_pdf(org, "Garden3.pdf", "rake shovel compost", "Garden")      # something new for a racing update
+    paused, go, train, updater, result = threading.Event(), threading.Event(), matching.train, [], {}
+
+    def slow_train(texts, labels):
+        if threading.current_thread() in updater:
+            paused.set()
+            go.wait(10)
+        return train(texts, labels)
+
+    monkeypatch.setattr(matching, "train", slow_train)
+    t = threading.Thread(target=lambda: result.update(org.update_matching()))
+    updater.append(t)
+    t.start()
+    assert paused.wait(10)
+    path = folder / "r1.pdf"
+    doc, _ = org.record(path, *read_and_analyze(path))                  # the example, now a question
+    go.set()
+    t.join(10)
+    assert result["outcome"] == "newer choices"
+
+    def check(org):
+        for row in org.catalog.all("SELECT status, bundle_json FROM matchers"):
+            assert doc not in json.loads(row["bundle_json"])["training"], row["status"]
+        assert org.catalog.document(doc)["status"] == "needs_decision"
+        assert doc not in org.matcher()[1].bundle["training"]           # its own ranking: a model without it
+        assert org.catalog.active_matcher()["trigger"] == "pending"
+
+    check(org)
+    check(make_org())                                                    # after a restart
+    org = make_org()
+    org.file(doc, org.catalog.category_by_key("recipes")["id"])         # the user answers
+    org.update_matching()
+    assert list(json.loads(org.catalog.all("SELECT bundle_json FROM matchers ORDER BY version DESC LIMIT 1")[0][0])
+                ["training"]).count(doc) == 1 and doc in org.catalog.explicit_labels()
+
+
+@pytest.mark.parametrize("order", ["abc", "cba", "bac"])
+def test_an_unlabelled_document_never_bridges_two_owner_families(order):
+    """designImp3 ticket 5: A (owner F1) and C (owner F2) both look like B (no owner id) by name and by text; B may
+    join one of them, never both. Owner twins and identical bytes still join."""
+    from classifile import evaluation, matching
+
+    text = matching.terms("compost soil seedling mulch pruning hedge greenhouse")
+    ids = dict(zip("abc", order))                                       # other id orders, same documents
+    counts = {ids[k]: text for k in "abc"} | {"d": matching.terms("hotel booking passport"),
+                                              "e": matching.terms("hotel booking passport flight")}
+    files = {ids["a"]: ("s1", "notes.pdf", "F1"), ids["b"]: ("s2", "notes.pdf", ""),
+             ids["c"]: ("s3", "notes (2).pdf", "F2"), "d": ("s4", "trip.pdf", "F3"), "e": ("s5", "other.pdf", "F3")}
+    refused = set()
+    groups = evaluation.families(counts, files, refused)
+    assert groups[ids["a"]] != groups[ids["c"]]
+    assert groups[ids["b"]] in (groups[ids["a"]], groups[ids["c"]])
+    assert groups["d"] == groups["e"]                                   # the owner's twins
+    assert refused == {ids["b"]}                                        # said, not silently dropped
+    chain = {f"x{n}": text for n in range(5)}                           # a longer chain, owners at both ends
+    chain_files = {f"x{n}": (f"h{n}", f"part {n}.pdf", {0: "F1", 4: "F2"}.get(n, "")) for n in range(5)}
+    groups = evaluation.families(chain, chain_files)
+    assert groups["x0"] != groups["x4"]
+    owners = {}
+    for d, g in groups.items():
+        if chain_files[d][2]:
+            owners.setdefault(g, set()).add(chain_files[d][2])
+    assert all(len(o) == 1 for o in owners.values())
+
+
+def test_readiness_and_training_keep_owner_families_apart(make_org, filed_pdf):
+    """The partition the app uses (readiness, the audit, the evaluation) keeps the owner's families apart."""
+    org = make_org()
+    a = filed_pdf(org, "notes.pdf", "compost soil seedling mulch pruning", "Garden")
+    b = filed_pdf(org, "notes-v2.pdf", "compost soil seedling mulch pruning", "Garden")
+    c = filed_pdf(org, "notes-v3.pdf", "compost soil seedling mulch pruning", "Garden")
+    sha = lambda d: org.catalog.document(d)["sha256"]
+    org.catalog.set_family_labels({sha(a): "F1", sha(c): "F2"})
+    groups = org.evaluation_inputs()[2]
+    assert groups[a] != groups[c] and groups[b] in (groups[a], groups[c])
+    assert org.readiness() == [("Garden", 3, 2, 0)]
+    assert set(org.catalog.explicit_labels()) == {a, b, c}
+    assert org.learning_audit()["bridges"] == 1
 
 
 def test_inferred_families_teach_and_are_shown_owner_families_decide(make_org, filed_pdf, tmp_path):

@@ -97,17 +97,18 @@ class Organizer:
             self.catalog.remove_document(doc_id)
         self._unlearn(doc_ids)
 
-    def _unlearn(self, doc_ids):
-        """The one path for documents that left the catalog (Remove, Forget): every matching version trained on
-        them is emptied, and when one was, a new version is trained at once from what remains (trigger "forget",
-        without the update check: the owner's choice, 2026-10-20). With too little left, matching pauses until the
-        next update. What was worked out from them is dropped as well."""
+    def _unlearn(self, doc_ids, trigger="forget"):
+        """The one path for documents that may no longer teach matching (Remove, Forget, an example imported for a
+        decision: trigger "pending"): every matching version trained on them is emptied, and when one was, a new
+        version is trained at once from what remains (without the update check: the owner's choice, 2026-10-20).
+        With too little left, matching pauses until the next update. What was worked out from them is dropped as
+        well."""
         if self.catalog.forget_in_matchers(doc_ids):
             for _ in range(3):              # retried while another change to the examples lands meanwhile
                 revision = self.catalog.learning_revision()
                 texts, labels = self.catalog.texts(), self.catalog.explicit_labels()
                 if len({c for d, c in labels.items() if texts.get(d)}) < 2 or self.catalog.add_matcher(
-                        matching.train(texts, labels), None, True, "forget", revision) is not None:
+                        matching.train(texts, labels), None, True, trigger, revision) is not None:
                     break
         self._matcher, self._ranked, self._words, self._groups = False, {}, {}, (None, [])
         self._audit = (None, None)
@@ -179,6 +180,9 @@ class Organizer:
             if self.catalog.document(doc_id)["status"] == "example":   # learned from a folder; now to be filed
                 self.catalog.update_source_path(doc_id, Path(path).resolve())
                 self.catalog.set_document_status(doc_id, "needs_decision")
+                # An open question teaches nothing (B4): no version in use or kept may still hold what it learned
+                # from this example, not even for this document's own suggestions (designImp3 ticket 4).
+                self._unlearn([doc_id], "pending")
                 return doc_id, None
             # A failed read (e.g. a timeout) is retried by importing the same bytes again; a failed copy is not. So
             # is a waiting document with parts left unread (Read again): a better read can clear them.
@@ -565,16 +569,14 @@ class Organizer:
         document with parts nothing has read (Catalog.unread_units) always waits: the unread part may be what it is
         about (B3), so it is the user's decision, with where the gap is."""
         level, doc = matching.LEVELS.get(self.auto_level()), self.catalog.document(doc_id)
-        if level is None or not self.matcher() or doc is None or doc["status"] != "needs_decision"                 or self.catalog.unread_units(doc_id):
+        if level is None or not self.matcher() or doc is None or doc["status"] != "needs_decision":
             return None
         row, model = self.matcher()
         ranked = self._rank(doc_id, {c["id"] for c in self.catalog.categories()})
-        if not ranked or matching.lead(ranked) < level:
-            return None
-        best, scope = ranked[0][0], self.auto_scope()
-        if scope is not None and best not in scope:     # best among all categories, never among the ticked only:
-            return None                                 # a selection cannot manufacture confidence (B1)
-        if list(self.catalog.explicit_labels().values()).count(best) < matching.AUTO_MIN_CONFIRMED:
+        best, scope = (ranked[0][0] if ranked else None), self.auto_scope()
+        # The best among all categories, never among the ticked only: a selection cannot manufacture confidence (B1).
+        if not matching.may_file(ranked, list(self.catalog.explicit_labels().values()).count(best), level,
+                                 bool(self.catalog.unread_units(doc_id)), scope is None or best in scope):
             return None
         return best, {"version": row["version"], "level": level, "documents": model.bundle["documents"][best],
                       "words": self.key_words(doc_id, best)}
@@ -693,19 +695,21 @@ class Organizer:
         "unreadable": labels whose document has no readable words (they teach nothing), "conflicts": documents
         the owner gave one family id but filed apart (left out, B4), "related": documents the evaluation takes for
         one family by name or text only (no owner's id says so) that are filed apart: they still teach, since a
-        shared name is no proof, and are listed for the user to look at}. The families are the ones the
+        shared name is no proof, and are listed for the user to look at, "bridges": documents without an owner's id
+        that resemble two of the owner's families, counted with one of them only (evaluation.families)}. The families are the ones the
         evaluation holds out together (evaluation.families). Counted again only when the labels change."""
         labels = self.catalog.explicit_labels()
         key = tuple(sorted(labels.items()))
         if self._audit[0] != key:
-            readable = {d: c for d in labels if (c := self._terms(d))}
-            groups = evaluation.families(readable, self._files())
+            readable, bridges = {d: c for d in labels if (c := self._terms(d))}, set()
+            groups = evaluation.families(readable, self._files(), bridges)
             cats = {}
             for d, g in groups.items():
                 cats.setdefault(g, set()).add(labels[d])
             self._audit = (key, {"documents": len(readable), "families": len(set(groups.values())),
                                  "unreadable": len(labels) - len(readable),
-                                 "related": sum(len(cats[g]) > 1 for g in groups.values())})
+                                 "related": sum(len(cats[g]) > 1 for g in groups.values()),
+                                 "bridges": len(bridges)})
         return self._audit[1] | {"conflicts": len(self.catalog.family_conflicts())}
 
     def readiness(self):
@@ -747,7 +751,8 @@ class Organizer:
         self._matcher = False               # read the catalog's state, not a remembered one
         current = self.matcher()
         live, level = {c["id"] for c in self.catalog.categories()}, self.check_level()
-        rows = evaluation.evaluate(counts, labels, groups, live=live)
+        unread = self.catalog.unread_units()    # the app's own rule, replayed: both versions under the same one
+        rows = evaluation.evaluate(counts, labels, groups, live=live, unread=unread)
         found = {"level": level, "new": evaluation.summary(rows, level), "check": evaluation.mismatches(rows)}
         if current and current[1].bundle["training"] == labels:
             stored = json.loads(current[0]["check_json"] or "{}")
@@ -757,7 +762,7 @@ class Organizer:
                     "documents": current[0]["documents"], "categories": current[0]["categories"], "check": None}
         if current:
             found["previous"] = evaluation.summary(
-                evaluation.evaluate(counts, labels, groups, current[1].bundle["training"], live), level)
+                evaluation.evaluate(counts, labels, groups, current[1].bundle["training"], live, unread), level)
         keep = current is None or evaluation.no_worse(found["new"], found["previous"])
         bundle = matching.train(texts, labels)
         version = self.catalog.add_matcher(bundle, found, keep, trigger, revision)

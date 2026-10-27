@@ -133,8 +133,8 @@ def main(argv=None):
     folder = Path(argv[0]) if argv else SAMPLES
     if not folder.is_dir():
         sys.exit(f"No folder at {folder}")
-    if "final-eval" in folder.resolve().parts or "validation" in folder.resolve().parts:
-        sys.exit("Refusing a held-out folder: use development files")
+    from tools import refuse_final_eval
+    refuse_final_eval(folder)                   # the one guard: every held-out folder, also through a parent
     from classifile.reader import READERS
     files = [p for p in sorted(folder.iterdir()) if p.is_file() and p.suffix.lower() in READERS]
     with tempfile.TemporaryDirectory(prefix="classifile-offline-") as tmp:

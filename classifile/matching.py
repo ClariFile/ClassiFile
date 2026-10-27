@@ -83,6 +83,16 @@ def lead(ranked):
     return ranked[0][1] - (ranked[1][1] if len(ranked) > 1 else 0.0) if ranked else 0.0
 
 
+def may_file(ranked, confirmed, level, unread=False, in_scope=True):
+    """The one rule for filing a document by itself, for the app (Organizer.auto_choice) and every replay of it
+    (evaluation.filed; designImp3 ticket 6): a level in use (None: off), a best category leading the second by at
+    least that level and holding at least AUTO_MIN_CONFIRMED confirmed documents (confirmed), nothing in the
+    document left unread (B3: unread), and in selected-category mode the best among all categories being a ticked
+    one (A5, B1: in_scope)."""
+    return (level is not None and bool(ranked) and not unread and in_scope and lead(ranked) >= level
+            and confirmed >= AUTO_MIN_CONFIRMED)
+
+
 def train(texts, labels):
     """A model from {document id: text} and {document id: category id}: the bundle a validated version keeps
     (preprocessing, vectorizer, category mapping and decision settings; decision record B4), as plain data."""
