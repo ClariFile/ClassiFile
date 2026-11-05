@@ -11,6 +11,8 @@
   `data\final-eval` is not read again, and `tools.final_eval` refuses a second run whatever its options.
 - **Next:** the clean-machine installer test (`docs/INSTALLER_TEST.md`; never on the owner's own laptop) and one
   friend's first-use run. Until those are done the state is "implementation complete; independent release checks pending".
+  Also still unchecked from designImp3's acceptance list, on the running Windows app: keyboard use, visible focus and
+  the animations at 100%, 125% and 150%, in both themes and with reduced motion.
 - Everything under "Done" is history: a "Next" line inside an entry was the next step at the time, not now.
 
 ## Done
